@@ -40,6 +40,7 @@ import { computeVerdict } from './lib/verdict';
 import {
   resolveTheme,
   serializeCustomTheme,
+  customSeedFrom,
   THEME_PRESETS,
   type ThemeTokens,
 } from './lib/theme';
@@ -50,9 +51,23 @@ const THEME_VAR_MAP: Array<[keyof ThemeTokens, string]> = [
   ['good', '--mzcs-good'],
   ['warn', '--mzcs-warn'],
   ['bad', '--mzcs-bad'],
+  ['bg', '--mzcs-bg'],
+  ['surface', '--mzcs-surface'],
+  ['chip', '--mzcs-chip'],
+  ['track', '--mzcs-track'],
+  ['border', '--mzcs-border'],
+  ['text', '--mzcs-text'],
+  ['textDim', '--mzcs-text-dim'],
 ];
 
 const CUSTOM_COLOR_LABELS: Array<{ key: keyof ThemeTokens; label: string }> = [
+  { key: 'bg', label: 'Card background' },
+  { key: 'surface', label: 'Panels (hero / rows)' },
+  { key: 'chip', label: 'Buttons and chips' },
+  { key: 'track', label: 'Tracks and wells' },
+  { key: 'border', label: 'Borders' },
+  { key: 'text', label: 'Text' },
+  { key: 'textDim', label: 'Muted text' },
   { key: 'accent', label: 'Accent (cooling / active)' },
   { key: 'accentBright', label: 'Accent bright (today / highlights)' },
   { key: 'good', label: 'Good (eco / normal)' },
@@ -381,7 +396,7 @@ export class MzcsCard extends LitElement {
         )}
         <button
           class=${presetKey === 'custom' ? 'chip mode-on' : 'chip'}
-          @click=${() => setTheme(serializeCustomTheme(tokens))}
+          @click=${() => setTheme(serializeCustomTheme(customSeedFrom(tokens)))}
         >
           Custom
         </button>
@@ -999,15 +1014,25 @@ export class MzcsCard extends LitElement {
       --mzcs-good: #2bb673;
       --mzcs-warn: #f59e0b;
       --mzcs-bad: #e5484d;
+      --mzcs-bg: #1c262e;
+      --mzcs-surface: #243039;
+      --mzcs-chip: #2b3844;
+      --mzcs-track: #16202a;
+      --mzcs-border: #3d4a55;
+      --mzcs-text: #e8edf1;
+      --mzcs-text-dim: #9fb0bd;
+    }
+    ha-card {
+      background: var(--mzcs-bg);
     }
     .wrap {
       padding: 12px;
-      color: var(--primary-text-color, #e1e6ea);
+      color: var(--mzcs-text);
     }
     .tabs {
       display: flex;
       gap: 4px;
-      background: var(--secondary-background-color, #16202a);
+      background: var(--mzcs-track);
       border-radius: 10px;
       padding: 3px;
       margin-bottom: 12px;
@@ -1018,20 +1043,20 @@ export class MzcsCard extends LitElement {
       border: none;
       border-radius: 8px;
       background: transparent;
-      color: var(--secondary-text-color, #9fb0bd);
+      color: var(--mzcs-text-dim);
       font-size: 12px;
       cursor: pointer;
     }
     .tab.on {
-      background: var(--card-background-color, #2b3844);
-      color: var(--primary-text-color, #fff);
+      background: var(--mzcs-chip);
+      color: var(--mzcs-text);
       font-weight: 500;
     }
     .hero {
       display: flex;
       align-items: center;
       gap: 12px;
-      background: var(--secondary-background-color, #243039);
+      background: var(--mzcs-surface);
       border-radius: 12px;
       padding: 12px 14px;
     }
@@ -1039,7 +1064,7 @@ export class MzcsCard extends LitElement {
       width: 14px;
       height: 14px;
       border-radius: 50%;
-      background: var(--disabled-text-color, #9fb0bd);
+      background: var(--mzcs-text-dim);
       flex: none;
     }
     .dot.cool {
@@ -1060,7 +1085,7 @@ export class MzcsCard extends LitElement {
     .status {
       margin: 0;
       font-size: 12px;
-      color: var(--secondary-text-color, #9fb0bd);
+      color: var(--mzcs-text-dim);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -1072,9 +1097,9 @@ export class MzcsCard extends LitElement {
       width: 34px;
       height: 34px;
       border-radius: 50%;
-      border: 0.5px solid var(--divider-color, #3d4a55);
-      background: var(--card-background-color, #2b3844);
-      color: var(--primary-text-color, #e8edf1);
+      border: 0.5px solid var(--mzcs-border);
+      background: var(--mzcs-chip);
+      color: var(--mzcs-text);
       font-size: 18px;
       cursor: pointer;
       flex: none;
@@ -1093,7 +1118,7 @@ export class MzcsCard extends LitElement {
       align-items: center;
       background: none;
       border: none;
-      color: var(--secondary-text-color, #9fb0bd);
+      color: var(--mzcs-text-dim);
       font-size: 12px;
       padding: 10px 4px 6px;
       cursor: pointer;
@@ -1109,9 +1134,9 @@ export class MzcsCard extends LitElement {
     .chip {
       padding: 6px 12px;
       border-radius: 14px;
-      background: var(--card-background-color, #2b3844);
-      border: 0.5px solid var(--divider-color, #3d4a55);
-      color: var(--secondary-text-color, #9fb0bd);
+      background: var(--mzcs-chip);
+      border: 0.5px solid var(--mzcs-border);
+      color: var(--mzcs-text-dim);
       font-size: 12px;
       cursor: pointer;
     }
@@ -1134,11 +1159,11 @@ export class MzcsCard extends LitElement {
     }
     .fanlbl {
       font-size: 12px;
-      color: var(--secondary-text-color, #9fb0bd);
+      color: var(--mzcs-text-dim);
       padding: 6px 0;
     }
     .rooms {
-      border-top: 0.5px solid var(--divider-color, #33414c);
+      border-top: 0.5px solid var(--mzcs-border);
       margin-top: 6px;
     }
     .room {
@@ -1146,7 +1171,7 @@ export class MzcsCard extends LitElement {
       justify-content: space-between;
       align-items: center;
       padding: 8px 2px;
-      border-bottom: 0.5px solid var(--divider-color, #33414c);
+      border-bottom: 0.5px solid var(--mzcs-border);
       font-size: 13px;
     }
     .room:last-child {
@@ -1156,7 +1181,7 @@ export class MzcsCard extends LitElement {
       font-size: 14px;
     }
     .muted {
-      color: var(--disabled-text-color, #7a8894);
+      color: var(--mzcs-text-dim);
     }
     .badge {
       font-size: 11px;
@@ -1192,7 +1217,7 @@ export class MzcsCard extends LitElement {
     .setup-sub {
       margin: 0;
       font-size: 12px;
-      color: var(--secondary-text-color, #9fb0bd);
+      color: var(--mzcs-text-dim);
     }
     .setup-err {
       color: var(--mzcs-bad);
@@ -1202,7 +1227,7 @@ export class MzcsCard extends LitElement {
       width: 100%;
       max-height: 320px;
       overflow-y: auto;
-      border: 0.5px solid var(--divider-color, #33414c);
+      border: 0.5px solid var(--mzcs-border);
       border-radius: 10px;
       padding: 8px 10px;
     }
@@ -1215,14 +1240,14 @@ export class MzcsCard extends LitElement {
       color: var(--mzcs-bad);
     }
     .plan-h.quiet {
-      color: var(--secondary-text-color, #9fb0bd);
+      color: var(--mzcs-text-dim);
       font-weight: 400;
     }
     .plan-list {
       margin: 0 0 4px;
       padding-left: 18px;
       font-size: 11px;
-      color: var(--secondary-text-color, #9fb0bd);
+      color: var(--mzcs-text-dim);
     }
     .plan-list.del li {
       color: var(--mzcs-bad);
@@ -1232,10 +1257,10 @@ export class MzcsCard extends LitElement {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      background: var(--secondary-background-color, #243039);
+      background: var(--mzcs-surface);
       border: none;
       border-radius: 12px;
-      color: var(--primary-text-color, #c8d4dc);
+      color: var(--mzcs-text);
       font-size: 12px;
       padding: 10px 12px;
       margin-top: 10px;
@@ -1245,7 +1270,7 @@ export class MzcsCard extends LitElement {
       color: var(--mzcs-warn);
     }
     .schedbody {
-      background: var(--secondary-background-color, #243039);
+      background: var(--mzcs-surface);
       border-radius: 0 0 12px 12px;
       padding: 4px 12px 10px;
       margin-top: -8px;
@@ -1270,10 +1295,10 @@ export class MzcsCard extends LitElement {
     }
     .btime,
     .btemp {
-      background: var(--card-background-color, #16202a);
-      border: 0.5px solid var(--divider-color, #3d4a55);
+      background: var(--mzcs-track);
+      border: 0.5px solid var(--mzcs-border);
       border-radius: 6px;
-      color: var(--primary-text-color, #e8edf1);
+      color: var(--mzcs-text);
       padding: 4px 6px;
       font-size: 12px;
     }
@@ -1306,7 +1331,7 @@ export class MzcsCard extends LitElement {
       padding: 3px 0;
     }
     .rt-b {
-      color: var(--primary-text-color, #fff);
+      color: var(--mzcs-text);
       font-weight: 500;
     }
     .verdict.normal {
@@ -1316,7 +1341,7 @@ export class MzcsCard extends LitElement {
       color: var(--mzcs-warn);
     }
     .verdict.learning {
-      color: var(--secondary-text-color, #9fb0bd);
+      color: var(--mzcs-text-dim);
     }
     .cols {
       display: flex;
@@ -1345,7 +1370,7 @@ export class MzcsCard extends LitElement {
       flex: 1;
       height: 12px;
       border-radius: 6px;
-      background: var(--card-background-color, #16202a);
+      background: var(--mzcs-track);
       overflow: hidden;
       display: block;
     }
@@ -1396,7 +1421,7 @@ export class MzcsCard extends LitElement {
       position: relative;
       height: 12px;
       border-radius: 6px;
-      background: var(--card-background-color, #16202a);
+      background: var(--mzcs-track);
       overflow: hidden;
     }
     .seg {
@@ -1410,7 +1435,7 @@ export class MzcsCard extends LitElement {
       display: flex;
       justify-content: space-between;
       font-size: 9px;
-      color: var(--secondary-text-color, #9fb0bd);
+      color: var(--mzcs-text-dim);
       margin-top: 2px;
     }
     .managerow.master {
@@ -1440,10 +1465,10 @@ export class MzcsCard extends LitElement {
     .managerow input,
     .managerow select {
       width: 90px;
-      background: var(--card-background-color, #16202a);
-      border: 0.5px solid var(--divider-color, #3d4a55);
+      background: var(--mzcs-track);
+      border: 0.5px solid var(--mzcs-border);
       border-radius: 6px;
-      color: var(--primary-text-color, #e8edf1);
+      color: var(--mzcs-text);
       padding: 4px 6px;
       font-size: 12px;
     }
