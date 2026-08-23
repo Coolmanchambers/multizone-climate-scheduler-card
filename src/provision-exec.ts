@@ -291,8 +291,10 @@ export async function executePlan(hass: HassLike, plan: Plan, ctx: ExecContext):
     for (const a of plan.update) {
       if (a.kind === 'helper') {
         const { domain, objectId } = splitId(a.id);
+        const { unit, ...rest } = a.spec;
+        const payload = { ...rest, ...(unit ? { unit_of_measurement: unit } : {}) };
         try {
-          await hass.callWS!({ type: `${domain}/update`, [`${domain}_id`]: objectId, ...a.spec });
+          await hass.callWS!({ type: `${domain}/update`, [`${domain}_id`]: objectId, ...payload });
           result.updated++;
           ctx.log(`Updated ${a.id}`);
         } catch {

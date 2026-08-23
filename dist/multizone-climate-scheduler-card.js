@@ -1836,9 +1836,9 @@ async function Ls(t, e, s) {
       await Ze(t, a.id), n.adopted++, s.log(`Adopted ${a.id}`);
     for (const a of e.update)
       if (a.kind === "helper") {
-        const { domain: o, objectId: r } = te(a.id);
+        const { domain: o, objectId: r } = te(a.id), { unit: l, ...c } = a.spec, p = { ...c, ...l ? { unit_of_measurement: l } : {} };
         try {
-          await t.callWS({ type: `${o}/update`, [`${o}_id`]: r, ...a.spec }), n.updated++, s.log(`Updated ${a.id}`);
+          await t.callWS({ type: `${o}/update`, [`${o}_id`]: r, ...p }), n.updated++, s.log(`Updated ${a.id}`);
         } catch {
           n.skipped++, s.log(`SKIP update ${a.id} - not updatable`);
         }
