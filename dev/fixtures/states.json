@@ -1,0 +1,83 @@
+{
+  "_captured": "2026-08-23 via HA MCP, live instance (America/Phoenix). Mini-split quirk: min_temp/max_temp are Celsius bounds (7/35) while temps are Fahrenheit - adapter must not trust min/max on that zone. timer.* entities are synthetic (not yet provisioned).",
+  "climate.nest_upstairs": {
+    "state": "cool",
+    "attributes": {
+      "hvac_modes": ["heat", "cool", "heat_cool", "off"],
+      "min_temp": 50,
+      "max_temp": 90,
+      "fan_modes": ["on", "off"],
+      "preset_modes": ["none", "eco"],
+      "current_temperature": 76,
+      "temperature": 77,
+      "target_temp_high": null,
+      "target_temp_low": null,
+      "current_humidity": 53,
+      "fan_mode": "off",
+      "hvac_action": "idle",
+      "preset_mode": "none",
+      "friendly_name": "Nest - Upstairs",
+      "supported_features": 411
+    }
+  },
+  "climate.nest_downstairs": {
+    "state": "cool",
+    "attributes": {
+      "hvac_modes": ["heat", "cool", "heat_cool", "off"],
+      "min_temp": 50,
+      "max_temp": 90,
+      "fan_modes": ["on", "off"],
+      "preset_modes": ["none", "eco"],
+      "current_temperature": 78,
+      "temperature": 77,
+      "target_temp_high": null,
+      "target_temp_low": null,
+      "current_humidity": 51,
+      "fan_mode": "off",
+      "hvac_action": "cooling",
+      "preset_mode": "none",
+      "friendly_name": "Nest - Downstairs",
+      "supported_features": 411
+    }
+  },
+  "climate.owner_s_office_mini_split": {
+    "state": "cool",
+    "attributes": {
+      "hvac_modes": ["off", "cool", "dry", "fan_only", "auto", "heat"],
+      "min_temp": 7,
+      "max_temp": 35,
+      "fan_modes": ["auto", "low", "medium", "high", "turbo"],
+      "preset_modes": ["none", "sleep", "quiet", "smart", "boost"],
+      "swing_modes": ["off", "both", "vertical"],
+      "current_temperature": 78,
+      "temperature": 80,
+      "fan_mode": "auto",
+      "preset_mode": "none",
+      "swing_mode": "off",
+      "friendly_name": "the owner’s Office Mini-split",
+      "supported_features": 441
+    }
+  },
+  "weather.openweathermap": {
+    "state": "sunny",
+    "attributes": {
+      "temperature": 111,
+      "apparent_temperature": 111,
+      "humidity": 17,
+      "temperature_unit": "°F",
+      "friendly_name": "OpenWeatherMap"
+    }
+  },
+  "timer.climate_upstairs_fan": {
+    "state": "idle",
+    "attributes": { "duration": "0:30:00", "friendly_name": "Climate Upstairs Fan" }
+  },
+  "timer.climate_downstairs_fan": {
+    "state": "idle",
+    "attributes": { "duration": "0:30:00", "friendly_name": "Climate Downstairs Fan" }
+  },
+  "timer.climate_owners_office_fan": {
+    "state": "idle",
+    "attributes": { "duration": "0:30:00", "friendly_name": "Climate Office Fan" }
+  }
+}

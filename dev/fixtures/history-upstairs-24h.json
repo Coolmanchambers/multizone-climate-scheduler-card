@@ -1,0 +1,32 @@
+{
+  "_captured": "2026-08-23 via HA MCP, climate.nest_upstairs, first 30 of 200 changes in 24h (asc). Trimmed to the attributes segment-extraction uses. Real idle->cooling->idle cycling.",
+  "entity_id": "climate.nest_upstairs",
+  "states": [
+    { "t": "2026-08-22T12:50:31-07:00", "action": "idle", "cur": 76, "set": 77 },
+    { "t": "2026-08-22T12:50:53-07:00", "action": "idle", "cur": 76, "set": 77 },
+    { "t": "2026-08-22T12:59:53-07:00", "action": "idle", "cur": 77, "set": 77 },
+    { "t": "2026-08-22T13:05:23-07:00", "action": "idle", "cur": 78, "set": 77 },
+    { "t": "2026-08-22T13:07:54-07:00", "action": "cooling", "cur": 78, "set": 77 },
+    { "t": "2026-08-22T13:15:22-07:00", "action": "cooling", "cur": 77, "set": 77 },
+    { "t": "2026-08-22T13:19:53-07:00", "action": "cooling", "cur": 76, "set": 77 },
+    { "t": "2026-08-22T13:19:53.3-07:00", "action": "idle", "cur": 76, "set": 77 },
+    { "t": "2026-08-22T13:30:22-07:00", "action": "idle", "cur": 77, "set": 77 },
+    { "t": "2026-08-22T13:35:22-07:00", "action": "idle", "cur": 78, "set": 77 },
+    { "t": "2026-08-22T13:36:21-07:00", "action": "cooling", "cur": 78, "set": 77 },
+    { "t": "2026-08-22T13:45:22-07:00", "action": "cooling", "cur": 77, "set": 77 },
+    { "t": "2026-08-22T13:49:21-07:00", "action": "cooling", "cur": 76, "set": 77 },
+    { "t": "2026-08-22T13:49:21.9-07:00", "action": "idle", "cur": 76, "set": 77 },
+    { "t": "2026-08-22T13:59:53-07:00", "action": "idle", "cur": 77, "set": 77 },
+    { "t": "2026-08-22T14:05:20-07:00", "action": "cooling", "cur": 78, "set": 77 },
+    { "t": "2026-08-22T14:15:24-07:00", "action": "cooling", "cur": 77, "set": 77 },
+    { "t": "2026-08-22T14:18:49-07:00", "action": "cooling", "cur": 76, "set": 77 },
+    { "t": "2026-08-22T14:18:49.7-07:00", "action": "idle", "cur": 76, "set": 77 },
+    { "t": "2026-08-22T14:25:33-07:00", "action": "idle", "cur": 77, "set": 77 },
+    { "t": "2026-08-22T14:26:27-07:00", "action": "idle", "cur": 79, "set": 77 },
+    { "t": "2026-08-22T14:26:28-07:00", "action": "cooling", "cur": 79, "set": 77 },
+    { "t": "2026-08-22T14:47:04-07:00", "action": "cooling", "cur": 78, "set": 77 },
+    { "t": "2026-08-22T15:27:25-07:00", "action": "cooling", "cur": 78, "set": 77 },
+    { "t": "2026-08-22T15:42:25-07:00", "action": "cooling", "cur": 77, "set": 77 }
+  ],
+  "total_count_24h": 200
+}

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MZCS dev harness</title>
+  <style>
+    body { margin: 0; padding: 24px 8px; background: #111417; font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; color: #c8d4dc; }
+    main { max-width: 400px; margin: 0 auto; }
+    h1 { font-size: 15px; font-weight: 500; color: #8fa0ac; }
+    .controls { display: flex; gap: 8px; margin: 14px 0; flex-wrap: wrap; }
+    .controls button { background: #242b31; border: 1px solid #3a444d; border-radius: 8px; color: #e1e6ea; padding: 8px 12px; font-size: 12px; cursor: pointer; }
+    pre { background: #16202a; border-radius: 8px; padding: 10px; font-size: 11px; min-height: 60px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>MZCS harness · fixtures from live HA 2026-08-23</h1>
+    <div id="mount"></div>
+    <div class="controls">
+      <button id="btn-fan">Start upstairs fan timer</button>
+      <button id="btn-cool">Upstairs → cooling</button>
+      <button id="btn-unavail">Downstairs → unavailable</button>
+    </div>
+    <pre id="svc-log" aria-label="service call log"></pre>
+    <script type="module" src="/dev/main.ts"></script>
+  </main>
+</body>
+</html>
