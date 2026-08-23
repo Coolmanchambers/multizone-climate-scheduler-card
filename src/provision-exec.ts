@@ -41,6 +41,27 @@ function splitId(entityId: string): { domain: string; objectId: string } {
   return { domain: entityId.slice(0, dot), objectId: entityId.slice(dot + 1) };
 }
 
+/** HA's own name→object_id slugification (apostrophes become separators: "the owner's" → "owner_s"). */
+function haSlug(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+/** Rename an entity to its contract id when HA's name-derived id differs. Retries because
+ * registry entries for flow-created sensors can lag the create by a moment. */
+async function ensureEntityId(hass: HassLike, actual: string, desired: string, ctx: ExecContext): Promise<void> {
+  if (actual === desired) return;
+  for (let i = 0; i < 3; i++) {
+    try {
+      await hass.callWS!({ type: 'config/entity_registry/update', entity_id: actual, new_entity_id: desired });
+      ctx.log(`Renamed ${actual} -> ${desired}`);
+      return;
+    } catch {
+      await new Promise((r) => setTimeout(r, 400 * (i + 1)));
+    }
+  }
+  ctx.log(`WARN: could not rename ${actual} -> ${desired} - rename it manually in the entity registry`);
+}
+
 async function ensureLabel(hass: HassLike, ctx: ExecContext): Promise<void> {
   try {
     await hass.callWS!({ type: 'config/label_registry/create', name: 'mzcs', color: 'blue', icon: 'mdi:thermostat-box' });
@@ -189,8 +210,13 @@ async function createOne(
     return { kind: 'automation', automationId: uid };
   }
   const { domain, objectId } = splitId(a.id);
-  if (['timer', 'input_text', 'input_select', 'input_number', 'input_boolean'].includes(domain)) {
-    const body: Record<string, unknown> = { name: spec.name ?? objectId };
+  if (['timer', 'input_text', 'input_select', 'input_number', 'input_boolean', 'schedule'].includes(domain)) {
+    // HA derives the object_id from the create name (its slugify differs from the
+    // contract's - "the owner's" becomes "owner_s"). Creating with name = the contract
+    // object_id makes the generated item id and entity_id exact, then a follow-up
+    // update sets the display name without touching the id.
+    const prettyName = String(spec.name ?? objectId);
+    const body: Record<string, unknown> = {};
     if (domain === 'timer') Object.assign(body, { restore: spec.restore ?? true, duration: '0:30:00' });
     if (domain === 'input_select') Object.assign(body, { options: spec.options ?? ['-'] });
     if (domain === 'input_number') {
@@ -202,15 +228,20 @@ async function createOne(
         ...(typeof spec.initial === 'number' ? { initial: spec.initial } : {}),
       });
     }
-    const res = (await hass.callWS!({ type: `${domain}/create`, ...body })) as { id?: string };
-    return { kind: 'collection', domain, itemId: res?.id ?? objectId };
-  }
-  if (domain === 'schedule') {
-    const body: Record<string, unknown> = { type: 'schedule/create', name: spec.name ?? objectId };
-    const week = spec.week as Partial<Record<DayKey, TimeRange[]>> | undefined;
-    for (const d of DAY_KEYS) body[d] = week?.[d] ?? [];
-    const res = (await hass.callWS!(body)) as { id?: string };
-    return { kind: 'collection', domain, itemId: res?.id ?? objectId };
+    if (domain === 'schedule') {
+      const week = spec.week as Partial<Record<DayKey, TimeRange[]>> | undefined;
+      for (const d of DAY_KEYS) body[d] = week?.[d] ?? [];
+    }
+    const res = (await hass.callWS!({ type: `${domain}/create`, ...body, name: objectId })) as { id?: string };
+    const itemId = res?.id ?? objectId;
+    if (prettyName !== itemId) {
+      try {
+        await hass.callWS!({ type: `${domain}/update`, [`${domain}_id`]: itemId, ...body, name: prettyName });
+      } catch {
+        ctx.log(`NOTE: created ${a.id} but could not set its display name to "${prettyName}"`);
+      }
+    }
+    return { kind: 'collection', domain, itemId };
   }
   if (a.kind === 'template_sensor' || a.kind === 'stats_sensor') {
     if (a.kind === 'stats_sensor') {
@@ -219,14 +250,16 @@ async function createOne(
         ctx.log(`SKIP ${a.id} - no zone match`);
         return null;
       }
+      const statsName = String(spec.name ?? objectId);
       const entryId = await driveFlow(hass, 'history_stats', null, {
-        name: spec.name ?? objectId,
+        name: statsName,
         entity_id: `binary_sensor.${ctx.prefix}_${zone.slug}_running`,
         type: 'time',
         state: ['on'],
         start: '{{ today_at() }}',
         end: '{{ now() }}',
       });
+      await ensureEntityId(hass, `sensor.${haSlug(statsName)}`, a.id, ctx);
       return { kind: 'config_entry', entryId };
     }
     const flow = templateFlowSpec(a.id, spec, ctx);
@@ -235,6 +268,8 @@ async function createOne(
       return null;
     }
     const entryId = await driveFlow(hass, flow.handler, flow.menu, flow.fields);
+    const flowDomain = flow.menu === 'binary_sensor' ? 'binary_sensor' : 'sensor';
+    await ensureEntityId(hass, `${flowDomain}.${haSlug(String(flow.fields.name))}`, a.id, ctx);
     return { kind: 'config_entry', entryId };
   }
   ctx.log(`SKIP ${a.id} - unsupported kind ${a.kind}`);

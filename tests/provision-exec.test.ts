@@ -219,6 +219,48 @@ describe('executePlan', () => {
     expect(calls.some((c) => c.key.endsWith('/create') && c.key !== 'config/label_registry/create')).toBe(false);
   });
 
+  it('creates with slug-exact names so HA-generated ids match the contract (apostrophe zones)', async () => {
+    const { hass, calls } = fakeHass();
+    const p = emptyPlan();
+    p.create.push(
+      create('timer.climate_owners_office_fan', 'helper', { name: "Climate the owner's Office fan", restore: true }),
+    );
+    const res = await executePlan(hass, p, ctx());
+    expect(res.ok).toBe(true);
+    // HA slugifies the create name into the object_id ("the owner's" -> "owner_s"), so the
+    // create must use the contract object_id as the name...
+    const c = calls.find((x) => x.key === 'timer/create')!;
+    expect(c.data!.name).toBe('climate_owners_office_fan');
+    // ...and a follow-up update sets the display name without changing the id.
+    const u = calls.find((x) => x.key === 'timer/update')!;
+    expect(u.data!.timer_id).toBe('climate_owners_office_fan');
+    expect(u.data!.name).toBe("Climate the owner's Office fan");
+  });
+
+  it('renames flow-created sensors to the contract id when HA slugification diverges', async () => {
+    const { hass, calls } = fakeHass();
+    const officeCtx: ExecContext = {
+      prefix: 'climate',
+      zones: [{ slug: 'owners_office', name: "the owner's Office", climate: 'climate.owners_office' }],
+      seasons: SEASONS,
+      log: () => undefined,
+    };
+    const p = emptyPlan();
+    p.create.push(
+      create('binary_sensor.climate_owners_office_running', 'template_sensor', {
+        name: "Climate the owner's Office running",
+        source: 'hvac_action',
+      }),
+    );
+    const res = await executePlan(hass, p, officeCtx);
+    expect(res.ok).toBe(true);
+    const rename = calls.find(
+      (x) => x.key === 'config/entity_registry/update' && x.data!.new_entity_id !== undefined,
+    )!;
+    expect(rename.data!.entity_id).toBe('binary_sensor.climate_owner_s_office_running');
+    expect(rename.data!.new_entity_id).toBe('binary_sensor.climate_owners_office_running');
+  });
+
   it('rolls back this run\'s creates in reverse order on failure', async () => {
     const { hass, calls } = fakeHass((c) => c.key === 'schedule/create');
     const p = emptyPlan();
