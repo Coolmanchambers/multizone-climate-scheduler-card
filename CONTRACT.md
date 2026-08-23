@@ -129,6 +129,28 @@ notify_target: mobile_app_owners_iphone
 
 Office mini-split: zone supported, on hold - not provisioned at onboarding.
 
+## 7b. Comfort steering (added pre-S1, spec §14)
+
+HA cannot select the Nest's internal sensor (SDM limit); the engine reproduces it via
+**setpoint compensation**: commanded setpoint = `thermostat_reading - (room_reading - target)`,
+clamped, throttled, reverted on target-reached / timer expiry / sensor unavailable. v1 steers in
+single-mode cool/heat only; on-peak hold caps compensation (exact rule settled with the S7
+audit).
+
+**Per zone:** `input_select.climate_<zone>_target_room` (default "Thermostat"),
+`timer.climate_<zone>_room_override`.
+**Global tunables:** `input_number.climate_override_minutes` (60),
+`input_number.climate_steer_min_setpoint` (68), `input_number.climate_steer_max_setpoint` (85),
+`input_number.climate_steer_max_offset` (5).
+**Sensor schedule:** per zone, named periods each mapping to thermostat-or-sensor (Nest
+dayparts UX: Morning/Midday/Evening/Night defaults, editable times, any count). Storage follows
+the §4 decision (blocks with data payload - identical shape).
+**Seed (the owner's live Nest config):** Upstairs - Morning/Midday/Evening = thermostat, Night =
+Bedroom 1 sensor.
+**Card UX:** tap room chip → 1h override with countdown + highlighted chip; sensor-schedule
+editing in Manage. Steering inputs are Aqara-class sensors only (never Blink temps).
+**Build placement:** S9.5a engine+override, S9.5b sensor schedule + UX (after Aqara install).
+
 ## 8. Universal change-set rule
 
 Every wizard apply (first run or any later structural edit) = diff → categorized preview
