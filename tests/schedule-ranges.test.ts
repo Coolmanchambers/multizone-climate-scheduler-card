@@ -34,7 +34,7 @@ describe('blocksToDayRanges', () => {
     expect(ranges[0]).toEqual({
       from: '00:00:00',
       to: '06:00:00',
-      data: { block: 'Sleep', mode: 'cool', cool_temp: 76, heat_temp: null },
+      data: { block: 'Sleep', mode: 'cool', cool_temp: 76 },
     });
     // Tail runs to end-of-day with the same Sleep data.
     expect(ranges[6]).toMatchObject({ from: '21:30:00', to: '24:00:00' });
@@ -51,7 +51,7 @@ describe('blocksToDayRanges', () => {
       {
         from: '00:00:00',
         to: '24:00:00',
-        data: { block: 'Hold', mode: 'cool', cool_temp: 78, heat_temp: null },
+        data: { block: 'Hold', mode: 'cool', cool_temp: 78 },
       },
     ]);
   });

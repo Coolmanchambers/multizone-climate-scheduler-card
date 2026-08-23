@@ -166,11 +166,13 @@ function blocksBackToRanges(blocks: ScheduleBlock[]): TimeRange[] {
   if (sorted.length === 0) return [];
   const first = sorted[0]!;
   const last = sorted[sorted.length - 1]!;
+  // The schedule helper rejects null data values ("expected bool ... Got None") -
+  // temps must be OMITTED when absent, never sent as null.
   const toData = (b: ScheduleBlock) => ({
     block: b.name,
     mode: b.mode,
-    cool_temp: b.cool_temp,
-    heat_temp: b.heat_temp,
+    ...(b.cool_temp != null ? { cool_temp: b.cool_temp } : {}),
+    ...(b.heat_temp != null ? { heat_temp: b.heat_temp } : {}),
   });
   if (sorted.length === 1) return [{ from: '00:00:00', to: '24:00:00', data: toData(first) }];
   const ranges: TimeRange[] = [];

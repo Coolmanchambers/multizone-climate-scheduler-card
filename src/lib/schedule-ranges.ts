@@ -15,7 +15,9 @@ export interface ScheduleBlock {
 export interface TimeRange {
   from: string; // "HH:MM:SS"
   to: string; // "HH:MM:SS", "24:00:00" allowed as end-of-day
-  data: { block: string; mode: BlockMode; cool_temp: number | null; heat_temp: number | null };
+  // Absent temps are OMITTED (never null) - the schedule helper rejects None
+  // values in block data, and stored configs come back without the key.
+  data: { block: string; mode: BlockMode; cool_temp?: number; heat_temp?: number };
 }
 
 export type DayKey = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
@@ -51,7 +53,12 @@ export function validateBlocks(blocks: ScheduleBlock[]): string[] {
 }
 
 function toData(b: ScheduleBlock): TimeRange['data'] {
-  return { block: b.name, mode: b.mode, cool_temp: b.cool_temp, heat_temp: b.heat_temp };
+  return {
+    block: b.name,
+    mode: b.mode,
+    ...(b.cool_temp != null ? { cool_temp: b.cool_temp } : {}),
+    ...(b.heat_temp != null ? { heat_temp: b.heat_temp } : {}),
+  };
 }
 
 /**
