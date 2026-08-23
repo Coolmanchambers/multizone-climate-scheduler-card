@@ -182,7 +182,7 @@ export class MzcsCard extends LitElement {
     const hasTimer = entityExists(hass, timerId);
     return html`
       <button class="expander" @click=${() => (this._ctrlOpen = !this._ctrlOpen)}>
-        <span>Mode${hasTimer ? ' · Fan' : ''}${eco ? ' · Eco' : ''}</span>
+        <span>Mode</span>
         <span aria-hidden="true">${this._ctrlOpen ? '▴' : '▾'}</span>
       </button>
       ${this._ctrlOpen

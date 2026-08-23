@@ -825,7 +825,7 @@ let v = class extends S {
     const s = Kt(t, n), i = t.states[n]?.state, r = Xt(t, n), o = at("fan_timer", this._prefix, ot(e.name)), c = this._config?.features?.fan_timer ?? [15, 30, 60], a = Jt(t, o);
     return p`
       <button class="expander" @click=${() => this._ctrlOpen = !this._ctrlOpen}>
-        <span>Mode${a ? " · Fan" : ""}${r ? " · Eco" : ""}</span>
+        <span>Mode</span>
         <span aria-hidden="true">${this._ctrlOpen ? "▴" : "▾"}</span>
       </button>
       ${this._ctrlOpen ? p`
