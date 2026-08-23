@@ -11,6 +11,12 @@ edit / delete) for confirmation before anything is written. The card displays an
 your Home Assistant backend does the scheduling, so everything keeps working even with no
 dashboard open.
 
+**Safe by default.** Every zone has a scheduling kill switch (plus an all-zones master) on the
+card's Manage screen. Zones are created DISABLED - nothing touches your thermostats until you
+explicitly turn a zone on - and reconfiguration never flips your choices. Turn a zone off at
+any time and your thermostat's own app (Nest, SmartThings, ...) instantly governs again:
+that's the escape hatch while you set up, test, or troubleshoot.
+
 **Status: pre-alpha, under active development. Not yet ready for use.**
 
 See [CONTRACT.md](CONTRACT.md) for the frozen naming/schema contract and

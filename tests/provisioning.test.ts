@@ -64,6 +64,29 @@ describe('buildDesired inventory (CONTRACT §5)', () => {
     expect(new Set(d.map((x) => x.id)).size).toBe(42); // no id collisions
   });
 
+  it('kill switch: every zone gets a toggle whose spec can never flip state (CONTRACT 7c)', () => {
+    const d = buildDesired(baseInput());
+    const enables = d.filter((x) => x.id.startsWith('input_boolean.'));
+    expect(enables.map((e) => e.id).sort()).toEqual([
+      'input_boolean.climate_downstairs_enabled',
+      'input_boolean.climate_owners_office_enabled',
+      'input_boolean.climate_upstairs_enabled',
+    ]);
+    for (const e of enables) {
+      // config-only spec: no state, no initial - reconfiguration cannot enable/disable
+      expect(Object.keys(e.spec)).toEqual(['name']);
+    }
+  });
+
+  it('kill switch: removing a zone deletes its toggle with it', () => {
+    const installed = applyPlan(plan(buildDesired(baseInput()), []), []);
+    const input = baseInput();
+    input.zones = input.zones.filter((z) => z.slug !== 'owners_office');
+    delete input.schedules.owners_office;
+    const p = plan(buildDesired(input), installed);
+    expect(p.delete.map((a) => a.id)).toContain('input_boolean.climate_owners_office_enabled');
+  });
+
   it('steering feature adds its object group', () => {
     const input = baseInput();
     input.features.steering = true;

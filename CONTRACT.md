@@ -151,6 +151,29 @@ Bedroom 1 sensor.
 editing in Manage. Steering inputs are Aqara-class sensors only (never Blink temps).
 **Build placement:** S9.5a engine+override, S9.5b sensor schedule + UX (after Aqara install).
 
+## 7c. Kill switch (PRODUCT REQUIREMENT - final build)
+
+Per zone: `input_boolean.{prefix}_{zone}_enabled` (class `zone_enabled`) + a "Scheduling · all
+zones" master row on Manage. **Off = the engine stands down for that zone and the thermostat's
+own app (Nest/SmartThings/etc.) governs.** This is the user's escape hatch during setup,
+testing, or any issue - one tap returns full control to their existing apps.
+
+Invariants the wizard and engine MUST uphold:
+1. **Every configured zone always has its toggle** - the wizard creates it with the zone and
+   deletes it with the zone (zone_enabled is part of the standard desired inventory).
+2. **Born disabled.** input_boolean creation defaults to off; provisioning NEVER enables a
+   zone. A fresh install or newly added zone does nothing to the house until the user
+   explicitly turns it on.
+3. **Reconfiguration never flips toggles.** The differ's zone_enabled spec carries config only
+   (name) - never state - so no wizard apply, rename, or granularity change can silently
+   enable or disable scheduling. (Guarded by a unit test.)
+4. **Engine gates per zone** on the boolean at every trigger; the enable edge is itself an
+   engine trigger for instant resume.
+5. **Resume order:** enabling clears the zone's applied-block marker BEFORE the boolean flips
+   (the engine fires on the edge; clearing after races it - found via prod trace 2026-08-23).
+6. Disabled zones keep everything else working: fan chips, room strip, schedule viewing and
+   editing - only automatic setpoint application stands down.
+
 ## 8. Universal change-set rule
 
 Every wizard apply (first run or any later structural edit) = diff → categorized preview

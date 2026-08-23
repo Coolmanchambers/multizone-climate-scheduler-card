@@ -131,6 +131,8 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
       kind: 'helper',
       spec: { name: `Climate ${z.name} applied block` },
     });
+    // CONTRACT §7c: spec is config-only (name) - NEVER state/initial. Reconfiguration
+    // must be unable to flip a user's enable choice; creation defaults to off.
     out.push({
       id: zoneEntityId('zone_enabled', p, z.slug),
       kind: 'helper',
