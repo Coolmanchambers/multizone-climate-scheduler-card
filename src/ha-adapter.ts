@@ -174,12 +174,24 @@ export function updateScheduleWeek(
   hass: HassLike,
   scheduleEntityId: string,
   week: Record<string, unknown>,
+  name: string,
 ): Promise<unknown> {
   if (!hass.callWS) return Promise.reject(new Error('callWS unavailable'));
   const objectId = scheduleEntityId.split('.')[1];
-  const payload: Record<string, unknown> = { type: 'schedule/update', schedule_id: objectId };
+  // schedule/update validates `name` as required - omitting it 400s.
+  const payload: Record<string, unknown> = {
+    type: 'schedule/update',
+    schedule_id: objectId,
+    name,
+  };
   for (const d of DAY_KEYS) payload[d] = (week as Record<string, unknown>)[d] ?? [];
   return hass.callWS(payload);
+}
+
+export function errorText(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (e && typeof e === 'object' && 'message' in e) return String((e as { message: unknown }).message);
+  return JSON.stringify(e);
 }
 
 /** Clear the zone's applied-block marker and re-trigger the engine (Apply now). */

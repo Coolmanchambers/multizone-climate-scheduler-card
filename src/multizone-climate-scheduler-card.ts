@@ -20,6 +20,7 @@ import {
   fetchScheduleConfig,
   updateScheduleWeek,
   applyScheduleNow,
+  errorText,
 } from './ha-adapter';
 import {
   detectSets,
@@ -71,6 +72,7 @@ export class MzcsCard extends LitElement {
   @state() private _setupOpen = false;
   @state() private _schedOpen = false;
   @state() private _schedWeek?: Week;
+  private _schedName = '';
   @state() private _schedError?: string;
   @state() private _schedBusy = false;
   @state() private _dryRun?: Plan;
@@ -324,9 +326,10 @@ export class MzcsCard extends LitElement {
     try {
       const cfg = await fetchScheduleConfig(this.hass, schedId);
       this._schedWeek = (cfg?.week as Week | undefined) ?? undefined;
+      this._schedName = cfg?.name ?? '';
       this._schedError = cfg ? undefined : 'Could not load schedule config.';
     } catch (e) {
-      this._schedError = e instanceof Error ? e.message : String(e);
+      this._schedError = errorText(e);
     } finally {
       this._schedBusy = false;
     }
@@ -348,11 +351,12 @@ export class MzcsCard extends LitElement {
         this.hass,
         schedId,
         newWeek as unknown as Record<string, unknown>,
+        this._schedName,
       );
       this._schedWeek = newWeek;
       this._schedError = undefined;
     } catch (e) {
-      this._schedError = e instanceof Error ? e.message : String(e);
+      this._schedError = errorText(e);
     } finally {
       this._schedBusy = false;
     }
