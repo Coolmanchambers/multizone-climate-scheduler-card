@@ -216,12 +216,15 @@ export async function setZoneEnabled(
   markerEntityId: string,
   on: boolean,
 ): Promise<void> {
-  await hass.callService('input_boolean', on ? 'turn_on' : 'turn_off', {
-    entity_id: enableEntityId,
-  });
+  // Clear the marker BEFORE enabling - the engine triggers instantly on the
+  // enable edge, and clearing afterwards races it (stale marker = skipped
+  // resume until the next tick).
   if (on) {
     await hass.callService('input_text', 'set_value', { entity_id: markerEntityId, value: '' });
   }
+  await hass.callService('input_boolean', on ? 'turn_on' : 'turn_off', {
+    entity_id: enableEntityId,
+  });
 }
 
 export function errorText(e: unknown): string {

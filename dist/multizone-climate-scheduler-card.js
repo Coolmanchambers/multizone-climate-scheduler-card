@@ -681,9 +681,9 @@ function At(t, e, s) {
   return t.callService("input_select", "select_option", { entity_id: e, option: s });
 }
 async function xe(t, e, s, n) {
-  await t.callService("input_boolean", n ? "turn_on" : "turn_off", {
+  n && await t.callService("input_text", "set_value", { entity_id: s, value: "" }), await t.callService("input_boolean", n ? "turn_on" : "turn_off", {
     entity_id: e
-  }), n && await t.callService("input_text", "set_value", { entity_id: s, value: "" });
+  });
 }
 function ve(t) {
   return t instanceof Error ? t.message : t && typeof t == "object" && "message" in t ? String(t.message) : JSON.stringify(t);
