@@ -25,9 +25,17 @@ import {
   selectOption,
   setZoneEnabled,
   fetchDailyRuntime,
+  fetchDayHistory,
   type DailyRuntime,
 } from './ha-adapter';
-import { formatHoursQuarter } from './lib/segments';
+import {
+  formatHoursQuarter,
+  extractRunSegments,
+  extractSetpointChanges,
+  segmentToPct,
+  type Segment,
+  type SetpointChange,
+} from './lib/segments';
 import type { GlobalClass } from './lib/naming';
 
 const MANAGE_TUNABLES: Array<{ cls: GlobalClass; label: string }> = [
@@ -96,6 +104,10 @@ export class MzcsCard extends LitElement {
   @state() private _rtOpen = false;
   @state() private _rtDaily?: DailyRuntime[];
   private _rtLoadedFor?: string;
+  @state() private _rtDayOpen: number | null = null;
+  @state() private _rtDayDetail?: { segs: Segment[]; bubs: SetpointChange[]; start: number; end: number };
+  @state() private _rtDayLoading = false;
+  private _rtDayCache = new Map<number, { segs: Segment[]; bubs: SetpointChange[]; start: number; end: number }>();
   @state() private _dryRun?: Plan;
   @state() private _dryRunError?: string;
   @state() private _dryRunning = false;
@@ -435,6 +447,7 @@ export class MzcsCard extends LitElement {
     const days = (this._rtDaily ?? [])
       .filter((d) => d.day < today.getTime())
       .sort((a, b) => b.day - a.day);
+    const todayStart = today.getTime();
     return html`
       <button class="schedrow" @click=${() => (this._rtOpen = !this._rtOpen)}>
         <span>Runtime · Today <b class="rt-b">${todayLabel}</b></span>
@@ -443,14 +456,16 @@ export class MzcsCard extends LitElement {
       ${this._rtOpen
         ? html`
             <div class="schedbody">
-              ${this._renderPill('Today', Number.isFinite(todayHours) ? todayHours : 0, true)}
+              ${this._renderPill(zone, 'Today', Number.isFinite(todayHours) ? todayHours : 0, todayStart, true)}
               ${days.map((d) =>
                 this._renderPill(
+                  zone,
                   new Date(d.day).toLocaleDateString(undefined, {
                     weekday: 'short',
                     day: 'numeric',
                   }),
                   d.hours,
+                  d.day,
                   false,
                 ),
               )}
@@ -459,24 +474,100 @@ export class MzcsCard extends LitElement {
                     History accrues daily - past days appear as statistics build up.
                   </p>`
                 : nothing}
+              <p class="muted" style="font-size:10px;margin:6px 0 0;">
+                Tap a day for its run segments and setpoint changes.
+              </p>
             </div>
           `
         : nothing}
     `;
   }
 
-  private _renderPill(label: string, hours: number, isToday: boolean) {
+  private async _openDay(zone: ZoneConfig, dayStart: number): Promise<void> {
+    if (this._rtDayOpen === dayStart) {
+      this._rtDayOpen = null;
+      return;
+    }
+    this._rtDayOpen = dayStart;
+    const cached = this._rtDayCache.get(dayStart);
+    if (cached) {
+      this._rtDayDetail = cached;
+      return;
+    }
+    if (!this.hass) return;
+    this._rtDayLoading = true;
+    this._rtDayDetail = undefined;
+    try {
+      const slug = slugify(zone.name);
+      const runningId = zoneEntityId('running_sensor', this._prefix, slug);
+      const dayEnd = Math.min(dayStart + 86_400_000, Date.now());
+      const [runPts, setPts] = await Promise.all([
+        fetchDayHistory(this.hass, runningId, dayStart, dayEnd),
+        fetchDayHistory(this.hass, zone.entity, dayStart, dayEnd, 'temperature'),
+      ]);
+      const detail = {
+        segs: extractRunSegments(runPts, dayStart, dayEnd),
+        bubs: extractSetpointChanges(setPts),
+        start: dayStart,
+        end: dayStart + 86_400_000,
+      };
+      this._rtDayCache.set(dayStart, detail);
+      if (this._rtDayOpen === dayStart) this._rtDayDetail = detail;
+    } finally {
+      this._rtDayLoading = false;
+    }
+  }
+
+  private _renderPill(
+    zone: ZoneConfig,
+    label: string,
+    hours: number,
+    dayStart: number,
+    isToday: boolean,
+  ) {
     const pct = Math.min(100, Math.max(0, (hours / 24) * 100));
+    const open = this._rtDayOpen === dayStart;
     return html`
-      <div class="pillrow">
+      <button class="pillrow" @click=${() => void this._openDay(zone, dayStart)}>
         <span class="pill-label">${label}</span>
         <span class="pill-track">
           <span
-            class="pill-fill ${isToday ? 'today-fill' : ''}"
+            class="pill-fill ${isToday || open ? 'today-fill' : ''}"
             style="width: ${pct.toFixed(1)}%"
           ></span>
         </span>
         <span class="pill-hours">${formatHoursQuarter(hours)}</span>
+      </button>
+      ${open ? this._renderDayDetail() : nothing}
+    `;
+  }
+
+  private _renderDayDetail() {
+    if (this._rtDayLoading) return html`<p class="muted" style="font-size:11px;">Loading day…</p>`;
+    const d = this._rtDayDetail;
+    if (!d) return nothing;
+    return html`
+      <div class="daydetail">
+        <div class="bubblerow">
+          ${d.bubs.slice(0, 12).map((b) => {
+            const left = ((b.t - d.start) / (d.end - d.start)) * 100;
+            return html`<span class="bubble" style="left: ${left.toFixed(1)}%"
+              >${Math.round(b.value)}</span
+            >`;
+          })}
+        </div>
+        <div class="segtrack">
+          ${d.segs.map((s) => {
+            const { left, width } = segmentToPct(s, d.start, d.end);
+            return html`<span
+              class="seg"
+              style="left: ${left.toFixed(2)}%; width: ${Math.max(0.4, width).toFixed(2)}%"
+            ></span>`;
+          })}
+        </div>
+        <div class="axis">
+          <span>12A</span><span>6A</span><span>12P</span><span>6P</span><span>12A</span>
+        </div>
       </div>
     `;
   }
@@ -1077,6 +1168,56 @@ export class MzcsCard extends LitElement {
       width: 48px;
       text-align: right;
       flex: none;
+    }
+    button.pillrow {
+      width: 100%;
+      background: none;
+      border: none;
+      color: inherit;
+      cursor: pointer;
+      text-align: left;
+    }
+    .daydetail {
+      padding: 14px 2px 6px;
+    }
+    .bubblerow {
+      position: relative;
+      height: 14px;
+    }
+    .bubble {
+      position: absolute;
+      top: -10px;
+      width: 20px;
+      height: 20px;
+      margin-left: -10px;
+      border-radius: 50%;
+      background: #1e88e5;
+      color: #fff;
+      font-size: 9px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .segtrack {
+      position: relative;
+      height: 12px;
+      border-radius: 6px;
+      background: var(--card-background-color, #16202a);
+      overflow: hidden;
+    }
+    .seg {
+      position: absolute;
+      top: 0;
+      height: 12px;
+      background: #1e88e5;
+      display: block;
+    }
+    .axis {
+      display: flex;
+      justify-content: space-between;
+      font-size: 9px;
+      color: var(--secondary-text-color, #9fb0bd);
+      margin-top: 2px;
     }
     .managerow.master {
       font-weight: 500;

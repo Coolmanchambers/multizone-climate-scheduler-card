@@ -264,6 +264,63 @@ export async function fetchDailyRuntime(
   }
 }
 
+import type { HistoryPoint } from './lib/segments';
+
+interface WsHistoryRow {
+  s?: string;
+  lu?: number;
+  a?: Record<string, unknown>;
+}
+
+/** Normalize a history/history_during_period row list to HistoryPoints. */
+export function wsHistoryToPoints(
+  rows: WsHistoryRow[],
+  attribute?: string,
+): HistoryPoint[] {
+  const out: HistoryPoint[] = [];
+  for (const r of rows) {
+    if (typeof r.lu !== 'number') continue;
+    const t = r.lu * 1000;
+    if (attribute) {
+      const v = r.a?.[attribute];
+      if (v == null) continue;
+      out.push({ t, state: String(v) });
+    } else if (typeof r.s === 'string') {
+      out.push({ t, state: r.s });
+    }
+  }
+  return out;
+}
+
+/**
+ * Raw history for one day. minimal (state-only) for binary sensors; full rows
+ * (attributes) only when `attribute` is requested - the plan's history-volume
+ * mitigation: attribute-bearing queries are per-tapped-day only.
+ */
+export async function fetchDayHistory(
+  hass: HassLike,
+  entityId: string,
+  dayStart: number,
+  dayEnd: number,
+  attribute?: string,
+): Promise<HistoryPoint[]> {
+  if (!hass.callWS) return [];
+  try {
+    const res = (await hass.callWS({
+      type: 'history/history_during_period',
+      start_time: new Date(dayStart).toISOString(),
+      end_time: new Date(dayEnd).toISOString(),
+      entity_ids: [entityId],
+      minimal_response: !attribute,
+      no_attributes: !attribute,
+      significant_changes_only: false,
+    })) as Record<string, WsHistoryRow[]>;
+    return wsHistoryToPoints(res?.[entityId] ?? [], attribute);
+  } catch {
+    return [];
+  }
+}
+
 export function errorText(e: unknown): string {
   if (e instanceof Error) return e.message;
   if (e && typeof e === 'object' && 'message' in e) return String((e as { message: unknown }).message);

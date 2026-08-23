@@ -124,6 +124,36 @@ export class MockHass implements HassLike {
       return this.scheduleFixture;
     }
     if (t === 'config/entity_registry/get_entries') return {};
+    if (t === 'history/history_during_period') {
+      const ids = (msg.entity_ids as string[]) ?? [];
+      const start = Date.parse(String(msg.start_time));
+      const H = 3600_000;
+      const out: Record<string, Array<{ s?: string; lu: number; a?: Record<string, unknown> }>> = {};
+      for (const id of ids) {
+        if (id.startsWith('binary_sensor.')) {
+          out[id] = [
+            { s: 'off', lu: start / 1000 },
+            { s: 'on', lu: (start + 6 * H) / 1000 },
+            { s: 'off', lu: (start + 7.5 * H) / 1000 },
+            { s: 'on', lu: (start + 13 * H) / 1000 },
+            { s: 'off', lu: (start + 13.4 * H) / 1000 },
+            { s: 'on', lu: (start + 14 * H) / 1000 },
+            { s: 'off', lu: (start + 16.2 * H) / 1000 },
+            { s: 'on', lu: (start + 19 * H) / 1000 },
+            { s: 'off', lu: (start + 21.5 * H) / 1000 },
+          ];
+        } else {
+          out[id] = [
+            { s: 'cool', lu: start / 1000, a: { temperature: 76 } },
+            { s: 'cool', lu: (start + 6 * H) / 1000, a: { temperature: 78 } },
+            { s: 'cool', lu: (start + 14 * H) / 1000, a: { temperature: 76 } },
+            { s: 'cool', lu: (start + 16 * H) / 1000, a: { temperature: 79 } },
+            { s: 'cool', lu: (start + 21.5 * H) / 1000, a: { temperature: 76 } },
+          ];
+        }
+      }
+      return out;
+    }
     if (t === 'recorder/statistics_during_period') {
       const ids = (msg.statistic_ids as string[]) ?? [];
       const out: Record<string, Array<{ start: number; max: number }>> = {};
