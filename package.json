@@ -1,0 +1,27 @@
+{
+  "name": "multizone-climate-scheduler-card",
+  "version": "0.1.0",
+  "description": "Multi-Zone Climate Scheduler Card for Home Assistant: Nest-style climate view for 1-4 zones with seasonal scheduling, fan timers, and runtime history.",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Coolmanchambers/multizone-climate-scheduler-card.git"
+  },
+  "dependencies": {
+    "lit": "^3.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vite": "^6.0.0",
+    "vitest": "^3.0.0"
+  }
+}
