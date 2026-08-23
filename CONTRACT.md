@@ -1,0 +1,143 @@
+# MZCS CONTRACT.md - draft (2026-07-26, pre-S1)
+
+Draft of the repo's `CONTRACT.md`, written ahead of S1 so the session starts from a finished
+schema. S1 reviews, settles the one open decision (storage), and copies this into the repo as
+the frozen contract. Everything in the card, wizard, differ, and engine builds against this file.
+
+## 1. Identity
+
+- Card: **Multi-Zone Climate Scheduler Card** · type `custom:multizone-climate-scheduler-card`
+- Repo: `Coolmanchambers/multizone-climate-scheduler-card` (public, MIT)
+- Bundle: `dist/multizone-climate-scheduler-card.js` (ES2022 - Lit 3 requires it)
+- Label on every provisioned object: `mzcs` · Automation category: "Climate Scheduler"
+- Entity prefix: user-chosen in wizard, default `climate` (examples below use it)
+
+## 2. Zones and day-type granularity
+
+- 1-4 zones. Zone key = slug of display name (`upstairs`, `downstairs`, `office`).
+- Per zone x season, day granularity is one of:
+  - `all` - one block set (keys: `all`)
+  - `wdwe` - two sets (keys: `wd`, `we`)
+  - `days` - seven sets (keys: `mon`..`sun`)
+- Granularity transitions (wizard, via differ): expand = clone current values into new sets
+  (all→wdwe: both get copy; wdwe→days: mon-fri get wd, sat-sun get we). Collapse = survivor set
+  (days→wdwe: mon survives as wd, sat as we; →all: wd/mon survives). Preview always shows the
+  survivor choice; surplus objects deleted only after confirm.
+
+## 3. Block schema
+
+```
+block = { time: "HH:MM", name: string, mode: "cool" | "heat" | "heat_cool" | "off",
+          cool_temp: number|null, heat_temp: number|null }
+```
+- Season carries a default mode; blocks may override.
+- `heat_cool` requires both temps (cool_temp = target_temp_high, heat_temp = target_temp_low).
+- Ordering: blocks sorted by time; last block of the day rules until the first block next day
+  (midnight wrap).
+
+## 4. Schedule storage - THE open S1 decision
+
+Two candidate models; S1 prototypes the engine trigger path against both and freezes one.
+
+**Option A (leading): one native `schedule` helper per zone x season.**
+- `schedule.climate_upstairs_summer` etc. Blocks encoded as weekly time ranges with per-block
+  custom data `{name, mode, cool_temp, heat_temp}`. Granularity is purely a UI concept - the
+  editor writes the same values to all days in a set.
+- Engine triggers on schedule entity state/attribute change; reads active block's data.
+- Card tuning UI writes via the `schedule/update` websocket (same as core UI).
+- Pros: tiny object count at any granularity; HA's native weekly-grid editor works as a free
+  second editing surface; clean per-day support. Cons: block data editing via WS only (still
+  standard, but less obvious in the helpers UI than input_numbers).
+
+**Option B: per-value helpers.**
+- `input_datetime.climate_upstairs_summer_wd_wake_time`,
+  `input_number.climate_upstairs_summer_wd_wake_cool` (+ `_heat` when dual).
+- Naming: `{prefix}_{zone}_{season}_{dayset}_{block}_{field}` - alphabetical sort groups
+  zone→season→dayset contiguously.
+- Pros: every value individually visible/editable anywhere in HA. Cons: explodes at `days`
+  granularity (hundreds of helpers); engine must template-assemble the block list.
+
+Global tunables are individual helpers under BOTH options (see §6).
+
+## 5. Provisioned inventory (per current config: 3 zones, 2 active seasons)
+
+**Per zone:**
+- `timer.climate_<zone>_fan` + automation "Climate: <Zone> fan timer finished"
+- `binary_sensor.climate_<zone>_running` (template, from hvac_action) [adopted if pre-existing]
+- `sensor.climate_<zone>_runtime_today` (history_stats, state_class total_increasing)
+- `sensor.climate_<zone>_expected_runtime` (template: k x CDD, trailing-window k)
+
+**Per zone x season:** schedule storage per §4.
+
+**Global:**
+- `input_select.climate_season` (active season; options = season names)
+- `input_select.climate_season_mode` (manual | semi | full)
+- `input_number.climate_season_confirm_days` (3), `input_number.climate_season_dwell_days` (14)
+- `input_number.climate_dev_green_max` (2), `input_number.climate_dev_amber_max` (4)
+- `input_number.climate_runtime_alert_margin` (35), `input_number.climate_runtime_alert_days`
+  (3), `input_number.climate_runtime_learn_days` (30), `input_number.climate_cdd_base` (75)
+- `sensor.climate_next_block` (template; attributes: per-zone next block time/name/targets)
+
+**Automations (category "Climate Scheduler", label `mzcs`):**
+- "Climate: schedule engine" (block transitions → climate.set_temperature / set_hvac_mode;
+  respects season + granularity; APS precedence rule: external raises allowed, engine never
+  fights a higher hold during on-peak - exact encoding settled in S7 with the audit)
+- "Climate: <zone> fan timer finished" (per zone)
+- "Climate: season recommender" (forecast avg-high vs thresholds + date window; semi = notify
+  with actions, full = switch + notify; hysteresis via confirm_days, dwell via dwell_days)
+- "Climate: runtime anomaly alert" (actual vs expected x margin, N consecutive days; iOS
+  actionable + snooze, house pattern)
+- "Climate: engine watchdog" (heartbeat: alert if no engine fire across a scheduled transition)
+
+**Registry assignment:** zone objects → that zone's HA area; all objects → label `mzcs`;
+automations → category "Climate Scheduler".
+
+## 6. Card config schema (YAML shape the editor produces)
+
+```yaml
+type: custom:multizone-climate-scheduler-card
+prefix: climate
+zones:
+  - entity: climate.nest_upstairs
+    name: Upstairs
+    room_sensors: [sensor.guest_room_temperature, ...]   # or
+    auto_discover_area: true
+  - entity: climate.nest_downstairs
+    name: Downstairs
+seasons:
+  - { key: summer, name: Summer, default_mode: cool }
+  - { key: winter, name: Winter, default_mode: heat_cool }
+season_switch: semi          # manual | semi | full
+weather_entity: weather.openweathermap   # required for semi/full
+features: { fan_timer: [15, 30, 60], anomaly_alerts: true }
+notify_target: mobile_app_owners_iphone
+```
+
+## 7. Seed data (the owner's live Nest schedules, decoded 2026-07-26; ~times confirmed in tuning)
+
+**Upstairs · Summer (cool) · wdwe:**
+- wd: 06:00 Wake 78 · 08:00 Away 80 · 14:00 Pre-cool 76 · 16:00 On-peak 79 · 18:45 Evening 77 · 21:30 Sleep 76
+- we: 07:30 Wake 78 · 21:30 Sleep 76
+
+**Upstairs · Winter (heat_cool) · all:** 06:00 Day 84/66 · 19:00 Evening 78/68
+
+**Downstairs · Summer (cool) · wdwe:**
+- wd: 06:00 Wake 80 · 07:00 Morning 79 · 09:30 Day 78 · 14:00 Pre-cool 76 · 16:00 On-peak 79 · 17:15 Evening 82 · 21:30 Night 82
+- we: 07:00 Wake 79 · 09:45 Day 78 · 17:45 Evening 80 · 19:45 Night 82
+
+**Downstairs · Winter (heat_cool) · all:** 07:00 Day 78/68 · 19:00 Evening 84/66
+
+Office mini-split: zone supported, on hold - not provisioned at onboarding.
+
+## 8. Universal change-set rule
+
+Every wizard apply (first run or any later structural edit) = diff → categorized preview
+(Create n / Edit n / Delete n highlighted individually / Unchanged n, exact names) → explicit
+confirm → ordered apply with rollback list → verify by label query. No silent writes, ever.
+
+## 9. Non-goals (v1)
+
+Card never executes schedules (backend automations do). No Nest temp-sensor access (SDM
+limitation). Segment detail beyond recorder window (LTS totals only). Mini-split hero parity
+(zone on hold). Graph-based schedule editor (v1.x backlog, kneave/climate-scheduler MIT
+patterns).
