@@ -1,8 +1,7 @@
-# MZCS CONTRACT.md - draft (2026-07-26, pre-S1)
+# MZCS CONTRACT.md - v1.0 FROZEN (S1)
 
-Draft of the repo's `CONTRACT.md`, written ahead of S1 so the session starts from a finished
-schema. S1 reviews, settles the one open decision (storage), and copies this into the repo as
-the frozen contract. Everything in the card, wizard, differ, and engine builds against this file.
+The naming/schema contract. Everything in the card, wizard, differ, and engine builds against
+this file. Changes after freeze require a version bump + migration note.
 
 ## 1. Identity
 
@@ -35,29 +34,30 @@ block = { time: "HH:MM", name: string, mode: "cool" | "heat" | "heat_cool" | "of
 - Ordering: blocks sorted by time; last block of the day rules until the first block next day
   (midnight wrap).
 
-## 4. Schedule storage - THE open S1 decision
+## 4. Schedule storage - DECIDED (S1): native `schedule` helper per zone x season
 
-Two candidate models; S1 prototypes the engine trigger path against both and freezes one.
+**One `schedule.{prefix}_{zone}_{season}` entity per zone x season** (e.g.
+`schedule.climate_upstairs_summer`). Verified against HA docs 2026-08-23: schedule blocks carry
+custom data ("a mapping of attribute names to values, added to the entity's attributes when the
+block is active") and the entity exposes `next_event`.
 
-**Option A (leading): one native `schedule` helper per zone x season.**
-- `schedule.climate_upstairs_summer` etc. Blocks encoded as weekly time ranges with per-block
-  custom data `{name, mode, cool_temp, heat_temp}`. Granularity is purely a UI concept - the
-  editor writes the same values to all days in a set.
-- Engine triggers on schedule entity state/attribute change; reads active block's data.
-- Card tuning UI writes via the `schedule/update` websocket (same as core UI).
-- Pros: tiny object count at any granularity; HA's native weekly-grid editor works as a free
-  second editing surface; clean per-day support. Cons: block data editing via WS only (still
-  standard, but less obvious in the helpers UI than input_numbers).
+- Blocks stored as weekly time RANGES with data `{block: name, mode, cool_temp, heat_temp}`.
+  Our instant-based blocks convert to contiguous ranges (block time → next block time); the
+  overnight tail splits at midnight (…-24:00 + 00:00-…). Converter: `src/lib/schedule-ranges.ts`
+  (pure, unit-tested).
+- Because ranges are contiguous the entity is always `on`; the ENGINE TRIGGERS are:
+  (1) attribute change on the active season's schedule entities (block data + next_event change
+  at every boundary), (2) `input_select.{prefix}_season` change, (3) HA start / automation
+  reload, (4) a time-pattern safety tick (15 min) that reasserts the current block idempotently.
+- Granularity (`all`/`wdwe`/`days`) is a UI/wizard concept only: the editor writes identical
+  blocks to every day in a set. Collapse/expand transitions rewrite day ranges per §2.
+- Card tuning UI + wizard write via the `schedule/update` websocket (same command the core
+  helpers UI uses). HA's native weekly-grid editor remains usable as a second editing surface.
+- Sensor schedules (§7b) use the same model: `schedule.{prefix}_{zone}_sensor_schedule`, data
+  `{sensor: entity_id | "thermostat"}`.
 
-**Option B: per-value helpers.**
-- `input_datetime.climate_upstairs_summer_wd_wake_time`,
-  `input_number.climate_upstairs_summer_wd_wake_cool` (+ `_heat` when dual).
-- Naming: `{prefix}_{zone}_{season}_{dayset}_{block}_{field}` - alphabetical sort groups
-  zone→season→dayset contiguously.
-- Pros: every value individually visible/editable anywhere in HA. Cons: explodes at `days`
-  granularity (hundreds of helpers); engine must template-assemble the block list.
-
-Global tunables are individual helpers under BOTH options (see §6).
+Per-value helpers (rejected Option B) are archived in the home-assistant project spec §12;
+global tunables remain individual helpers (§6).
 
 ## 5. Provisioned inventory (per current config: 3 zones, 2 active seasons)
 
