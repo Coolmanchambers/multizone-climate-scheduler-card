@@ -138,6 +138,11 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
       kind: 'helper',
       spec: { name: `Climate ${z.name} enabled` },
     });
+    out.push({
+      id: zoneEntityId('k_factor', p, z.slug),
+      kind: 'helper',
+      spec: { name: `Climate ${z.name} K`, min: 0, max: 10, step: 0.01 },
+    });
     if (input.features.steering) {
       out.push({
         id: zoneEntityId('target_room_select', p, z.slug),
@@ -180,7 +185,14 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
     out.push({
       id: globalEntityId(n.cls, p),
       kind: 'helper',
-      spec: { min: n.min, max: n.max, step: n.step, initial: n.initial, ...(n.unit ? { unit: n.unit } : {}) },
+      spec: {
+        name: `Climate ${n.cls.replace(/_/g, ' ')}`,
+        min: n.min,
+        max: n.max,
+        step: n.step,
+        initial: n.initial,
+        ...(n.unit ? { unit: n.unit } : {}),
+      },
     });
   }
   if (input.features.steering) {
@@ -210,7 +222,9 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
   });
   out.push(auto('engine'));
   out.push(auto('watchdog'));
-  if (input.seasons.length > 1) out.push(auto('season_recommender'));
+  out.push(auto('runtime_learning'));
+  // season_recommender deferred to a post-v1 release: it needs per-season
+  // forecast-threshold helpers that are not yet in the contract.
   if (input.features.anomaly_alerts) out.push(auto('runtime_alert'));
   if (input.features.fan_timer) {
     for (const z of input.zones) {

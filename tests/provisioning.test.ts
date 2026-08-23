@@ -55,13 +55,13 @@ describe('buildDesired inventory (CONTRACT §5)', () => {
   it('produces the full expected inventory for 3 zones x 2 seasons', () => {
     const d = buildDesired(baseInput());
     const byKind = (k: string) => d.filter((x) => x.kind === k).length;
-    expect(byKind('helper')).toBe(20); // 3 fan timers + 3 markers + 3 enables + 2 selects + 8 numbers + theme
+    expect(byKind('helper')).toBe(23); // 3 fan timers + 3 markers + 3 enables + 3 k + 2 selects + 8 numbers + theme
     expect(byKind('template_sensor')).toBe(7); // 3 running + 3 expected + next_block
     expect(byKind('stats_sensor')).toBe(3);
     expect(byKind('schedule')).toBe(6);
-    expect(byKind('automation')).toBe(7); // engine, watchdog, recommender, alert, 3 fan
-    expect(d).toHaveLength(43);
-    expect(new Set(d.map((x) => x.id)).size).toBe(43); // no id collisions
+    expect(byKind('automation')).toBe(7); // engine, watchdog, learning, alert, 3 fan
+    expect(d).toHaveLength(46);
+    expect(new Set(d.map((x) => x.id)).size).toBe(46); // no id collisions
   });
 
   it('kill switch: every zone gets a toggle whose spec can never flip state (CONTRACT 7c)', () => {
@@ -97,12 +97,11 @@ describe('buildDesired inventory (CONTRACT §5)', () => {
     expect(d.some((x) => x.id === 'automation:climate_mzcs_steering')).toBe(true);
   });
 
-  it('single-season config skips the recommender', () => {
-    const input = baseInput();
-    input.seasons = [input.seasons[0]!];
-    for (const z of Object.keys(input.schedules)) delete input.schedules[z]!.winter;
-    const d = buildDesired(input);
+  it('recommender deferred; learning automation always present', () => {
+    const d = buildDesired(baseInput());
     expect(d.some((x) => x.id === 'automation:climate_mzcs_season_recommender')).toBe(false);
+    expect(d.some((x) => x.id === 'automation:climate_mzcs_runtime_learning')).toBe(true);
+    expect(d.some((x) => x.id === 'input_number.climate_upstairs_k')).toBe(true);
   });
 });
 
@@ -110,7 +109,7 @@ describe('plan + idempotence', () => {
   it('fresh install = all creates; apply → replan = zero actionable', () => {
     const desired = buildDesired(baseInput());
     const p1 = plan(desired, []);
-    expect(p1.create).toHaveLength(43);
+    expect(p1.create).toHaveLength(46);
     expect(actionable(plan(desired, applyPlan(p1, [])))).toHaveLength(0);
   });
 
@@ -126,7 +125,7 @@ describe('plan + idempotence', () => {
     ];
     const p = plan(desired, existing);
     expect(p.adopt.map((a) => a.id)).toEqual(['binary_sensor.climate_upstairs_running']);
-    expect(p.create).toHaveLength(42);
+    expect(p.create).toHaveLength(45);
     expect(actionable(plan(desired, applyPlan(p, existing)))).toHaveLength(0);
   });
 
@@ -138,7 +137,6 @@ describe('plan + idempotence', () => {
     for (const z of Object.keys(input.schedules)) delete input.schedules[z]!.winter;
     const p = plan(buildDesired(input), installed);
     expect(p.delete.map((a) => a.id).sort()).toEqual([
-      'automation:climate_mzcs_season_recommender',
       'schedule.climate_downstairs_winter',
       'schedule.climate_owners_office_winter',
       'schedule.climate_upstairs_winter',

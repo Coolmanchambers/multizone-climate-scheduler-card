@@ -23,6 +23,7 @@ const KIND_BY_CLASS: Record<string, ObjectKind> = {
   applied_block_marker: 'helper',
   zone_enabled: 'helper',
   theme: 'helper',
+  k_factor: 'helper',
   season_select: 'helper',
   season_mode: 'helper',
   season_confirm_days: 'helper',

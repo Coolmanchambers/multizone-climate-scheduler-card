@@ -32,6 +32,7 @@ export class MockHass implements HassLike {
       states: this.states,
       callService: this.callService.bind(this),
       callWS: this.callWS.bind(this),
+      callApi: this.callApi.bind(this),
     };
   }
 
@@ -102,6 +103,21 @@ export class MockHass implements HassLike {
   public async callWS(msg: Record<string, unknown>): Promise<unknown> {
     this.log.push({ domain: 'ws', service: String(msg.type), data: msg });
     const t = String(msg.type);
+    const createMatch = t.match(/^(timer|input_text|input_select|input_number|input_boolean|schedule)\/create$/);
+    if (createMatch) {
+      const domain = createMatch[1]!;
+      const name = String(msg.name ?? 'unnamed');
+      const objectId = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+      this.mutate(() => {
+        this.states[`${domain}.${objectId}`] = {
+          state: domain === 'input_boolean' ? 'off' : domain === 'timer' ? 'idle' : domain === 'schedule' ? 'on' : 'unknown',
+          attributes: { friendly_name: name },
+        };
+      });
+      return { id: objectId, ...msg };
+    }
+    if (t === 'config/label_registry/create') return { label_id: 'mzcs' };
+    if (t === 'config/entity_registry/update') return {};
     if (t === 'timer/list') {
       return Object.keys(this.states)
         .filter((id) => id.startsWith('timer.'))
@@ -169,6 +185,87 @@ export class MockHass implements HassLike {
       return out;
     }
     return {};
+  }
+
+  /** Simulates the REST surface the executor uses: config flows + automation config. */
+  private flowStep = new Map<string, number>();
+  private flowData = new Map<string, Record<string, unknown>>();
+  private flowCount = 0;
+  public async callApi(method: string, path: string, data?: Record<string, unknown>): Promise<unknown> {
+    this.log.push({ domain: 'api', service: `${method} ${path}`, data });
+    if (method === 'POST' && path === 'config/config_entries/flow') {
+      const flowId = `flow_${++this.flowCount}`;
+      this.flowStep.set(flowId, 0);
+      const handler = String(data?.handler);
+      if (handler === 'template') {
+        return { flow_id: flowId, type: 'menu', step_id: 'user' };
+      }
+      return {
+        flow_id: flowId,
+        type: 'form',
+        step_id: 'user',
+        data_schema: [{ name: 'name' }, { name: 'entity_id' }, { name: 'type' }],
+      };
+    }
+    const flowMatch = path.match(/^config\/config_entries\/flow\/(flow_\d+)$/);
+    if (method === 'POST' && flowMatch) {
+      const flowId = flowMatch[1]!;
+      const step = (this.flowStep.get(flowId) ?? 0) + 1;
+      this.flowStep.set(flowId, step);
+      const merged = { ...(this.flowData.get(flowId) ?? {}), ...(data ?? {}) };
+      this.flowData.set(flowId, merged);
+      if (data && 'next_step_id' in data) {
+        return {
+          flow_id: flowId,
+          type: 'form',
+          step_id: String(data.next_step_id),
+          data_schema: [
+            { name: 'name' },
+            { name: 'state' },
+            { name: 'device_class' },
+            { name: 'unit_of_measurement' },
+            { name: 'state_class' },
+          ],
+        };
+      }
+      if (step >= 2) {
+        const name = String(merged.name ?? `entry_${flowId}`);
+        const objectId = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+        const domain = String(merged.device_class ?? '') === 'running' ? 'binary_sensor' : 'sensor';
+        this.mutate(() => {
+          this.states[`${domain}.${objectId}`] = { state: 'unknown', attributes: { friendly_name: name } };
+        });
+        return { flow_id: flowId, type: 'create_entry', result: { entry_id: `entry_${flowId}` } };
+      }
+      return {
+        flow_id: flowId,
+        type: 'form',
+        step_id: 'options',
+        data_schema: [{ name: 'state' }, { name: 'start' }, { name: 'end' }],
+      };
+    }
+    const autoMatch = path.match(/^config\/automation\/config\/(.+)$/);
+    if (autoMatch) {
+      const uid = autoMatch[1]!;
+      const entityId = `automation.${uid}`;
+      if (method === 'POST') {
+        this.mutate(() => {
+          this.states[entityId] = {
+            state: 'on',
+            attributes: { id: uid, friendly_name: String(data?.alias ?? uid) },
+          };
+        });
+        return { result: 'ok' };
+      }
+      if (method === 'DELETE') {
+        this.mutate(() => {
+          delete this.states[entityId];
+        });
+        return { result: 'ok' };
+      }
+    }
+    if (method === 'DELETE') return { result: 'ok' };
+    throw new Error(`MockHass.callApi: unhandled ${method} ${path}`);
   }
 
   /** Upstairs Summer weekend/weekday week matching the prod S7 provisioning. */

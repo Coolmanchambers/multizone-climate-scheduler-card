@@ -110,9 +110,10 @@ const SET_LABELS: Record<string, string> = {
 };
 import { slugify, zoneEntityId, globalEntityId } from './lib/naming';
 import { deviationColor, formatDelta, sanitizeThresholds } from './lib/deviation';
-import { buildDesired, plan, type Plan, type ProvisionInput } from './lib/provisioning';
+import { buildDesired, plan, actionable, type Plan, type ProvisionInput } from './lib/provisioning';
 import { defaultSchedules } from './lib/default-schedules';
 import { fetchExisting } from './registry-read';
+import { executePlan, type ExecResult } from './provision-exec';
 
 const MODE_LABELS: Record<string, string> = {
   heat: 'Heat',
@@ -151,6 +152,10 @@ export class MzcsCard extends LitElement {
   @state() private _dryRun?: Plan;
   @state() private _dryRunError?: string;
   @state() private _dryRunning = false;
+  @state() private _execConfirm = false;
+  @state() private _execRunning = false;
+  @state() private _execLog: string[] = [];
+  @state() private _execResult?: ExecResult;
 
   public setConfig(config: MzcsCardConfig): void {
     if (!config.zones || !Array.isArray(config.zones) || config.zones.length < 1) {
@@ -241,6 +246,9 @@ export class MzcsCard extends LitElement {
         input.seasons.map((s) => s.key),
       );
       this._dryRun = plan(buildDesired(input), existing);
+      this._execConfirm = false;
+      this._execResult = undefined;
+      this._execLog = [];
     } catch (e) {
       this._dryRunError = e instanceof Error ? e.message : String(e);
     } finally {
@@ -248,13 +256,58 @@ export class MzcsCard extends LitElement {
     }
   }
 
+  private async _runApply(): Promise<void> {
+    const hass = this.hass;
+    const cfg = this._config;
+    const p = this._dryRun;
+    if (!hass || !cfg || !p || this._execRunning) return;
+    if (!hass.callWS || !hass.callApi) {
+      this._execLog = ['This HA frontend session does not expose the required APIs (callWS/callApi).'];
+      return;
+    }
+    this._execRunning = true;
+    this._execConfirm = false;
+    this._execLog = [];
+    try {
+      const input = this._provisionInput();
+      const zoneRefs = cfg.zones.map((z) => ({
+        slug: slugify(z.name),
+        name: z.name,
+        climate: z.entity,
+      }));
+      const result = await executePlan(hass, p, {
+        prefix: input.prefix,
+        zones: zoneRefs,
+        seasons: input.seasons,
+        log: (line) => {
+          this._execLog = [...this._execLog, line];
+        },
+      });
+      this._execResult = result;
+      // Verify step of the universal change-set rule: replan against the live
+      // registry so the user sees what actually landed.
+      const existing = await fetchExisting(
+        hass,
+        input.prefix,
+        input.zones.map((z) => z.slug),
+        input.seasons.map((s) => s.key),
+      );
+      this._dryRun = plan(buildDesired(input), existing);
+    } catch (e) {
+      this._execLog = [...this._execLog, `ERROR: ${e instanceof Error ? e.message : String(e)}`];
+    } finally {
+      this._execRunning = false;
+    }
+  }
+
   private _renderSetup() {
     const p = this._dryRun;
     return html`
       <div class="setup">
-        <p class="setup-title">Setup · dry run</p>
+        <p class="setup-title">Setup</p>
         <p class="setup-sub">
-          Read-only preview of what Setup would create. Nothing is written from this screen.
+          Preview first, then apply. Nothing is written until you confirm; existing schedules and
+          customized automations are never overwritten.
         </p>
         <button class="chip" .disabled=${this._dryRunning} @click=${() => void this._runDryRun()}>
           ${this._dryRunning ? 'Reading registry…' : 'Run dry-run preview'}
@@ -282,11 +335,48 @@ export class MzcsCard extends LitElement {
                   `,
                 )}
               </div>
+              ${this._renderApply(p)}
             `
           : nothing}
         ${this._renderManage()}
         <button class="chip" @click=${() => (this._setupOpen = false)}>Close</button>
       </div>
+    `;
+  }
+
+  private _renderApply(p: Plan) {
+    const n = actionable(p).length;
+    const done = this._execResult;
+    return html`
+      ${n > 0 && !this._execRunning && !done
+        ? this._execConfirm
+          ? html`
+              <div class="applyrow">
+                <button class="chip danger" @click=${() => void this._runApply()}>
+                  Confirm: apply ${n} change${n === 1 ? '' : 's'}
+                </button>
+                <button class="chip" @click=${() => (this._execConfirm = false)}>Cancel</button>
+              </div>
+            `
+          : html`
+              <button class="chip" @click=${() => (this._execConfirm = true)}>
+                Apply ${n} change${n === 1 ? '' : 's'}…
+              </button>
+            `
+        : nothing}
+      ${this._execRunning ? html`<p class="setup-sub">Applying…</p>` : nothing}
+      ${this._execLog.length > 0
+        ? html`<ul class="plan-list exec-log">
+            ${this._execLog.map((l) => html`<li>${l}</li>`)}
+          </ul>`
+        : nothing}
+      ${done
+        ? html`<p class="setup-sub ${done.ok ? '' : 'setup-err'}">
+            ${done.ok
+              ? `Done - ${done.created} created, ${done.adopted} adopted, ${done.updated} updated, ${done.deleted} deleted${done.skipped ? `, ${done.skipped} kept as-is` : ''}. The plan above has been re-verified against the live registry.`
+              : 'Apply failed - created objects from this run were rolled back. See the log above.'}
+          </p>`
+        : nothing}
     `;
   }
 
@@ -1256,6 +1346,22 @@ export class MzcsCard extends LitElement {
     }
     .plan-list.del li {
       color: var(--mzcs-bad);
+    }
+    .applyrow {
+      display: flex;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .chip.danger {
+      background: var(--mzcs-bad);
+      border-color: var(--mzcs-bad);
+      color: #fff;
+    }
+    .plan-list.exec-log {
+      max-height: 160px;
+      overflow-y: auto;
+      width: 100%;
+      box-sizing: border-box;
     }
     .schedrow {
       width: 100%;

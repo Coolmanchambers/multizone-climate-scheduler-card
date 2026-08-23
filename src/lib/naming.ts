@@ -11,7 +11,8 @@ export type ZoneClass =
   | 'target_room_select'
   | 'sensor_schedule'
   | 'applied_block_marker'
-  | 'zone_enabled';
+  | 'zone_enabled'
+  | 'k_factor';
 
 export type GlobalClass =
   | 'season_select'
@@ -49,6 +50,7 @@ const ZONE_CLASS_DEFS: Record<ZoneClass, { domain: string; suffix: string }> = {
   sensor_schedule: { domain: 'schedule', suffix: 'sensor_schedule' },
   applied_block_marker: { domain: 'input_text', suffix: 'applied_block' },
   zone_enabled: { domain: 'input_boolean', suffix: 'enabled' },
+  k_factor: { domain: 'input_number', suffix: 'k' },
 };
 
 const GLOBAL_CLASS_DEFS: Record<GlobalClass, { domain: string; suffix: string }> = {
@@ -109,6 +111,7 @@ export function automationAlias(key: string, zoneName?: string): string {
     fan_timer: `Climate: ${zoneName ?? '?'} fan timer finished`,
     season_recommender: 'Climate: season recommender',
     runtime_alert: 'Climate: runtime anomaly alert',
+    runtime_learning: 'Climate: runtime learning',
     watchdog: 'Climate: engine watchdog',
     steering: 'Climate: comfort steering',
   };

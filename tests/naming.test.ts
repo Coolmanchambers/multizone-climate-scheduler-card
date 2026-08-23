@@ -26,6 +26,7 @@ const ZONE_CLASSES: ZoneClass[] = [
   'sensor_schedule',
   'applied_block_marker',
   'zone_enabled',
+  'k_factor',
 ];
 
 const GLOBAL_CLASSES: GlobalClass[] = [

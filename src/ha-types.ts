@@ -14,4 +14,6 @@ export interface HassLike {
     data?: Record<string, unknown>,
   ): Promise<unknown>;
   callWS?(msg: Record<string, unknown>): Promise<unknown>;
+  /** REST via the frontend session - config flows + automation config API. */
+  callApi?(method: string, path: string, data?: Record<string, unknown>): Promise<unknown>;
 }
