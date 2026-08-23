@@ -126,6 +126,11 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
       kind: 'template_sensor',
       spec: { name: `Climate ${z.name} expected runtime`, model: 'k_x_cdd' },
     });
+    out.push({
+      id: zoneEntityId('applied_block_marker', p, z.slug),
+      kind: 'helper',
+      spec: { name: `Climate ${z.name} applied block` },
+    });
     if (input.features.steering) {
       out.push({
         id: zoneEntityId('target_room_select', p, z.slug),

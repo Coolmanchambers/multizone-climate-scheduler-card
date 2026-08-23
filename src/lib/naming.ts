@@ -9,7 +9,8 @@ export type ZoneClass =
   | 'runtime_today'
   | 'expected_runtime'
   | 'target_room_select'
-  | 'sensor_schedule';
+  | 'sensor_schedule'
+  | 'applied_block_marker';
 
 export type GlobalClass =
   | 'season_select'
@@ -44,6 +45,7 @@ const ZONE_CLASS_DEFS: Record<ZoneClass, { domain: string; suffix: string }> = {
   expected_runtime: { domain: 'sensor', suffix: 'expected_runtime' },
   target_room_select: { domain: 'input_select', suffix: 'target_room' },
   sensor_schedule: { domain: 'schedule', suffix: 'sensor_schedule' },
+  applied_block_marker: { domain: 'input_text', suffix: 'applied_block' },
 };
 
 const GLOBAL_CLASS_DEFS: Record<GlobalClass, { domain: string; suffix: string }> = {

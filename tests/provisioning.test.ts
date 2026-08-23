@@ -55,13 +55,13 @@ describe('buildDesired inventory (CONTRACT §5)', () => {
   it('produces the full expected inventory for 3 zones x 2 seasons', () => {
     const d = buildDesired(baseInput());
     const byKind = (k: string) => d.filter((x) => x.kind === k).length;
-    expect(byKind('helper')).toBe(13); // 3 fan timers + 2 selects + 8 numbers
+    expect(byKind('helper')).toBe(16); // 3 fan timers + 3 markers + 2 selects + 8 numbers
     expect(byKind('template_sensor')).toBe(7); // 3 running + 3 expected + next_block
     expect(byKind('stats_sensor')).toBe(3);
     expect(byKind('schedule')).toBe(6);
     expect(byKind('automation')).toBe(7); // engine, watchdog, recommender, alert, 3 fan
-    expect(d).toHaveLength(36);
-    expect(new Set(d.map((x) => x.id)).size).toBe(36); // no id collisions
+    expect(d).toHaveLength(39);
+    expect(new Set(d.map((x) => x.id)).size).toBe(39); // no id collisions
   });
 
   it('steering feature adds its object group', () => {
@@ -87,7 +87,7 @@ describe('plan + idempotence', () => {
   it('fresh install = all creates; apply → replan = zero actionable', () => {
     const desired = buildDesired(baseInput());
     const p1 = plan(desired, []);
-    expect(p1.create).toHaveLength(36);
+    expect(p1.create).toHaveLength(39);
     expect(actionable(plan(desired, applyPlan(p1, [])))).toHaveLength(0);
   });
 
@@ -103,7 +103,7 @@ describe('plan + idempotence', () => {
     ];
     const p = plan(desired, existing);
     expect(p.adopt.map((a) => a.id)).toEqual(['binary_sensor.climate_upstairs_running']);
-    expect(p.create).toHaveLength(35);
+    expect(p.create).toHaveLength(38);
     expect(actionable(plan(desired, applyPlan(p, existing)))).toHaveLength(0);
   });
 

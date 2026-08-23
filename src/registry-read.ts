@@ -20,6 +20,7 @@ const KIND_BY_CLASS: Record<string, ObjectKind> = {
   fan_timer: 'helper',
   room_override_timer: 'helper',
   target_room_select: 'helper',
+  applied_block_marker: 'helper',
   season_select: 'helper',
   season_mode: 'helper',
   season_confirm_days: 'helper',

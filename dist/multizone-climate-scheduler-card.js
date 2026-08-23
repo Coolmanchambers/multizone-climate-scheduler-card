@@ -75,7 +75,7 @@ const { is: Pe, defineProperty: Ue, getOwnPropertyDescriptor: Ne, getOwnProperty
   return t;
 } }, X = (s, e) => !Pe(s, e), oe = { attribute: !0, type: String, converter: I, reflect: !1, useDefault: !1, hasChanged: X };
 Symbol.metadata ??= Symbol("metadata"), B.litPropertyMetadata ??= /* @__PURE__ */ new WeakMap();
-let k = class extends HTMLElement {
+let C = class extends HTMLElement {
   static addInitializer(e) {
     this._$Ei(), (this.l ??= []).push(e);
   }
@@ -256,7 +256,7 @@ let k = class extends HTMLElement {
   firstUpdated(e) {
   }
 };
-k.elementStyles = [], k.shadowRootOptions = { mode: "open" }, k[M("elementProperties")] = /* @__PURE__ */ new Map(), k[M("finalized")] = /* @__PURE__ */ new Map(), Ie?.({ ReactiveElement: k }), (B.reactiveElementVersions ??= []).push("2.1.2");
+C.elementStyles = [], C.shadowRootOptions = { mode: "open" }, C[M("elementProperties")] = /* @__PURE__ */ new Map(), C[M("finalized")] = /* @__PURE__ */ new Map(), Ie?.({ ReactiveElement: C }), (B.reactiveElementVersions ??= []).push("2.1.2");
 /**
  * @license
  * Copyright 2017 Google LLC
@@ -493,7 +493,7 @@ const Xe = (s, e, t) => {
  * SPDX-License-Identifier: BSD-3-Clause
  */
 const ee = globalThis;
-class P extends k {
+class P extends C {
   constructor() {
     super(...arguments), this.renderOptions = { host: this }, this._$Do = void 0;
   }
@@ -566,10 +566,10 @@ function Ee(s) {
  * Copyright 2017 Google LLC
  * SPDX-License-Identifier: BSD-3-Clause
  */
-function C(s) {
+function k(s) {
   return Ee({ ...s, state: !0, attribute: !1 });
 }
-const st = "0.1.0", Se = "multizone-climate-scheduler-card", Ce = "Multi-Zone Climate Scheduler Card";
+const st = "0.1.0", Se = "multizone-climate-scheduler-card", ke = "Multi-Zone Climate Scheduler Card";
 function me(s, e) {
   const t = s.states[e];
   if (!t || t.state === "unavailable" || t.state === "unknown")
@@ -663,7 +663,8 @@ const te = {
   runtime_today: { domain: "sensor", suffix: "runtime_today" },
   expected_runtime: { domain: "sensor", suffix: "expected_runtime" },
   target_room_select: { domain: "input_select", suffix: "target_room" },
-  sensor_schedule: { domain: "schedule", suffix: "sensor_schedule" }
+  sensor_schedule: { domain: "schedule", suffix: "sensor_schedule" },
+  applied_block_marker: { domain: "input_text", suffix: "applied_block" }
 }, se = {
   season_select: { domain: "input_select", suffix: "season" },
   season_mode: { domain: "input_select", suffix: "season_mode" },
@@ -731,8 +732,8 @@ function ft(s, e, t, n) {
   }
   return null;
 }
-const ke = 2, Oe = 4;
-function _t(s, e = ke, t = Oe) {
+const Ce = 2, Oe = 4;
+function _t(s, e = Ce, t = Oe) {
   const n = Math.abs(s);
   return n <= e ? "green" : n <= t ? "amber" : "red";
 }
@@ -741,7 +742,7 @@ function $t(s) {
   return `${e > 0 ? "+" : ""}${e}°`;
 }
 function gt(s, e) {
-  let t = s != null && s > 0 ? s : ke, n = e != null && e > 0 ? e : Oe;
+  let t = s != null && s > 0 ? s : Ce, n = e != null && e > 0 ? e : Oe;
   return n <= t && (n = t + 1), { greenMax: t, amberMax: n };
 }
 const J = [
@@ -810,13 +811,13 @@ const Et = "mzcs", be = "r1", St = [
   { cls: "runtime_alert_days", min: 1, max: 7, step: 1, initial: 3 },
   { cls: "runtime_learn_days", min: 7, max: 60, step: 1, initial: 30 },
   { cls: "cdd_base", min: 60, max: 80, step: 1, initial: 75, unit: "°F" }
-], Ct = [
+], kt = [
   { cls: "override_minutes", min: 15, max: 240, step: 15, initial: 60 },
   { cls: "steer_min_setpoint", min: 50, max: 80, step: 1, initial: 68 },
   { cls: "steer_max_setpoint", min: 70, max: 95, step: 1, initial: 85 },
   { cls: "steer_max_offset", min: 1, max: 10, step: 1, initial: 5 }
 ];
-function kt(s) {
+function Ct(s) {
   return wt(s.granularity, s.sets);
 }
 function Ot(s) {
@@ -838,6 +839,10 @@ function Ot(s) {
       id: y("expected_runtime", t, i.slug),
       kind: "template_sensor",
       spec: { name: `Climate ${i.name} expected runtime`, model: "k_x_cdd" }
+    }), e.push({
+      id: y("applied_block_marker", t, i.slug),
+      kind: "helper",
+      spec: { name: `Climate ${i.name} applied block` }
     }), s.features.steering && (e.push({
       id: y("target_room_select", t, i.slug),
       kind: "helper",
@@ -857,7 +862,7 @@ function Ot(s) {
       e.push({
         id: mt(t, i.slug, r.key),
         kind: "schedule",
-        spec: { name: `Climate ${i.name} ${r.name}`, week: kt(o) }
+        spec: { name: `Climate ${i.name} ${r.name}`, week: Ct(o) }
       });
     }
   }
@@ -877,7 +882,7 @@ function Ot(s) {
       spec: { min: i.min, max: i.max, step: i.step, initial: i.initial, ...i.unit ? { unit: i.unit } : {} }
     });
   if (s.features.steering)
-    for (const i of Ct)
+    for (const i of kt)
       e.push({
         id: w(i.cls, t),
         kind: "helper",
@@ -945,6 +950,7 @@ const Ut = {
   fan_timer: "helper",
   room_override_timer: "helper",
   target_room_select: "helper",
+  applied_block_marker: "helper",
   season_select: "helper",
   season_mode: "helper",
   season_confirm_days: "helper",
@@ -1052,7 +1058,7 @@ const jt = {
   dry: "Dry",
   fan_only: "Fan only"
 };
-console.info(`%c ${Ce} %c v${st}`, "background:#1e88e5;color:#fff;padding:2px 6px;border-radius:4px 0 0 4px;", "background:#243039;color:#fff;padding:2px 6px;border-radius:0 4px 4px 0;");
+console.info(`%c ${ke} %c v${st}`, "background:#1e88e5;color:#fff;padding:2px 6px;border-radius:4px 0 0 4px;", "background:#243039;color:#fff;padding:2px 6px;border-radius:0 4px 4px 0;");
 let g = class extends P {
   constructor() {
     super(...arguments), this._zoneIndex = 0, this._ctrlOpen = !1, this._setupOpen = !1, this._dryRunning = !1;
@@ -1556,25 +1562,25 @@ x([
   Ee({ attribute: !1 })
 ], g.prototype, "hass", 2);
 x([
-  C()
+  k()
 ], g.prototype, "_config", 2);
 x([
-  C()
+  k()
 ], g.prototype, "_zoneIndex", 2);
 x([
-  C()
+  k()
 ], g.prototype, "_ctrlOpen", 2);
 x([
-  C()
+  k()
 ], g.prototype, "_setupOpen", 2);
 x([
-  C()
+  k()
 ], g.prototype, "_dryRun", 2);
 x([
-  C()
+  k()
 ], g.prototype, "_dryRunError", 2);
 x([
-  C()
+  k()
 ], g.prototype, "_dryRunning", 2);
 g = x([
   Qe(Se)
@@ -1582,7 +1588,7 @@ g = x([
 window.customCards = window.customCards ?? [];
 window.customCards.push({
   type: Se,
-  name: Ce,
+  name: ke,
   description: "Nest-style climate view for 1-4 zones with seasonal scheduling, fan timers, and runtime history."
 });
 export {
