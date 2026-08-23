@@ -96,14 +96,27 @@ export function setEco(hass: HassLike, entityId: string, on: boolean): Promise<u
   });
 }
 
-export function startFanTimer(
+export function supportsFanOn(hass: HassLike, climateEntityId: string): boolean {
+  const m = hass.states[climateEntityId]?.attributes.fan_modes;
+  return Array.isArray(m) && m.includes('on');
+}
+
+/** Turn the fan on (when the unit supports plain on/off) and start the timer. */
+export async function startFanTimer(
   hass: HassLike,
+  climateEntityId: string,
   timerEntityId: string,
   minutes: number,
-): Promise<unknown> {
+): Promise<void> {
+  if (supportsFanOn(hass, climateEntityId)) {
+    await hass.callService('climate', 'set_fan_mode', {
+      entity_id: climateEntityId,
+      fan_mode: 'on',
+    });
+  }
   const mm = String(minutes % 60).padStart(2, '0');
   const hh = String(Math.floor(minutes / 60)).padStart(2, '0');
-  return hass.callService('timer', 'start', {
+  await hass.callService('timer', 'start', {
     entity_id: timerEntityId,
     duration: `${hh}:${mm}:00`,
   });

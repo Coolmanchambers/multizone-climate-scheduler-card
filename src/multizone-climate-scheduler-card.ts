@@ -321,7 +321,7 @@ export class MzcsCard extends LitElement {
                         (m) => html`
                           <button
                             class="chip"
-                            @click=${() => void startFanTimer(hass, timerId, m)}
+                            @click=${() => void startFanTimer(hass, entity, timerId, m)}
                           >
                             ${m}m
                           </button>
