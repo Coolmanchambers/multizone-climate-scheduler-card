@@ -22,6 +22,7 @@ const KIND_BY_CLASS: Record<string, ObjectKind> = {
   target_room_select: 'helper',
   applied_block_marker: 'helper',
   zone_enabled: 'helper',
+  theme: 'helper',
   season_select: 'helper',
   season_mode: 'helper',
   season_confirm_days: 'helper',

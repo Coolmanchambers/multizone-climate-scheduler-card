@@ -44,6 +44,7 @@ const GLOBAL_CLASSES: GlobalClass[] = [
   'steer_max_setpoint',
   'steer_max_offset',
   'next_block_sensor',
+  'theme',
 ];
 
 describe('slugify', () => {

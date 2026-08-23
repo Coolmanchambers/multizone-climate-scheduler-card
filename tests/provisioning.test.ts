@@ -55,13 +55,13 @@ describe('buildDesired inventory (CONTRACT §5)', () => {
   it('produces the full expected inventory for 3 zones x 2 seasons', () => {
     const d = buildDesired(baseInput());
     const byKind = (k: string) => d.filter((x) => x.kind === k).length;
-    expect(byKind('helper')).toBe(19); // 3 fan timers + 3 markers + 3 enables + 2 selects + 8 numbers
+    expect(byKind('helper')).toBe(20); // 3 fan timers + 3 markers + 3 enables + 2 selects + 8 numbers + theme
     expect(byKind('template_sensor')).toBe(7); // 3 running + 3 expected + next_block
     expect(byKind('stats_sensor')).toBe(3);
     expect(byKind('schedule')).toBe(6);
     expect(byKind('automation')).toBe(7); // engine, watchdog, recommender, alert, 3 fan
-    expect(d).toHaveLength(42);
-    expect(new Set(d.map((x) => x.id)).size).toBe(42); // no id collisions
+    expect(d).toHaveLength(43);
+    expect(new Set(d.map((x) => x.id)).size).toBe(43); // no id collisions
   });
 
   it('kill switch: every zone gets a toggle whose spec can never flip state (CONTRACT 7c)', () => {
@@ -110,7 +110,7 @@ describe('plan + idempotence', () => {
   it('fresh install = all creates; apply → replan = zero actionable', () => {
     const desired = buildDesired(baseInput());
     const p1 = plan(desired, []);
-    expect(p1.create).toHaveLength(42);
+    expect(p1.create).toHaveLength(43);
     expect(actionable(plan(desired, applyPlan(p1, [])))).toHaveLength(0);
   });
 
@@ -126,7 +126,7 @@ describe('plan + idempotence', () => {
     ];
     const p = plan(desired, existing);
     expect(p.adopt.map((a) => a.id)).toEqual(['binary_sensor.climate_upstairs_running']);
-    expect(p.create).toHaveLength(41);
+    expect(p.create).toHaveLength(42);
     expect(actionable(plan(desired, applyPlan(p, existing)))).toHaveLength(0);
   });
 

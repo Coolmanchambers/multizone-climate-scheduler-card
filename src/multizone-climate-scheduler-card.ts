@@ -37,6 +37,28 @@ import {
   type SetpointChange,
 } from './lib/segments';
 import { computeVerdict } from './lib/verdict';
+import {
+  resolveTheme,
+  serializeCustomTheme,
+  THEME_PRESETS,
+  type ThemeTokens,
+} from './lib/theme';
+
+const THEME_VAR_MAP: Array<[keyof ThemeTokens, string]> = [
+  ['accent', '--mzcs-accent'],
+  ['accentBright', '--mzcs-accent-bright'],
+  ['good', '--mzcs-good'],
+  ['warn', '--mzcs-warn'],
+  ['bad', '--mzcs-bad'],
+];
+
+const CUSTOM_COLOR_LABELS: Array<{ key: keyof ThemeTokens; label: string }> = [
+  { key: 'accent', label: 'Accent (cooling / active)' },
+  { key: 'accentBright', label: 'Accent bright (today / highlights)' },
+  { key: 'good', label: 'Good (eco / normal)' },
+  { key: 'warn', label: 'Warn (heat / season / high)' },
+  { key: 'bad', label: 'Alert (out of range)' },
+];
 import type { GlobalClass } from './lib/naming';
 
 const MANAGE_TUNABLES: Array<{ cls: GlobalClass; label: string }> = [
@@ -88,7 +110,7 @@ const MODE_LABELS: Record<string, string> = {
 };
 
 /* eslint-disable no-console */
-console.info(`%c ${CARD_NAME} %c v${CARD_VERSION}`, 'background:#1e88e5;color:#fff;padding:2px 6px;border-radius:4px 0 0 4px;', 'background:#243039;color:#fff;padding:2px 6px;border-radius:0 4px 4px 0;');
+console.info(`%c ${CARD_NAME} %c v${CARD_VERSION}`, 'background:var(--mzcs-accent);color:#fff;padding:2px 6px;border-radius:4px 0 0 4px;', 'background:#243039;color:#fff;padding:2px 6px;border-radius:0 4px 4px 0;');
 
 @customElement(CARD_TYPE)
 export class MzcsCard extends LitElement {
@@ -332,11 +354,74 @@ export class MzcsCard extends LitElement {
           </div>
         `,
       )}
+      ${this._renderThemePicker()}
     `;
+  }
+
+  private _renderThemePicker() {
+    const hass = this.hass;
+    if (!hass) return nothing;
+    const themeId = globalEntityId('theme', this._prefix);
+    if (!entityExists(hass, themeId)) return nothing;
+    const { presetKey, tokens } = resolveTheme(hass.states[themeId]?.state);
+    const setTheme = (value: string) =>
+      void hass.callService('input_text', 'set_value', { entity_id: themeId, value });
+    return html`
+      <p class="setup-title" style="margin-top:12px;">Theme</p>
+      <div class="chips">
+        ${Object.entries(THEME_PRESETS).map(
+          ([key, p]) => html`
+            <button
+              class=${presetKey === key ? 'chip mode-on' : 'chip'}
+              @click=${() => setTheme(key)}
+            >
+              <span class="swatch" style="background:${p.tokens.accent}"></span>${p.label}
+            </button>
+          `,
+        )}
+        <button
+          class=${presetKey === 'custom' ? 'chip mode-on' : 'chip'}
+          @click=${() => setTheme(serializeCustomTheme(tokens))}
+        >
+          Custom
+        </button>
+      </div>
+      ${presetKey === 'custom'
+        ? html`
+            ${CUSTOM_COLOR_LABELS.map(
+              (c) => html`
+                <div class="managerow">
+                  <span>${c.label}</span>
+                  <input
+                    type="color"
+                    .value=${tokens[c.key]}
+                    @change=${(e: Event) => {
+                      const next = { ...tokens, [c.key]: (e.target as HTMLInputElement).value };
+                      setTheme(serializeCustomTheme(next));
+                    }}
+                  />
+                </div>
+              `,
+            )}
+            <p class="muted" style="font-size:11px;margin:2px 0 0;">
+              Colors apply live to every device showing the card.
+            </p>
+          `
+        : nothing}
+    `;
+  }
+
+  private _applyTheme(): void {
+    const stored = this.hass?.states[globalEntityId('theme', this._prefix)]?.state;
+    const { tokens } = resolveTheme(stored);
+    for (const [key, cssVar] of THEME_VAR_MAP) {
+      this.style.setProperty(cssVar, tokens[key]);
+    }
   }
 
   protected render() {
     if (!this._config || !this.hass) return nothing;
+    this._applyTheme();
     const zone = this._zone();
     if (!zone) return nothing;
     if (this._setupOpen) {
@@ -908,6 +993,13 @@ export class MzcsCard extends LitElement {
   }
 
   static styles = css`
+    :host {
+      --mzcs-accent: #1e88e5;
+      --mzcs-accent-bright: #42a5f5;
+      --mzcs-good: #2bb673;
+      --mzcs-warn: #f59e0b;
+      --mzcs-bad: #e5484d;
+    }
     .wrap {
       padding: 12px;
       color: var(--primary-text-color, #e1e6ea);
@@ -951,10 +1043,10 @@ export class MzcsCard extends LitElement {
       flex: none;
     }
     .dot.cool {
-      background: #1e88e5;
+      background: var(--mzcs-accent);
     }
     .dot.heat {
-      background: #f59e0b;
+      background: var(--mzcs-warn);
     }
     .mid {
       flex: 1;
@@ -974,7 +1066,7 @@ export class MzcsCard extends LitElement {
       text-overflow: ellipsis;
     }
     .fan {
-      color: #1e88e5;
+      color: var(--mzcs-accent);
     }
     .nudge {
       width: 34px;
@@ -1024,16 +1116,16 @@ export class MzcsCard extends LitElement {
       cursor: pointer;
     }
     .chip.mode-on {
-      background: #1e88e5;
-      border-color: #1e88e5;
+      background: var(--mzcs-accent);
+      border-color: var(--mzcs-accent);
       color: #fff;
     }
     .chip.eco {
-      border-color: #2bb673;
-      color: #2bb673;
+      border-color: var(--mzcs-good);
+      color: var(--mzcs-good);
     }
     .chip.eco-on {
-      background: #2bb673;
+      background: var(--mzcs-good);
       color: #fff;
     }
     .fanrow {
@@ -1074,13 +1166,13 @@ export class MzcsCard extends LitElement {
       color: #16202a;
     }
     .badge.green {
-      background: #2bb673;
+      background: var(--mzcs-good);
     }
     .badge.amber {
-      background: #f59e0b;
+      background: var(--mzcs-warn);
     }
     .badge.red {
-      background: #e5484d;
+      background: var(--mzcs-bad);
     }
     .tab.gear {
       flex: 0 0 40px;
@@ -1103,7 +1195,7 @@ export class MzcsCard extends LitElement {
       color: var(--secondary-text-color, #9fb0bd);
     }
     .setup-err {
-      color: #e5484d;
+      color: var(--mzcs-bad);
       font-size: 12px;
     }
     .planwrap {
@@ -1120,7 +1212,7 @@ export class MzcsCard extends LitElement {
       font-weight: 500;
     }
     .plan-h.del {
-      color: #e5484d;
+      color: var(--mzcs-bad);
     }
     .plan-h.quiet {
       color: var(--secondary-text-color, #9fb0bd);
@@ -1133,7 +1225,7 @@ export class MzcsCard extends LitElement {
       color: var(--secondary-text-color, #9fb0bd);
     }
     .plan-list.del li {
-      color: #e5484d;
+      color: var(--mzcs-bad);
     }
     .schedrow {
       width: 100%;
@@ -1150,7 +1242,7 @@ export class MzcsCard extends LitElement {
       cursor: pointer;
     }
     .season {
-      color: #f59e0b;
+      color: var(--mzcs-warn);
     }
     .schedbody {
       background: var(--secondary-background-color, #243039);
@@ -1165,7 +1257,7 @@ export class MzcsCard extends LitElement {
     }
     .today {
       font-size: 10px;
-      color: #1e88e5;
+      color: var(--mzcs-accent);
       font-weight: 400;
     }
     .blockrow {
@@ -1201,7 +1293,7 @@ export class MzcsCard extends LitElement {
       padding: 8px 12px;
     }
     .schederr {
-      color: #e5484d;
+      color: var(--mzcs-bad);
       font-size: 12px;
     }
     .managerow {
@@ -1218,10 +1310,10 @@ export class MzcsCard extends LitElement {
       font-weight: 500;
     }
     .verdict.normal {
-      color: #2bb673;
+      color: var(--mzcs-good);
     }
     .verdict.high {
-      color: #f59e0b;
+      color: var(--mzcs-warn);
     }
     .verdict.learning {
       color: var(--secondary-text-color, #9fb0bd);
@@ -1235,7 +1327,7 @@ export class MzcsCard extends LitElement {
     .col {
       flex: 1;
       border-radius: 2px 2px 0 0;
-      background: #1e88e5;
+      background: var(--mzcs-accent);
       display: block;
     }
     .pillrow {
@@ -1261,10 +1353,10 @@ export class MzcsCard extends LitElement {
       display: block;
       height: 12px;
       border-radius: 6px;
-      background: #1e88e5;
+      background: var(--mzcs-accent);
     }
     .pill-fill.today-fill {
-      background: #42a5f5;
+      background: var(--mzcs-accent-bright);
     }
     .pill-hours {
       width: 48px;
@@ -1293,7 +1385,7 @@ export class MzcsCard extends LitElement {
       height: 20px;
       margin-left: -10px;
       border-radius: 50%;
-      background: #1e88e5;
+      background: var(--mzcs-accent);
       color: #fff;
       font-size: 9px;
       display: flex;
@@ -1311,7 +1403,7 @@ export class MzcsCard extends LitElement {
       position: absolute;
       top: 0;
       height: 12px;
-      background: #1e88e5;
+      background: var(--mzcs-accent);
       display: block;
     }
     .axis {
@@ -1324,12 +1416,25 @@ export class MzcsCard extends LitElement {
     .managerow.master {
       font-weight: 500;
     }
+    .swatch {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-right: 6px;
+      vertical-align: -1px;
+    }
+    .managerow input[type='color'] {
+      width: 44px;
+      height: 26px;
+      padding: 1px;
+    }
     .chip.togg {
       min-width: 44px;
     }
     .chip.togg.on {
-      background: #2bb673;
-      border-color: #2bb673;
+      background: var(--mzcs-good);
+      border-color: var(--mzcs-good);
       color: #fff;
     }
     .managerow input,

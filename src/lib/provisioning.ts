@@ -197,6 +197,11 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
     kind: 'template_sensor',
     spec: { name: 'Climate next block' },
   });
+  out.push({
+    id: globalEntityId('theme', p),
+    kind: 'helper',
+    spec: { name: 'Climate theme' },
+  });
 
   const auto = (key: string, zoneName?: string): DesiredObject => ({
     id: `automation:${automationUniqueId(p, zoneName ? `${key}_${zoneName.toLowerCase()}` : key)}`,

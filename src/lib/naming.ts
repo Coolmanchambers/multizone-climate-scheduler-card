@@ -28,7 +28,8 @@ export type GlobalClass =
   | 'steer_min_setpoint'
   | 'steer_max_setpoint'
   | 'steer_max_offset'
-  | 'next_block_sensor';
+  | 'next_block_sensor'
+  | 'theme';
 
 export type ObjectClass = ZoneClass | GlobalClass | 'zone_schedule';
 
@@ -66,6 +67,7 @@ const GLOBAL_CLASS_DEFS: Record<GlobalClass, { domain: string; suffix: string }>
   steer_max_setpoint: { domain: 'input_number', suffix: 'steer_max_setpoint' },
   steer_max_offset: { domain: 'input_number', suffix: 'steer_max_offset' },
   next_block_sensor: { domain: 'sensor', suffix: 'next_block' },
+  theme: { domain: 'input_text', suffix: 'theme' },
 };
 
 // Suffixes that may never be used as a season key or collide with a zone-class
