@@ -20,6 +20,9 @@ import {
 } from './ha-adapter';
 import { slugify, zoneEntityId, globalEntityId } from './lib/naming';
 import { deviationColor, formatDelta, sanitizeThresholds } from './lib/deviation';
+import { buildDesired, plan, type Plan, type ProvisionInput } from './lib/provisioning';
+import { defaultSchedules } from './lib/default-schedules';
+import { fetchExisting } from './registry-read';
 
 const MODE_LABELS: Record<string, string> = {
   heat: 'Heat',
@@ -40,6 +43,10 @@ export class MzcsCard extends LitElement {
   @state() private _config?: MzcsCardConfig;
   @state() private _zoneIndex = 0;
   @state() private _ctrlOpen = false;
+  @state() private _setupOpen = false;
+  @state() private _dryRun?: Plan;
+  @state() private _dryRunError?: string;
+  @state() private _dryRunning = false;
 
   public setConfig(config: MzcsCardConfig): void {
     if (!config.zones || !Array.isArray(config.zones) || config.zones.length < 1) {
@@ -89,10 +96,97 @@ export class MzcsCard extends LitElement {
     void setTemperature(this.hass, zone.entity, target);
   }
 
+  private _provisionInput(): ProvisionInput {
+    const cfg = this._config!;
+    const zones = cfg.zones.map((z) => ({ slug: slugify(z.name), name: z.name }));
+    const seasons = cfg.seasons ?? [
+      { key: 'summer', name: 'Summer', default_mode: 'cool' as const },
+      { key: 'winter', name: 'Winter', default_mode: 'heat_cool' as const },
+    ];
+    return {
+      prefix: this._prefix,
+      zones,
+      seasons,
+      schedules: defaultSchedules(
+        zones.map((z) => z.slug),
+        seasons,
+      ),
+      features: {
+        fan_timer: (this._config?.features?.fan_timer?.length ?? 3) > 0,
+        anomaly_alerts: this._config?.features?.anomaly_alerts ?? true,
+        steering: false,
+      },
+    };
+  }
+
+  private async _runDryRun(): Promise<void> {
+    if (!this.hass || this._dryRunning) return;
+    this._dryRunning = true;
+    this._dryRunError = undefined;
+    try {
+      const input = this._provisionInput();
+      const existing = await fetchExisting(
+        this.hass,
+        input.prefix,
+        input.zones.map((z) => z.slug),
+        input.seasons.map((s) => s.key),
+      );
+      this._dryRun = plan(buildDesired(input), existing);
+    } catch (e) {
+      this._dryRunError = e instanceof Error ? e.message : String(e);
+    } finally {
+      this._dryRunning = false;
+    }
+  }
+
+  private _renderSetup() {
+    const p = this._dryRun;
+    return html`
+      <div class="setup">
+        <p class="setup-title">Setup · dry run</p>
+        <p class="setup-sub">
+          Read-only preview of what Setup would create. Nothing is written from this screen.
+        </p>
+        <button class="chip" .disabled=${this._dryRunning} @click=${() => void this._runDryRun()}>
+          ${this._dryRunning ? 'Reading registry…' : 'Run dry-run preview'}
+        </button>
+        ${this._dryRunError ? html`<p class="setup-err">${this._dryRunError}</p>` : nothing}
+        ${p
+          ? html`
+              <div class="planwrap">
+                ${(
+                  [
+                    ['Create', p.create, ''],
+                    ['Adopt', p.adopt, ''],
+                    ['Update', p.update, ''],
+                    ['Delete', p.delete, 'del'],
+                    ['Unchanged', p.noop, 'quiet'],
+                  ] as const
+                ).map(
+                  ([label, items, cls]) => html`
+                    <p class="plan-h ${cls}">${label} (${items.length})</p>
+                    ${items.length > 0 && label !== 'Unchanged'
+                      ? html`<ul class="plan-list ${cls}">
+                          ${items.map((a) => html`<li>${a.id}</li>`)}
+                        </ul>`
+                      : nothing}
+                  `,
+                )}
+              </div>
+            `
+          : nothing}
+        <button class="chip" @click=${() => (this._setupOpen = false)}>Close</button>
+      </div>
+    `;
+  }
+
   protected render() {
     if (!this._config || !this.hass) return nothing;
     const zone = this._zone();
     if (!zone) return nothing;
+    if (this._setupOpen) {
+      return html`<ha-card><div class="wrap">${this._renderSetup()}</div></ha-card>`;
+    }
     const s = climateSummary(this.hass, zone.entity);
     const fanOn = fanTimerActive(
       this.hass,
@@ -128,6 +222,15 @@ export class MzcsCard extends LitElement {
                 </button>
               `,
             )}
+            <button
+              class="tab gear"
+              aria-label="Setup"
+              @click=${() => {
+                this._setupOpen = true;
+              }}
+            >
+              ⚙
+            </button>
           </div>
 
           <div class="hero">
@@ -445,6 +548,59 @@ export class MzcsCard extends LitElement {
     }
     .badge.red {
       background: #e5484d;
+    }
+    .tab.gear {
+      flex: 0 0 40px;
+      font-size: 14px;
+    }
+    .setup {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      align-items: flex-start;
+    }
+    .setup-title {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    .setup-sub {
+      margin: 0;
+      font-size: 12px;
+      color: var(--secondary-text-color, #9fb0bd);
+    }
+    .setup-err {
+      color: #e5484d;
+      font-size: 12px;
+    }
+    .planwrap {
+      width: 100%;
+      max-height: 320px;
+      overflow-y: auto;
+      border: 0.5px solid var(--divider-color, #33414c);
+      border-radius: 10px;
+      padding: 8px 10px;
+    }
+    .plan-h {
+      margin: 6px 0 2px;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .plan-h.del {
+      color: #e5484d;
+    }
+    .plan-h.quiet {
+      color: var(--secondary-text-color, #9fb0bd);
+      font-weight: 400;
+    }
+    .plan-list {
+      margin: 0 0 4px;
+      padding-left: 18px;
+      font-size: 11px;
+      color: var(--secondary-text-color, #9fb0bd);
+    }
+    .plan-list.del li {
+      color: #e5484d;
     }
   `;
 }

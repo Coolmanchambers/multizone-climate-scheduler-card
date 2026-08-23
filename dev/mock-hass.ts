@@ -89,6 +89,23 @@ export class MockHass implements HassLike {
 
   public async callWS(msg: Record<string, unknown>): Promise<unknown> {
     this.log.push({ domain: 'ws', service: String(msg.type), data: msg });
+    const t = String(msg.type);
+    if (t === 'timer/list') {
+      return Object.keys(this.states)
+        .filter((id) => id.startsWith('timer.'))
+        .map((id) => ({
+          id: id.slice('timer.'.length),
+          name: this.states[id]?.attributes.friendly_name,
+          restore: false,
+        }));
+    }
+    if (t === 'input_number/list') {
+      return Object.keys(this.states)
+        .filter((id) => id.startsWith('input_number.'))
+        .map((id) => ({ id: id.slice('input_number.'.length), min: 1, max: 15, step: 1 }));
+    }
+    if (t === 'input_select/list' || t === 'schedule/list') return [];
+    if (t === 'config/entity_registry/get_entries') return {};
     return {};
   }
 
