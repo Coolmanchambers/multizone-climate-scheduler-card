@@ -13,6 +13,9 @@ export default defineConfig({
     rollupOptions: {
       // Bundle everything (including Lit) - never rely on HA's internal Lit.
       external: [],
+      // Single-file output: dynamic imports (the editor) must inline, because
+      // only dist/multizone-climate-scheduler-card.js is tracked/served.
+      output: { inlineDynamicImports: true },
     },
   },
   test: {
