@@ -44,6 +44,71 @@ export function fanTimerActive(hass: HassLike, timerEntityId: string): boolean {
   return hass.states[timerEntityId]?.state === 'active';
 }
 
+export function entityExists(hass: HassLike, entityId: string): boolean {
+  return hass.states[entityId] !== undefined;
+}
+
+export function hvacModes(hass: HassLike, entityId: string): string[] {
+  const m = hass.states[entityId]?.attributes.hvac_modes;
+  return Array.isArray(m) ? m.filter((x): x is string => typeof x === 'string') : [];
+}
+
+export function ecoSupported(hass: HassLike, entityId: string): boolean {
+  const p = hass.states[entityId]?.attributes.preset_modes;
+  return Array.isArray(p) && p.includes('eco');
+}
+
+export function ecoActive(hass: HassLike, entityId: string): boolean {
+  return hass.states[entityId]?.attributes.preset_mode === 'eco';
+}
+
+export function numberHelperValue(hass: HassLike, entityId: string): number | null {
+  const e = hass.states[entityId];
+  if (!e) return null;
+  const v = Number(e.state);
+  return Number.isFinite(v) ? v : null;
+}
+
+export interface RoomReading {
+  entityId: string;
+  name: string;
+  temp: number | null;
+}
+
+export function roomReading(hass: HassLike, entityId: string): RoomReading {
+  const e = hass.states[entityId];
+  const name =
+    typeof e?.attributes.friendly_name === 'string'
+      ? e.attributes.friendly_name.replace(/ (Temperature|temperature)$/, '')
+      : entityId.split('.')[1] ?? entityId;
+  const v = e ? Number(e.state) : NaN;
+  return { entityId, name, temp: Number.isFinite(v) ? v : null };
+}
+
+export function setHvacMode(hass: HassLike, entityId: string, mode: string): Promise<unknown> {
+  return hass.callService('climate', 'set_hvac_mode', { entity_id: entityId, hvac_mode: mode });
+}
+
+export function setEco(hass: HassLike, entityId: string, on: boolean): Promise<unknown> {
+  return hass.callService('climate', 'set_preset_mode', {
+    entity_id: entityId,
+    preset_mode: on ? 'eco' : 'none',
+  });
+}
+
+export function startFanTimer(
+  hass: HassLike,
+  timerEntityId: string,
+  minutes: number,
+): Promise<unknown> {
+  const mm = String(minutes % 60).padStart(2, '0');
+  const hh = String(Math.floor(minutes / 60)).padStart(2, '0');
+  return hass.callService('timer', 'start', {
+    entity_id: timerEntityId,
+    duration: `${hh}:${mm}:00`,
+  });
+}
+
 export function setTemperature(
   hass: HassLike,
   entityId: string,

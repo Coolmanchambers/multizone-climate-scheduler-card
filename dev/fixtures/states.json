@@ -79,5 +79,33 @@
   "timer.climate_owners_office_fan": {
     "state": "idle",
     "attributes": { "duration": "0:30:00", "friendly_name": "Climate Office Fan" }
+  },
+  "sensor.guest_room_temperature": {
+    "state": "71.2",
+    "attributes": { "friendly_name": "Guest Room Temperature", "unit_of_measurement": "°F" }
+  },
+  "sensor.bedroom_1_temperature": {
+    "state": "77.8",
+    "attributes": { "friendly_name": "Bedroom 1 Temperature", "unit_of_measurement": "°F" }
+  },
+  "sensor.bedroom_2_temperature": {
+    "state": "72.4",
+    "attributes": { "friendly_name": "Bedroom 2 Temperature", "unit_of_measurement": "°F" }
+  },
+  "sensor.loft_temperature": {
+    "state": "81.1",
+    "attributes": { "friendly_name": "Loft Temperature", "unit_of_measurement": "°F" }
+  },
+  "sensor.dead_sensor_temperature": {
+    "state": "unavailable",
+    "attributes": { "friendly_name": "Dead Sensor Temperature" }
+  },
+  "input_number.climate_dev_green_max": {
+    "state": "2",
+    "attributes": { "friendly_name": "Climate deviation green max" }
+  },
+  "input_number.climate_dev_amber_max": {
+    "state": "4",
+    "attributes": { "friendly_name": "Climate deviation amber max" }
   }
 }

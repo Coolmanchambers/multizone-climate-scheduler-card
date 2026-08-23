@@ -21,7 +21,17 @@ const config: MzcsCardConfig = {
   prefix: 'climate',
   zones: [
     { entity: 'climate.nest_downstairs', name: 'Downstairs' },
-    { entity: 'climate.nest_upstairs', name: 'Upstairs' },
+    {
+      entity: 'climate.nest_upstairs',
+      name: 'Upstairs',
+      room_sensors: [
+        'sensor.guest_room_temperature',
+        'sensor.bedroom_1_temperature',
+        'sensor.bedroom_2_temperature',
+        'sensor.loft_temperature',
+        'sensor.dead_sensor_temperature',
+      ],
+    },
     { entity: 'climate.owner_s_office_mini_split', name: "the owner's Office" },
   ],
 };

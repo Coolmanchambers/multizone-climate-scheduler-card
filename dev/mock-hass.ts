@@ -60,6 +60,25 @@ export class MockHass implements HassLike {
         }
       });
     }
+    if (domain === 'climate' && service === 'set_hvac_mode' && entityId) {
+      this.mutate(() => {
+        const e = this.states[entityId];
+        if (e && typeof data?.hvac_mode === 'string') {
+          this.states[entityId] = { ...e, state: data.hvac_mode };
+        }
+      });
+    }
+    if (domain === 'climate' && service === 'set_preset_mode' && entityId) {
+      this.mutate(() => {
+        const e = this.states[entityId];
+        if (e && typeof data?.preset_mode === 'string') {
+          this.states[entityId] = {
+            ...e,
+            attributes: { ...e.attributes, preset_mode: data.preset_mode },
+          };
+        }
+      });
+    }
     if (domain === 'timer' && service === 'start' && entityId) {
       this.mutate(() => {
         const e = this.states[entityId];

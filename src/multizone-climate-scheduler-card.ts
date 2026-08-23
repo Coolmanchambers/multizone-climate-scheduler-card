@@ -3,8 +3,32 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { CARD_TYPE, CARD_NAME, CARD_VERSION } from './const';
 import type { MzcsCardConfig, ZoneConfig } from './types';
 import type { HassLike } from './ha-types';
-import { climateSummary, fanTimerActive, setTemperature } from './ha-adapter';
-import { slugify, zoneEntityId } from './lib/naming';
+import {
+  climateSummary,
+  fanTimerActive,
+  setTemperature,
+  entityExists,
+  hvacModes,
+  ecoSupported,
+  ecoActive,
+  numberHelperValue,
+  roomReading,
+  setHvacMode,
+  setEco,
+  startFanTimer,
+} from './ha-adapter';
+import { slugify, zoneEntityId, globalEntityId } from './lib/naming';
+import { deviationColor, formatDelta, sanitizeThresholds } from './lib/deviation';
+
+const MODE_LABELS: Record<string, string> = {
+  heat: 'Heat',
+  cool: 'Cool',
+  heat_cool: 'Heat·Cool',
+  off: 'Off',
+  auto: 'Auto',
+  dry: 'Dry',
+  fan_only: 'Fan only',
+};
 
 /* eslint-disable no-console */
 console.info(`%c ${CARD_NAME} %c v${CARD_VERSION}`, 'background:#1e88e5;color:#fff;padding:2px 6px;border-radius:4px 0 0 4px;', 'background:#243039;color:#fff;padding:2px 6px;border-radius:0 4px 4px 0;');
@@ -14,6 +38,7 @@ export class MzcsCard extends LitElement {
   @property({ attribute: false }) public hass?: HassLike;
   @state() private _config?: MzcsCardConfig;
   @state() private _zoneIndex = 0;
+  @state() private _ctrlOpen = false;
 
   public setConfig(config: MzcsCardConfig): void {
     if (!config.zones || !Array.isArray(config.zones) || config.zones.length < 1) {
@@ -128,8 +153,112 @@ export class MzcsCard extends LitElement {
               +
             </button>
           </div>
+
+          ${this._renderControls(zone.entity)} ${this._renderRooms(zone, s.setpoint)}
         </div>
       </ha-card>
+    `;
+  }
+
+  private _renderControls(entity: string) {
+    if (!this.hass) return nothing;
+    const hass = this.hass;
+    const zone = this._zone();
+    if (!zone) return nothing;
+    const modes = hvacModes(hass, entity);
+    const cur = hass.states[entity]?.state;
+    const eco = ecoSupported(hass, entity);
+    const timerId = zoneEntityId('fan_timer', this._prefix, slugify(zone.name));
+    const fanDurations = this._config?.features?.fan_timer ?? [15, 30, 60];
+    const hasTimer = entityExists(hass, timerId);
+    return html`
+      <button class="expander" @click=${() => (this._ctrlOpen = !this._ctrlOpen)}>
+        <span>Mode${hasTimer ? ' · Fan' : ''}${eco ? ' · Eco' : ''}</span>
+        <span aria-hidden="true">${this._ctrlOpen ? '▴' : '▾'}</span>
+      </button>
+      ${this._ctrlOpen
+        ? html`
+            <div class="ctrl">
+              <div class="chips">
+                ${modes.map(
+                  (m) => html`
+                    <button
+                      class=${cur === m ? 'chip mode-on' : 'chip'}
+                      @click=${() => void setHvacMode(hass, entity, m)}
+                    >
+                      ${MODE_LABELS[m] ?? m}
+                    </button>
+                  `,
+                )}
+                ${eco
+                  ? html`
+                      <button
+                        class=${ecoActive(hass, entity) ? 'chip eco eco-on' : 'chip eco'}
+                        @click=${() => void setEco(hass, entity, !ecoActive(hass, entity))}
+                      >
+                        Eco
+                      </button>
+                    `
+                  : nothing}
+              </div>
+              ${hasTimer
+                ? html`
+                    <div class="chips fanrow">
+                      <span class="fanlbl">Fan</span>
+                      ${fanDurations.map(
+                        (m) => html`
+                          <button
+                            class="chip"
+                            @click=${() => void startFanTimer(hass, timerId, m)}
+                          >
+                            ${m}m
+                          </button>
+                        `,
+                      )}
+                    </div>
+                  `
+                : nothing}
+            </div>
+          `
+        : nothing}
+    `;
+  }
+
+  private _renderRooms(zone: ZoneConfig, setpoint: number | null) {
+    if (!this.hass || !zone.room_sensors || zone.room_sensors.length === 0) return nothing;
+    const hass = this.hass;
+    const { greenMax, amberMax } = sanitizeThresholds(
+      numberHelperValue(hass, globalEntityId('dev_green_max', this._prefix)),
+      numberHelperValue(hass, globalEntityId('dev_amber_max', this._prefix)),
+    );
+    return html`
+      <div class="rooms">
+        ${zone.room_sensors.map((id) => {
+          const r = roomReading(hass, id);
+          if (r.temp == null || setpoint == null) {
+            return html`
+              <div class="room">
+                <span class="rname">${r.name}</span>
+                <span class="rtemp muted">${r.temp == null ? '—' : `${r.temp}°`}</span>
+              </div>
+            `;
+          }
+          // Round once so the badge color always agrees with the displayed number
+          // (4.1 must not display "+4°" in red).
+          const delta = Math.round(r.temp - setpoint);
+          return html`
+            <div class="room">
+              <span class="rname">${r.name}</span>
+              <span>
+                <span class="badge ${deviationColor(delta, greenMax, amberMax)}"
+                  >${formatDelta(delta)}</span
+                >
+                <span class="rtemp">${r.temp}°</span>
+              </span>
+            </div>
+          `;
+        })}
+      </div>
     `;
   }
 
@@ -219,6 +348,94 @@ export class MzcsCard extends LitElement {
       width: 36px;
       text-align: center;
       flex: none;
+    }
+    .expander {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: none;
+      border: none;
+      color: var(--secondary-text-color, #9fb0bd);
+      font-size: 12px;
+      padding: 10px 4px 6px;
+      cursor: pointer;
+    }
+    .ctrl {
+      padding: 2px 2px 8px;
+    }
+    .chips {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .chip {
+      padding: 6px 12px;
+      border-radius: 14px;
+      background: var(--card-background-color, #2b3844);
+      border: 0.5px solid var(--divider-color, #3d4a55);
+      color: var(--secondary-text-color, #9fb0bd);
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .chip.mode-on {
+      background: #1e88e5;
+      border-color: #1e88e5;
+      color: #fff;
+    }
+    .chip.eco {
+      border-color: #2bb673;
+      color: #2bb673;
+    }
+    .chip.eco-on {
+      background: #2bb673;
+      color: #fff;
+    }
+    .fanrow {
+      margin-top: 8px;
+      align-items: center;
+    }
+    .fanlbl {
+      font-size: 12px;
+      color: var(--secondary-text-color, #9fb0bd);
+      padding: 6px 0;
+    }
+    .rooms {
+      border-top: 0.5px solid var(--divider-color, #33414c);
+      margin-top: 6px;
+    }
+    .room {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 2px;
+      border-bottom: 0.5px solid var(--divider-color, #33414c);
+      font-size: 13px;
+    }
+    .room:last-child {
+      border-bottom: none;
+    }
+    .rtemp {
+      font-size: 14px;
+    }
+    .muted {
+      color: var(--disabled-text-color, #7a8894);
+    }
+    .badge {
+      font-size: 11px;
+      border-radius: 9px;
+      padding: 2px 7px;
+      margin-right: 8px;
+      color: #16202a;
+    }
+    .badge.green {
+      background: #2bb673;
+    }
+    .badge.amber {
+      background: #f59e0b;
+    }
+    .badge.red {
+      background: #e5484d;
     }
   `;
 }
