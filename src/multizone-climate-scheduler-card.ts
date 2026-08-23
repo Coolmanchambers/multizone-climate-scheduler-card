@@ -21,7 +21,21 @@ import {
   updateScheduleWeek,
   applyScheduleNow,
   errorText,
+  setNumberHelper,
+  selectOption,
 } from './ha-adapter';
+import type { GlobalClass } from './lib/naming';
+
+const MANAGE_TUNABLES: Array<{ cls: GlobalClass; label: string }> = [
+  { cls: 'dev_green_max', label: 'Room deviation · green up to (°)' },
+  { cls: 'dev_amber_max', label: 'Room deviation · amber up to (°)' },
+  { cls: 'runtime_alert_margin', label: 'Runtime alert margin (%)' },
+  { cls: 'runtime_alert_days', label: 'Runtime alert · consecutive days' },
+  { cls: 'runtime_learn_days', label: 'Runtime learn window (days)' },
+  { cls: 'cdd_base', label: 'Cooling degree-day base (°)' },
+  { cls: 'season_confirm_days', label: 'Season switch · confirm after (days)' },
+  { cls: 'season_dwell_days', label: 'Season switch · min dwell (days)' },
+];
 import {
   detectSets,
   rangesToDayBlocks,
@@ -206,8 +220,55 @@ export class MzcsCard extends LitElement {
               </div>
             `
           : nothing}
+        ${this._renderManage()}
         <button class="chip" @click=${() => (this._setupOpen = false)}>Close</button>
       </div>
+    `;
+  }
+
+  private _renderManage() {
+    const hass = this.hass;
+    if (!hass) return nothing;
+    const seasonSel = globalEntityId('season_select', this._prefix);
+    const season = hass.states[seasonSel];
+    const options = Array.isArray(season?.attributes.options)
+      ? (season!.attributes.options as string[])
+      : [];
+    const rows = MANAGE_TUNABLES.map((t) => ({
+      ...t,
+      id: globalEntityId(t.cls, this._prefix),
+    })).filter((t) => entityExists(hass, t.id));
+    if (!season && rows.length === 0) return nothing;
+    return html`
+      <p class="setup-title" style="margin-top:12px;">Manage</p>
+      ${season
+        ? html`
+            <div class="managerow">
+              <span>Active season</span>
+              <select
+                @change=${(e: Event) =>
+                  void selectOption(hass, seasonSel, (e.target as HTMLSelectElement).value)}
+              >
+                ${options.map(
+                  (o) => html`<option .value=${o} ?selected=${o === season.state}>${o}</option>`,
+                )}
+              </select>
+            </div>
+          `
+        : nothing}
+      ${rows.map(
+        (t) => html`
+          <div class="managerow">
+            <span>${t.label}</span>
+            <input
+              type="number"
+              .value=${hass.states[t.id]?.state ?? ''}
+              @change=${(e: Event) =>
+                void setNumberHelper(hass, t.id, Number((e.target as HTMLInputElement).value))}
+            />
+          </div>
+        `,
+      )}
     `;
   }
 
@@ -853,6 +914,25 @@ export class MzcsCard extends LitElement {
     }
     .schederr {
       color: #e5484d;
+      font-size: 12px;
+    }
+    .managerow {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      padding: 3px 0;
+    }
+    .managerow input,
+    .managerow select {
+      width: 90px;
+      background: var(--card-background-color, #16202a);
+      border: 0.5px solid var(--divider-color, #3d4a55);
+      border-radius: 6px;
+      color: var(--primary-text-color, #e8edf1);
+      padding: 4px 6px;
       font-size: 12px;
     }
   `;

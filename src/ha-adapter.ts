@@ -188,6 +188,22 @@ export function updateScheduleWeek(
   return hass.callWS(payload);
 }
 
+export function setNumberHelper(
+  hass: HassLike,
+  entityId: string,
+  value: number,
+): Promise<unknown> {
+  return hass.callService('input_number', 'set_value', { entity_id: entityId, value });
+}
+
+export function selectOption(
+  hass: HassLike,
+  entityId: string,
+  option: string,
+): Promise<unknown> {
+  return hass.callService('input_select', 'select_option', { entity_id: entityId, option });
+}
+
 export function errorText(e: unknown): string {
   if (e instanceof Error) return e.message;
   if (e && typeof e === 'object' && 'message' in e) return String((e as { message: unknown }).message);
