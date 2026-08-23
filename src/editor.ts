@@ -1,0 +1,374 @@
+// Visual config editor (S12a). Rendered by HA inside the card editor dialog.
+// Uses HA's own ha-selector elements (entity pickers etc.) - those custom
+// elements only register once a stock card editor has loaded, hence the
+// loadCardHelpers bootstrap in connectedCallback.
+import { LitElement, html, css, nothing } from 'lit';
+import { customElement, property, state } from 'lit/decorators.js';
+import type { HassLike } from './ha-types';
+import type { MzcsCardConfig, ZoneConfig, SeasonConfig, BlockMode } from './types';
+
+declare global {
+  interface Window {
+    loadCardHelpers?: () => Promise<{
+      createCardElement: (cfg: Record<string, unknown>) => {
+        constructor: { getConfigElement?: () => unknown };
+      };
+    }>;
+  }
+}
+
+let selectorsReady: Promise<void> | null = null;
+function ensureSelectors(): Promise<void> {
+  if (!selectorsReady) {
+    selectorsReady = (async () => {
+      if (customElements.get('ha-selector')) return;
+      try {
+        const helpers = await window.loadCardHelpers?.();
+        const card = helpers?.createCardElement({ type: 'entities', entities: [] });
+        await card?.constructor.getConfigElement?.();
+        await customElements.whenDefined('ha-selector');
+      } catch {
+        // Editor degrades to plain inputs if selectors never register.
+      }
+    })();
+  }
+  return selectorsReady;
+}
+
+const DEFAULT_SEASONS: SeasonConfig[] = [
+  { key: 'summer', name: 'Summer', default_mode: 'cool' },
+  { key: 'winter', name: 'Winter', default_mode: 'heat_cool' },
+];
+
+@customElement('multizone-climate-scheduler-card-editor')
+export class MzcsCardEditor extends LitElement {
+  @property({ attribute: false }) public hass?: HassLike;
+  @state() private _config?: MzcsCardConfig;
+  @state() private _ready = false;
+  @state() private _probe?: { ok: boolean; text: string };
+
+  public setConfig(config: MzcsCardConfig): void {
+    this._config = {
+      type: config.type,
+      prefix: config.prefix ?? 'climate',
+      zones: config.zones ?? [],
+      seasons: config.seasons ?? DEFAULT_SEASONS.map((s) => ({ ...s })),
+      season_switch: config.season_switch ?? 'semi',
+      weather_entity: config.weather_entity,
+      features: {
+        fan_timer: config.features?.fan_timer ?? [15, 30, 60],
+        anomaly_alerts: config.features?.anomaly_alerts ?? true,
+      },
+      notify_target: config.notify_target,
+    };
+  }
+
+  public connectedCallback(): void {
+    super.connectedCallback();
+    void ensureSelectors().then(() => {
+      this._ready = true;
+    });
+  }
+
+  private _emit(patch: Partial<MzcsCardConfig>): void {
+    if (!this._config) return;
+    this._config = { ...this._config, ...patch };
+    this.dispatchEvent(
+      new CustomEvent('config-changed', {
+        detail: { config: this._config },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  }
+
+  private _setZone(i: number, patch: Partial<ZoneConfig>): void {
+    const zones = (this._config?.zones ?? []).map((z, zi) => (zi === i ? { ...z, ...patch } : z));
+    this._emit({ zones });
+  }
+
+  private async _probeWeather(): Promise<void> {
+    const entity = this._config?.weather_entity;
+    if (!entity || !this.hass?.callWS) return;
+    this._probe = undefined;
+    try {
+      const res = (await this.hass.callWS({
+        type: 'call_service',
+        domain: 'weather',
+        service: 'get_forecasts',
+        service_data: { type: 'daily' },
+        target: { entity_id: entity },
+        return_response: true,
+      })) as { response?: Record<string, { forecast?: unknown[] }> };
+      const days = res?.response?.[entity]?.forecast?.length ?? 0;
+      this._probe =
+        days > 0
+          ? { ok: true, text: `Daily forecast supported (${days} days).` }
+          : { ok: false, text: 'No daily forecast - pick a different weather entity.' };
+    } catch {
+      this._probe = { ok: false, text: 'Probe unavailable - validation skipped.' };
+    }
+  }
+
+  private _selector(selector: Record<string, unknown>, value: unknown, onChange: (v: unknown) => void, label?: string) {
+    if (!this._ready || !customElements.get('ha-selector')) {
+      return html`<input
+        .value=${typeof value === 'string' ? value : ''}
+        placeholder=${label ?? ''}
+        @change=${(e: Event) => onChange((e.target as HTMLInputElement).value)}
+      />`;
+    }
+    return html`<ha-selector
+      .hass=${this.hass}
+      .selector=${selector}
+      .value=${value}
+      .label=${label}
+      @value-changed=${(e: CustomEvent) => onChange(e.detail.value)}
+    ></ha-selector>`;
+  }
+
+  protected render() {
+    const c = this._config;
+    if (!c) return nothing;
+    const zones = c.zones ?? [];
+    const seasons = c.seasons ?? [];
+    return html`
+      <div class="ed">
+        <h4>Zones (1-4)</h4>
+        ${zones.map(
+          (z, i) => html`
+            <div class="zone">
+              <div class="zonehead">
+                <span>Zone ${i + 1}</span>
+                <button
+                  class="link danger"
+                  @click=${() => this._emit({ zones: zones.filter((_, zi) => zi !== i) })}
+                >
+                  Remove
+                </button>
+              </div>
+              ${this._selector(
+                { entity: { domain: 'climate' } },
+                z.entity,
+                (v) => this._setZone(i, { entity: String(v ?? '') }),
+                'Thermostat',
+              )}
+              <input
+                class="namefield"
+                .value=${z.name ?? ''}
+                placeholder="Display name"
+                @change=${(e: Event) =>
+                  this._setZone(i, { name: (e.target as HTMLInputElement).value })}
+              />
+              ${this._selector(
+                { entity: { domain: 'sensor', device_class: 'temperature', multiple: true } },
+                z.room_sensors ?? [],
+                (v) => this._setZone(i, { room_sensors: (v as string[]) ?? [] }),
+                'Room sensors',
+              )}
+            </div>
+          `,
+        )}
+        ${zones.length < 4
+          ? html`<button
+              class="link"
+              @click=${() => this._emit({ zones: [...zones, { entity: '', name: `Zone ${zones.length + 1}` }] })}
+            >
+              + Add zone
+            </button>`
+          : nothing}
+
+        <h4>Seasons (1-4)</h4>
+        ${seasons.map(
+          (s, i) => html`
+            <div class="seasonrow">
+              <input
+                .value=${s.name}
+                @change=${(e: Event) => {
+                  const name = (e.target as HTMLInputElement).value;
+                  const next = seasons.map((x, xi) =>
+                    xi === i ? { ...x, name, key: name.toLowerCase().replace(/[^a-z0-9]+/g, '_') } : x,
+                  );
+                  this._emit({ seasons: next });
+                }}
+              />
+              <select
+                .value=${s.default_mode}
+                @change=${(e: Event) => {
+                  const mode = (e.target as HTMLSelectElement).value as BlockMode;
+                  this._emit({
+                    seasons: seasons.map((x, xi) => (xi === i ? { ...x, default_mode: mode } : x)),
+                  });
+                }}
+              >
+                <option value="cool">Cool</option>
+                <option value="heat">Heat</option>
+                <option value="heat_cool">Heat+Cool</option>
+              </select>
+              <button
+                class="link danger"
+                @click=${() => this._emit({ seasons: seasons.filter((_, xi) => xi !== i) })}
+              >
+                Remove
+              </button>
+            </div>
+          `,
+        )}
+        ${seasons.length < 4
+          ? html`<button
+              class="link"
+              @click=${() =>
+                this._emit({
+                  seasons: [
+                    ...seasons,
+                    { key: `season_${seasons.length + 1}`, name: `Season ${seasons.length + 1}`, default_mode: 'cool' },
+                  ],
+                })}
+            >
+              + Add season
+            </button>`
+          : nothing}
+
+        <h4>Season switching</h4>
+        <select
+          .value=${c.season_switch ?? 'semi'}
+          @change=${(e: Event) =>
+            this._emit({ season_switch: (e.target as HTMLSelectElement).value as MzcsCardConfig['season_switch'] })}
+        >
+          <option value="manual">Manual</option>
+          <option value="semi">Semi-auto (recommend + confirm)</option>
+          <option value="full">Full-auto</option>
+        </select>
+        ${(c.season_switch ?? 'semi') !== 'manual'
+          ? html`
+              ${this._selector(
+                { entity: { domain: 'weather' } },
+                c.weather_entity,
+                (v) => {
+                  this._probe = undefined;
+                  this._emit({ weather_entity: String(v ?? '') || undefined });
+                },
+                'Weather entity (daily forecast)',
+              )}
+              <button class="link" .disabled=${!c.weather_entity} @click=${() => void this._probeWeather()}>
+                Check daily forecast support
+              </button>
+              ${this._probe
+                ? html`<p class=${this._probe.ok ? 'ok' : 'bad'}>${this._probe.text}</p>`
+                : nothing}
+            `
+          : nothing}
+
+        <h4>Features</h4>
+        <label class="checkrow">
+          <input
+            type="checkbox"
+            .checked=${(c.features?.fan_timer?.length ?? 0) > 0}
+            @change=${(e: Event) =>
+              this._emit({
+                features: {
+                  ...c.features,
+                  fan_timer: (e.target as HTMLInputElement).checked ? [15, 30, 60] : [],
+                },
+              })}
+          />
+          Fan timer buttons (15/30/60)
+        </label>
+        <label class="checkrow">
+          <input
+            type="checkbox"
+            .checked=${c.features?.anomaly_alerts ?? true}
+            @change=${(e: Event) =>
+              this._emit({
+                features: { ...c.features, anomaly_alerts: (e.target as HTMLInputElement).checked },
+              })}
+          />
+          Runtime anomaly alerts
+        </label>
+
+        <h4>Advanced</h4>
+        <label class="fieldrow">
+          Entity prefix
+          <input
+            .value=${c.prefix ?? 'climate'}
+            @change=${(e: Event) => this._emit({ prefix: (e.target as HTMLInputElement).value || 'climate' })}
+          />
+        </label>
+      </div>
+    `;
+  }
+
+  static styles = css`
+    .ed {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 4px 0 12px;
+    }
+    h4 {
+      margin: 10px 0 2px;
+      font-size: 14px;
+    }
+    .zone {
+      border: 1px solid var(--divider-color, #444);
+      border-radius: 10px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .zonehead {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: 500;
+    }
+    .seasonrow {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 8px;
+      align-items: center;
+    }
+    .link {
+      background: none;
+      border: none;
+      color: var(--primary-color, #03a9f4);
+      cursor: pointer;
+      text-align: left;
+      padding: 4px 0;
+      font-size: 13px;
+    }
+    .link.danger {
+      color: var(--error-color, #e5484d);
+    }
+    input,
+    select {
+      padding: 8px;
+      border-radius: 6px;
+      border: 1px solid var(--divider-color, #444);
+      background: var(--card-background-color, transparent);
+      color: var(--primary-text-color, inherit);
+      font-size: 13px;
+    }
+    .checkrow,
+    .fieldrow {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+    }
+    .fieldrow input {
+      width: 120px;
+    }
+    .ok {
+      color: var(--success-color, #2bb673);
+      font-size: 12px;
+      margin: 0;
+    }
+    .bad {
+      color: var(--error-color, #e5484d);
+      font-size: 12px;
+      margin: 0;
+    }
+  `;
+}

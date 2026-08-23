@@ -168,8 +168,13 @@ export class MzcsCard extends LitElement {
     if (this._zoneIndex >= config.zones.length) this._zoneIndex = 0;
   }
 
+  public static async getConfigElement(): Promise<HTMLElement> {
+    await import('./editor');
+    return document.createElement('multizone-climate-scheduler-card-editor');
+  }
+
   public static getStubConfig(): Partial<MzcsCardConfig> {
-    return { zones: [] };
+    return { prefix: 'climate', zones: [] };
   }
 
   public getCardSize(): number {
