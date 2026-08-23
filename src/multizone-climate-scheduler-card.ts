@@ -36,6 +36,7 @@ import {
   type Segment,
   type SetpointChange,
 } from './lib/segments';
+import { computeVerdict } from './lib/verdict';
 import type { GlobalClass } from './lib/naming';
 
 const MANAGE_TUNABLES: Array<{ cls: GlobalClass; label: string }> = [
@@ -108,6 +109,8 @@ export class MzcsCard extends LitElement {
   @state() private _rtDayDetail?: { segs: Segment[]; bubs: SetpointChange[]; start: number; end: number };
   @state() private _rtDayLoading = false;
   private _rtDayCache = new Map<number, { segs: Segment[]; bubs: SetpointChange[]; start: number; end: number }>();
+  @state() private _rtRange: 7 | 30 = 7;
+  @state() private _rt30?: DailyRuntime[];
   @state() private _dryRun?: Plan;
   @state() private _dryRunError?: string;
   @state() private _dryRunning = false;
@@ -448,38 +451,116 @@ export class MzcsCard extends LitElement {
       .filter((d) => d.day < today.getTime())
       .sort((a, b) => b.day - a.day);
     const todayStart = today.getTime();
+    const expected = Number(
+      hass.states[zoneEntityId('expected_runtime', this._prefix, slug)]?.state,
+    );
+    const margin =
+      numberHelperValue(hass, globalEntityId('runtime_alert_margin', this._prefix)) ?? 35;
+    const hoursElapsed = (Date.now() - todayStart) / 3600_000;
+    const verdict = computeVerdict(
+      Number.isFinite(todayHours) ? todayHours : 0,
+      expected,
+      margin,
+      hoursElapsed,
+    );
     return html`
       <button class="schedrow" @click=${() => (this._rtOpen = !this._rtOpen)}>
-        <span>Runtime · Today <b class="rt-b">${todayLabel}</b></span>
+        <span
+          >Runtime · Today <b class="rt-b">${todayLabel}</b>${verdict.label
+            ? html` <span class="verdict ${verdict.status}">· ${verdict.label}</span>`
+            : nothing}</span
+        >
         <span aria-hidden="true">${this._rtOpen ? '▴' : '▾'}</span>
       </button>
       ${this._rtOpen
         ? html`
             <div class="schedbody">
-              ${this._renderPill(zone, 'Today', Number.isFinite(todayHours) ? todayHours : 0, todayStart, true)}
-              ${days.map((d) =>
-                this._renderPill(
-                  zone,
-                  new Date(d.day).toLocaleDateString(undefined, {
-                    weekday: 'short',
-                    day: 'numeric',
-                  }),
-                  d.hours,
-                  d.day,
-                  false,
-                ),
-              )}
-              ${days.length === 0
-                ? html`<p class="muted" style="font-size:11px;margin:6px 0;">
-                    History accrues daily - past days appear as statistics build up.
-                  </p>`
+              <div class="chips" style="margin-bottom:6px;">
+                <button
+                  class=${this._rtRange === 7 ? 'chip mode-on' : 'chip'}
+                  @click=${() => (this._rtRange = 7)}
+                >
+                  7 days
+                </button>
+                <button
+                  class=${this._rtRange === 30 ? 'chip mode-on' : 'chip'}
+                  @click=${() => {
+                    this._rtRange = 30;
+                    if (!this._rt30) {
+                      void fetchDailyRuntime(hass, todayId, 30).then((d) => {
+                        this._rt30 = d;
+                      });
+                    }
+                  }}
+                >
+                  30 days
+                </button>
+              </div>
+              ${this._rtRange === 30 ? this._render30() : nothing}
+              ${this._rtRange === 7
+                ? html`${this._renderPill(zone, 'Today', Number.isFinite(todayHours) ? todayHours : 0, todayStart, true)}`
                 : nothing}
-              <p class="muted" style="font-size:10px;margin:6px 0 0;">
-                Tap a day for its run segments and setpoint changes.
-              </p>
+              ${this._rtRange === 7
+                ? html`
+                    ${days.map((d) =>
+                      this._renderPill(
+                        zone,
+                        new Date(d.day).toLocaleDateString(undefined, {
+                          weekday: 'short',
+                          day: 'numeric',
+                        }),
+                        d.hours,
+                        d.day,
+                        false,
+                      ),
+                    )}
+                    ${days.length === 0
+                      ? html`<p class="muted" style="font-size:11px;margin:6px 0;">
+                          History accrues daily - past days appear as statistics build up.
+                        </p>`
+                      : nothing}
+                    <p class="muted" style="font-size:10px;margin:6px 0 0;">
+                      Tap a day for its run segments and setpoint changes.
+                    </p>
+                  `
+                : nothing}
             </div>
           `
         : nothing}
+    `;
+  }
+
+  private _render30() {
+    const rows = this._rt30;
+    if (!rows) return html`<p class="muted" style="font-size:11px;">Loading…</p>`;
+    if (rows.length === 0) {
+      return html`<p class="muted" style="font-size:11px;">
+        Long-term statistics build daily - the 30-day view fills in as days accumulate.
+      </p>`;
+    }
+    const sorted = [...rows].sort((a, b) => a.day - b.day);
+    const max = Math.max(...sorted.map((r) => r.hours), 1);
+    const avg = sorted.reduce((a, r) => a + r.hours, 0) / sorted.length;
+    const fmtDay = (t: number) =>
+      new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    return html`
+      <div class="cols">
+        ${sorted.map(
+          (r) => html`<span
+            class="col"
+            title="${fmtDay(r.day)}: ${formatHoursQuarter(r.hours)}"
+            style="height: ${Math.max(6, (r.hours / max) * 64).toFixed(0)}px"
+          ></span>`,
+        )}
+      </div>
+      <div class="axis">
+        <span>${fmtDay(sorted[0]!.day)}</span>
+        <span>${fmtDay(sorted[sorted.length - 1]!.day)}</span>
+      </div>
+      <p class="muted" style="font-size:11px;margin:6px 0 0;">
+        Avg <b class="rt-b">${formatHoursQuarter(avg)}</b> · Max
+        <b class="rt-b">${formatHoursQuarter(max)}</b> · from long-term statistics (kept forever)
+      </p>
     `;
   }
 
@@ -1135,6 +1216,27 @@ export class MzcsCard extends LitElement {
     .rt-b {
       color: var(--primary-text-color, #fff);
       font-weight: 500;
+    }
+    .verdict.normal {
+      color: #2bb673;
+    }
+    .verdict.high {
+      color: #f59e0b;
+    }
+    .verdict.learning {
+      color: var(--secondary-text-color, #9fb0bd);
+    }
+    .cols {
+      display: flex;
+      align-items: flex-end;
+      gap: 2px;
+      height: 64px;
+    }
+    .col {
+      flex: 1;
+      border-radius: 2px 2px 0 0;
+      background: #1e88e5;
+      display: block;
     }
     .pillrow {
       display: flex;
