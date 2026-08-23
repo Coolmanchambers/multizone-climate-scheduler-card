@@ -107,5 +107,21 @@
   "input_number.climate_dev_amber_max": {
     "state": "4",
     "attributes": { "friendly_name": "Climate deviation amber max" }
+  },
+  "input_select.climate_season": {
+    "state": "Summer",
+    "attributes": { "friendly_name": "Climate Season", "options": ["Summer", "Winter"] }
+  },
+  "input_text.climate_upstairs_applied_block": {
+    "state": "Wake",
+    "attributes": { "friendly_name": "Climate Upstairs Applied Block" }
+  },
+  "schedule.climate_upstairs_summer": {
+    "state": "on",
+    "attributes": { "friendly_name": "Climate Upstairs Summer", "block": "Wake", "mode": "cool", "cool_temp": 78 }
+  },
+  "automation.climate_schedule_engine": {
+    "state": "on",
+    "attributes": { "friendly_name": "Climate: schedule engine", "id": "climate_mzcs_engine" }
   }
 }

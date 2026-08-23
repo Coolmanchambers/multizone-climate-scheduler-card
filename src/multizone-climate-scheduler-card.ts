@@ -17,7 +17,32 @@ import {
   setEco,
   startFanTimer,
   clampSetpoint,
+  fetchScheduleConfig,
+  updateScheduleWeek,
+  applyScheduleNow,
 } from './ha-adapter';
+import {
+  detectSets,
+  rangesToDayBlocks,
+  nextBlockAfter,
+  editBlockInSet,
+  type Week,
+} from './lib/schedule-view';
+import type { DayKey, TimeRange } from './lib/schedule-ranges';
+
+function fmtTime(t: string): string {
+  const [hRaw, m] = t.split(':');
+  let h = Number(hRaw);
+  const ap = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 === 0 ? 12 : h % 12;
+  return `${h}:${m} ${ap}`;
+}
+
+const SET_LABELS: Record<string, string> = {
+  all: 'Every day',
+  wd: 'Weekdays',
+  we: 'Weekend',
+};
 import { slugify, zoneEntityId, globalEntityId } from './lib/naming';
 import { deviationColor, formatDelta, sanitizeThresholds } from './lib/deviation';
 import { buildDesired, plan, type Plan, type ProvisionInput } from './lib/provisioning';
@@ -44,6 +69,10 @@ export class MzcsCard extends LitElement {
   @state() private _zoneIndex = 0;
   @state() private _ctrlOpen = false;
   @state() private _setupOpen = false;
+  @state() private _schedOpen = false;
+  @state() private _schedWeek?: Week;
+  @state() private _schedError?: string;
+  @state() private _schedBusy = false;
   @state() private _dryRun?: Plan;
   @state() private _dryRunError?: string;
   @state() private _dryRunning = false;
@@ -267,8 +296,159 @@ export class MzcsCard extends LitElement {
           </div>
 
           ${this._renderControls(zone.entity)} ${this._renderRooms(zone, s.setpoint)}
+          ${this._renderSchedule(zone)}
         </div>
       </ha-card>
+    `;
+  }
+
+  private _activeSeasonKey(): string | null {
+    const sel = this.hass?.states[globalEntityId('season_select', this._prefix)];
+    return sel && sel.state !== 'unknown' ? slugify(sel.state) : null;
+  }
+
+  private _scheduleEntityId(zone: ZoneConfig): string | null {
+    const season = this._activeSeasonKey();
+    if (!season) return null;
+    return `schedule.${this._prefix}_${slugify(zone.name)}_${season}`;
+  }
+
+  private async _loadWeek(zone: ZoneConfig): Promise<void> {
+    if (!this.hass) return;
+    const schedId = this._scheduleEntityId(zone);
+    if (!schedId || !entityExists(this.hass, schedId)) {
+      this._schedWeek = undefined;
+      return;
+    }
+    this._schedBusy = true;
+    try {
+      const cfg = await fetchScheduleConfig(this.hass, schedId);
+      this._schedWeek = (cfg?.week as Week | undefined) ?? undefined;
+      this._schedError = cfg ? undefined : 'Could not load schedule config.';
+    } catch (e) {
+      this._schedError = e instanceof Error ? e.message : String(e);
+    } finally {
+      this._schedBusy = false;
+    }
+  }
+
+  private async _saveBlockEdit(
+    zone: ZoneConfig,
+    setDays: DayKey[],
+    originalTime: string,
+    patch: { time?: string; cool_temp?: number },
+  ): Promise<void> {
+    if (!this.hass || !this._schedWeek) return;
+    const schedId = this._scheduleEntityId(zone);
+    if (!schedId) return;
+    this._schedBusy = true;
+    try {
+      const newWeek = editBlockInSet(this._schedWeek, setDays, originalTime, patch);
+      await updateScheduleWeek(
+        this.hass,
+        schedId,
+        newWeek as unknown as Record<string, unknown>,
+      );
+      this._schedWeek = newWeek;
+      this._schedError = undefined;
+    } catch (e) {
+      this._schedError = e instanceof Error ? e.message : String(e);
+    } finally {
+      this._schedBusy = false;
+    }
+  }
+
+  private _schedLoadedFor?: string;
+
+  private _renderSchedule(zone: ZoneConfig) {
+    if (!this.hass) return nothing;
+    const schedId = this._scheduleEntityId(zone);
+    if (!schedId || !entityExists(this.hass, schedId)) return nothing;
+    if (this._schedLoadedFor !== schedId && !this._schedBusy) {
+      this._schedLoadedFor = schedId;
+      this._schedWeek = undefined;
+      queueMicrotask(() => void this._loadWeek(zone));
+    }
+    const seasonName =
+      this.hass.states[globalEntityId('season_select', this._prefix)]?.state ?? '';
+    const week = this._schedWeek;
+    const next = week ? nextBlockAfter(week, new Date()) : null;
+    const nextLine = next
+      ? `Next · ${fmtTime(next.time)} ${next.name} → ${next.cool_temp ?? next.heat_temp}°`
+      : 'Schedule';
+    return html`
+      <button
+        class="schedrow"
+        @click=${() => {
+          this._schedOpen = !this._schedOpen;
+          if (!this._schedWeek) void this._loadWeek(zone);
+        }}
+      >
+        <span>${nextLine} <span class="season">· ${seasonName}</span></span>
+        <span aria-hidden="true">${this._schedOpen ? '▴' : '▾'}</span>
+      </button>
+      ${this._schedOpen ? this._renderScheduleBody(zone) : nothing}
+    `;
+  }
+
+  private _renderScheduleBody(zone: ZoneConfig) {
+    if (this._schedBusy && !this._schedWeek) return html`<p class="muted pad">Loading…</p>`;
+    if (this._schedError) return html`<p class="schederr pad">${this._schedError}</p>`;
+    const week = this._schedWeek;
+    if (!week) return html`<p class="muted pad">No schedule data.</p>`;
+    const det = detectSets(week);
+    const today = new Date().getDay();
+    const todayKey = (['sunday','monday','tuesday','wednesday','thursday','friday','saturday'] as DayKey[])[today]!;
+    return html`
+      <div class="schedbody">
+        ${Object.entries(det.sets).map(([setKey, days]) => {
+          const blocks = rangesToDayBlocks((week[days[0]!] ?? []) as TimeRange[]);
+          const isToday = days.includes(todayKey);
+          return html`
+            <p class="sethead">
+              ${SET_LABELS[setKey] ?? setKey}${isToday ? html` <span class="today">today</span>` : nothing}
+            </p>
+            ${blocks.map(
+              (b) => html`
+                <div class="blockrow">
+                  <input
+                    class="btime"
+                    type="time"
+                    .value=${b.time}
+                    @change=${(e: Event) =>
+                      void this._saveBlockEdit(zone, days, b.time, {
+                        time: (e.target as HTMLInputElement).value,
+                      })}
+                  />
+                  <span class="bname">${b.name}</span>
+                  <input
+                    class="btemp"
+                    type="number"
+                    .value=${String(b.cool_temp ?? b.heat_temp ?? '')}
+                    @change=${(e: Event) =>
+                      void this._saveBlockEdit(zone, days, b.time, {
+                        cool_temp: Number((e.target as HTMLInputElement).value),
+                      })}
+                  />
+                </div>
+              `,
+            )}
+          `;
+        })}
+        <div class="schedactions">
+          <button
+            class="chip"
+            .disabled=${this._schedBusy}
+            @click=${() => {
+              const marker = zoneEntityId('applied_block_marker', this._prefix, slugify(zone.name));
+              void applyScheduleNow(this.hass!, marker, 'automation.climate_schedule_engine');
+            }}
+          >
+            Apply now
+          </button>
+          <span class="muted">Edits apply at the next block; Apply now re-asserts immediately.</span>
+        </div>
+      </div>
     `;
   }
 
@@ -601,6 +781,75 @@ export class MzcsCard extends LitElement {
     }
     .plan-list.del li {
       color: #e5484d;
+    }
+    .schedrow {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--secondary-background-color, #243039);
+      border: none;
+      border-radius: 12px;
+      color: var(--primary-text-color, #c8d4dc);
+      font-size: 12px;
+      padding: 10px 12px;
+      margin-top: 10px;
+      cursor: pointer;
+    }
+    .season {
+      color: #f59e0b;
+    }
+    .schedbody {
+      background: var(--secondary-background-color, #243039);
+      border-radius: 0 0 12px 12px;
+      padding: 4px 12px 10px;
+      margin-top: -8px;
+    }
+    .sethead {
+      margin: 8px 0 2px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .today {
+      font-size: 10px;
+      color: #1e88e5;
+      font-weight: 400;
+    }
+    .blockrow {
+      display: grid;
+      grid-template-columns: 92px 1fr 56px;
+      gap: 8px;
+      align-items: center;
+      padding: 3px 0;
+      font-size: 12px;
+    }
+    .btime,
+    .btemp {
+      background: var(--card-background-color, #16202a);
+      border: 0.5px solid var(--divider-color, #3d4a55);
+      border-radius: 6px;
+      color: var(--primary-text-color, #e8edf1);
+      padding: 4px 6px;
+      font-size: 12px;
+    }
+    .bname {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .schedactions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 8px;
+      font-size: 11px;
+    }
+    .pad {
+      padding: 8px 12px;
+    }
+    .schederr {
+      color: #e5484d;
+      font-size: 12px;
     }
   `;
 }

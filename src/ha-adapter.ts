@@ -142,6 +142,61 @@ export function clampSetpoint(
   return Math.min(hi, Math.max(lo, target));
 }
 
+export interface ScheduleConfig {
+  id: string;
+  name?: string;
+  week: Record<string, unknown>;
+}
+
+const DAY_KEYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+
+export async function fetchScheduleConfig(
+  hass: HassLike,
+  scheduleEntityId: string,
+): Promise<ScheduleConfig | null> {
+  if (!hass.callWS) return null;
+  const objectId = scheduleEntityId.split('.')[1];
+  try {
+    const items = (await hass.callWS({ type: 'schedule/list' })) as Array<
+      Record<string, unknown>
+    >;
+    const item = items.find((i) => i.id === objectId);
+    if (!item) return null;
+    const week: Record<string, unknown> = {};
+    for (const d of DAY_KEYS) if (item[d]) week[d] = item[d];
+    return { id: String(item.id), name: typeof item.name === 'string' ? item.name : undefined, week };
+  } catch {
+    return null;
+  }
+}
+
+export function updateScheduleWeek(
+  hass: HassLike,
+  scheduleEntityId: string,
+  week: Record<string, unknown>,
+): Promise<unknown> {
+  if (!hass.callWS) return Promise.reject(new Error('callWS unavailable'));
+  const objectId = scheduleEntityId.split('.')[1];
+  const payload: Record<string, unknown> = { type: 'schedule/update', schedule_id: objectId };
+  for (const d of DAY_KEYS) payload[d] = (week as Record<string, unknown>)[d] ?? [];
+  return hass.callWS(payload);
+}
+
+/** Clear the zone's applied-block marker and re-trigger the engine (Apply now). */
+export async function applyScheduleNow(
+  hass: HassLike,
+  markerEntityId: string,
+  engineAutomationEntityId: string,
+): Promise<void> {
+  await hass.callService('input_text', 'set_value', {
+    entity_id: markerEntityId,
+    value: '',
+  });
+  await hass.callService('automation', 'trigger', {
+    entity_id: engineAutomationEntityId,
+  });
+}
+
 export function setTemperature(
   hass: HassLike,
   entityId: string,

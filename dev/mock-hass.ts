@@ -104,10 +104,45 @@ export class MockHass implements HassLike {
         .filter((id) => id.startsWith('input_number.'))
         .map((id) => ({ id: id.slice('input_number.'.length), min: 1, max: 15, step: 1 }));
     }
-    if (t === 'input_select/list' || t === 'schedule/list') return [];
+    if (t === 'input_select/list') return [];
+    if (t === 'schedule/list') return [this.scheduleFixture];
+    if (t === 'schedule/update') {
+      const { type: _t, schedule_id: _id, ...days } = msg;
+      this.scheduleFixture = { ...this.scheduleFixture, ...days };
+      return this.scheduleFixture;
+    }
     if (t === 'config/entity_registry/get_entries') return {};
     return {};
   }
+
+  /** Upstairs Summer weekend/weekday week matching the prod S7 provisioning. */
+  public scheduleFixture: Record<string, unknown> = (() => {
+    const wd = [
+      { from: '00:00:00', to: '06:00:00', data: { block: 'Sleep', mode: 'cool', cool_temp: 76 } },
+      { from: '06:00:00', to: '08:00:00', data: { block: 'Wake', mode: 'cool', cool_temp: 78 } },
+      { from: '08:00:00', to: '14:00:00', data: { block: 'Away', mode: 'cool', cool_temp: 80 } },
+      { from: '14:00:00', to: '16:00:00', data: { block: 'Pre-cool', mode: 'cool', cool_temp: 76 } },
+      { from: '16:00:00', to: '18:45:00', data: { block: 'On-peak', mode: 'cool', cool_temp: 79 } },
+      { from: '18:45:00', to: '21:30:00', data: { block: 'Evening', mode: 'cool', cool_temp: 77 } },
+      { from: '21:30:00', to: '24:00:00', data: { block: 'Sleep', mode: 'cool', cool_temp: 76 } },
+    ];
+    const we = [
+      { from: '00:00:00', to: '07:30:00', data: { block: 'Sleep', mode: 'cool', cool_temp: 76 } },
+      { from: '07:30:00', to: '21:30:00', data: { block: 'Wake', mode: 'cool', cool_temp: 78 } },
+      { from: '21:30:00', to: '24:00:00', data: { block: 'Sleep', mode: 'cool', cool_temp: 76 } },
+    ];
+    return {
+      id: 'climate_upstairs_summer',
+      name: 'Climate Upstairs Summer',
+      monday: wd,
+      tuesday: wd,
+      wednesday: wd,
+      thursday: wd,
+      friday: wd,
+      saturday: we,
+      sunday: we,
+    };
+  })();
 
   /** Harness helper: flip an entity's state/attributes and notify. */
   public set(entityId: string, patch: Partial<HassEntity>): void {
