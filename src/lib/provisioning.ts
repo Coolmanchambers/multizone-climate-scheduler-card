@@ -131,6 +131,11 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
       kind: 'helper',
       spec: { name: `Climate ${z.name} applied block` },
     });
+    out.push({
+      id: zoneEntityId('zone_enabled', p, z.slug),
+      kind: 'helper',
+      spec: { name: `Climate ${z.name} enabled` },
+    });
     if (input.features.steering) {
       out.push({
         id: zoneEntityId('target_room_select', p, z.slug),

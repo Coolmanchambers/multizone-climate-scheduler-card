@@ -25,6 +25,7 @@ const ZONE_CLASSES: ZoneClass[] = [
   'target_room_select',
   'sensor_schedule',
   'applied_block_marker',
+  'zone_enabled',
 ];
 
 const GLOBAL_CLASSES: GlobalClass[] = [

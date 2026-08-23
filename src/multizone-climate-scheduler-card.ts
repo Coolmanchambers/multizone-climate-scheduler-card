@@ -23,6 +23,7 @@ import {
   errorText,
   setNumberHelper,
   selectOption,
+  setZoneEnabled,
 } from './ha-adapter';
 import type { GlobalClass } from './lib/naming';
 
@@ -239,8 +240,49 @@ export class MzcsCard extends LitElement {
       id: globalEntityId(t.cls, this._prefix),
     })).filter((t) => entityExists(hass, t.id));
     if (!season && rows.length === 0) return nothing;
+    const zones = (this._config?.zones ?? []).map((z) => {
+      const slug = slugify(z.name);
+      return {
+        name: z.name,
+        enableId: zoneEntityId('zone_enabled', this._prefix, slug),
+        markerId: zoneEntityId('applied_block_marker', this._prefix, slug),
+      };
+    }).filter((z) => entityExists(hass, z.enableId));
+    const allOn = zones.length > 0 && zones.every((z) => hass.states[z.enableId]?.state === 'on');
     return html`
       <p class="setup-title" style="margin-top:12px;">Manage</p>
+      ${zones.length > 0
+        ? html`
+            <div class="managerow master">
+              <span>Scheduling · all zones</span>
+              <button
+                class=${allOn ? 'chip togg on' : 'chip togg'}
+                @click=${() => {
+                  for (const z of zones) void setZoneEnabled(hass, z.enableId, z.markerId, !allOn);
+                }}
+              >
+                ${allOn ? 'On' : 'Off'}
+              </button>
+            </div>
+            ${zones.map((z) => {
+              const on = hass.states[z.enableId]?.state === 'on';
+              return html`
+                <div class="managerow">
+                  <span>${z.name} scheduling</span>
+                  <button
+                    class=${on ? 'chip togg on' : 'chip togg'}
+                    @click=${() => void setZoneEnabled(hass, z.enableId, z.markerId, !on)}
+                  >
+                    ${on ? 'On' : 'Off'}
+                  </button>
+                </div>
+              `;
+            })}
+            <p class="muted" style="font-size:11px;margin:2px 0 6px;">
+              Off = the engine stands down and the thermostat's own app schedule takes over.
+            </p>
+          `
+        : nothing}
       ${season
         ? html`
             <div class="managerow">
@@ -924,6 +966,17 @@ export class MzcsCard extends LitElement {
       gap: 10px;
       font-size: 12px;
       padding: 3px 0;
+    }
+    .managerow.master {
+      font-weight: 500;
+    }
+    .chip.togg {
+      min-width: 44px;
+    }
+    .chip.togg.on {
+      background: #2bb673;
+      border-color: #2bb673;
+      color: #fff;
     }
     .managerow input,
     .managerow select {

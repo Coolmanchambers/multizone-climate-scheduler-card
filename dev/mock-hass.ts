@@ -79,6 +79,18 @@ export class MockHass implements HassLike {
         }
       });
     }
+    if (domain === 'input_boolean' && (service === 'turn_on' || service === 'turn_off') && entityId) {
+      this.mutate(() => {
+        const e = this.states[entityId];
+        if (e) this.states[entityId] = { ...e, state: service === 'turn_on' ? 'on' : 'off' };
+      });
+    }
+    if (domain === 'input_text' && service === 'set_value' && entityId) {
+      this.mutate(() => {
+        const e = this.states[entityId];
+        if (e) this.states[entityId] = { ...e, state: String(data?.value ?? '') };
+      });
+    }
     if (domain === 'timer' && service === 'start' && entityId) {
       this.mutate(() => {
         const e = this.states[entityId];

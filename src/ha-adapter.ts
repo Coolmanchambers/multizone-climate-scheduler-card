@@ -204,6 +204,26 @@ export function selectOption(
   return hass.callService('input_select', 'select_option', { entity_id: entityId, option });
 }
 
+/**
+ * Enable/disable a zone's scheduling. On ENABLE the applied-block marker is
+ * cleared so the engine re-asserts the current block at the next trigger -
+ * without this, a stale marker matching the current block name would leave the
+ * external app's setpoints in place indefinitely.
+ */
+export async function setZoneEnabled(
+  hass: HassLike,
+  enableEntityId: string,
+  markerEntityId: string,
+  on: boolean,
+): Promise<void> {
+  await hass.callService('input_boolean', on ? 'turn_on' : 'turn_off', {
+    entity_id: enableEntityId,
+  });
+  if (on) {
+    await hass.callService('input_text', 'set_value', { entity_id: markerEntityId, value: '' });
+  }
+}
+
 export function errorText(e: unknown): string {
   if (e instanceof Error) return e.message;
   if (e && typeof e === 'object' && 'message' in e) return String((e as { message: unknown }).message);
