@@ -16,6 +16,7 @@ import {
   setHvacMode,
   setEco,
   startFanTimer,
+  clampSetpoint,
 } from './ha-adapter';
 import { slugify, zoneEntityId, globalEntityId } from './lib/naming';
 import { deviationColor, formatDelta, sanitizeThresholds } from './lib/deviation';
@@ -77,7 +78,15 @@ export class MzcsCard extends LitElement {
     if (!zone || !this.hass) return;
     const s = climateSummary(this.hass, zone.entity);
     if (s.setpoint == null) return;
-    void setTemperature(this.hass, zone.entity, s.setpoint + delta);
+    const attrs = this.hass.states[zone.entity]?.attributes;
+    const target = clampSetpoint(
+      s.setpoint + delta,
+      s.setpoint,
+      attrs?.min_temp,
+      attrs?.max_temp,
+    );
+    if (target === s.setpoint) return;
+    void setTemperature(this.hass, zone.entity, target);
   }
 
   protected render() {

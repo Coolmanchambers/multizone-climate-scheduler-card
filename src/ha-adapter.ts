@@ -109,6 +109,26 @@ export function startFanTimer(
   });
 }
 
+/**
+ * Clamp a target setpoint to the entity's min/max ONLY when those bounds are
+ * plausible for the current setpoint's unit. Real-world quirk this guards:
+ * SmartThings mini-splits report min_temp/max_temp in Celsius (7/35) while
+ * temperatures are Fahrenheit - naive clamping would slam 78°F down to 35.
+ */
+export function clampSetpoint(
+  target: number,
+  current: number | null,
+  min: unknown,
+  max: unknown,
+): number {
+  const lo = typeof min === 'number' ? min : null;
+  const hi = typeof max === 'number' ? max : null;
+  const boundsPlausible =
+    lo != null && hi != null && lo < hi && current != null && current >= lo && current <= hi;
+  if (!boundsPlausible) return target;
+  return Math.min(hi, Math.max(lo, target));
+}
+
 export function setTemperature(
   hass: HassLike,
   entityId: string,
