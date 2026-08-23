@@ -124,6 +124,20 @@ export class MockHass implements HassLike {
       return this.scheduleFixture;
     }
     if (t === 'config/entity_registry/get_entries') return {};
+    if (t === 'recorder/statistics_during_period') {
+      const ids = (msg.statistic_ids as string[]) ?? [];
+      const out: Record<string, Array<{ start: number; max: number }>> = {};
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const vals = [9.5, 10.25, 11.5, 9.5, 9.25, 9.5];
+      for (const id of ids) {
+        out[id] = vals.map((v, i) => ({
+          start: today.getTime() - (i + 1) * 86400000,
+          max: v,
+        }));
+      }
+      return out;
+    }
     return {};
   }
 

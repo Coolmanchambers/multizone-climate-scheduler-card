@@ -227,6 +227,43 @@ export async function setZoneEnabled(
   });
 }
 
+export interface DailyRuntime {
+  /** local midnight epoch ms for the day */
+  day: number;
+  hours: number;
+}
+
+/**
+ * Daily runtime totals from long-term statistics of the history_stats sensor
+ * (resets at midnight → the day's max IS the day's total). Today's live value
+ * comes from the sensor state instead; LTS lags by up to an hour.
+ */
+export async function fetchDailyRuntime(
+  hass: HassLike,
+  runtimeSensorId: string,
+  days: number,
+): Promise<DailyRuntime[]> {
+  if (!hass.callWS) return [];
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - (days - 1));
+  try {
+    const res = (await hass.callWS({
+      type: 'recorder/statistics_during_period',
+      start_time: start.toISOString(),
+      statistic_ids: [runtimeSensorId],
+      period: 'day',
+      types: ['max'],
+    })) as Record<string, Array<{ start: number; max?: number | null }>>;
+    const rows = res?.[runtimeSensorId] ?? [];
+    return rows
+      .filter((r) => typeof r.max === 'number')
+      .map((r) => ({ day: r.start, hours: r.max as number }));
+  } catch {
+    return [];
+  }
+}
+
 export function errorText(e: unknown): string {
   if (e instanceof Error) return e.message;
   if (e && typeof e === 'object' && 'message' in e) return String((e as { message: unknown }).message);

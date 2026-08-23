@@ -120,6 +120,10 @@
     "state": "on",
     "attributes": { "friendly_name": "Climate Upstairs Summer", "block": "Wake", "mode": "cool", "cool_temp": 78 }
   },
+  "sensor.climate_upstairs_runtime_today": {
+    "state": "6.27",
+    "attributes": { "friendly_name": "Climate Upstairs Runtime Today", "unit_of_measurement": "h" }
+  },
   "automation.climate_schedule_engine": {
     "state": "on",
     "attributes": { "friendly_name": "Climate: schedule engine", "id": "climate_mzcs_engine" }

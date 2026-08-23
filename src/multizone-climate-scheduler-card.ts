@@ -24,7 +24,10 @@ import {
   setNumberHelper,
   selectOption,
   setZoneEnabled,
+  fetchDailyRuntime,
+  type DailyRuntime,
 } from './ha-adapter';
+import { formatHoursQuarter } from './lib/segments';
 import type { GlobalClass } from './lib/naming';
 
 const MANAGE_TUNABLES: Array<{ cls: GlobalClass; label: string }> = [
@@ -90,6 +93,9 @@ export class MzcsCard extends LitElement {
   private _schedName = '';
   @state() private _schedError?: string;
   @state() private _schedBusy = false;
+  @state() private _rtOpen = false;
+  @state() private _rtDaily?: DailyRuntime[];
+  private _rtLoadedFor?: string;
   @state() private _dryRun?: Plan;
   @state() private _dryRunError?: string;
   @state() private _dryRunning = false;
@@ -401,9 +407,77 @@ export class MzcsCard extends LitElement {
           </div>
 
           ${this._renderControls(zone.entity)} ${this._renderRooms(zone, s.setpoint)}
-          ${this._renderSchedule(zone)}
+          ${this._renderSchedule(zone)} ${this._renderRuntime(zone)}
         </div>
       </ha-card>
+    `;
+  }
+
+  private _renderRuntime(zone: ZoneConfig) {
+    if (!this.hass) return nothing;
+    const hass = this.hass;
+    const slug = slugify(zone.name);
+    const todayId = zoneEntityId('runtime_today', this._prefix, slug);
+    if (!entityExists(hass, todayId)) return nothing;
+    const todayHours = Number(hass.states[todayId]?.state);
+    const todayLabel = Number.isFinite(todayHours) ? formatHoursQuarter(todayHours) : '–';
+    if (this._rtLoadedFor !== todayId) {
+      this._rtLoadedFor = todayId;
+      this._rtDaily = undefined;
+      queueMicrotask(() =>
+        void fetchDailyRuntime(hass, todayId, 7).then((d) => {
+          this._rtDaily = d;
+        }),
+      );
+    }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const days = (this._rtDaily ?? [])
+      .filter((d) => d.day < today.getTime())
+      .sort((a, b) => b.day - a.day);
+    return html`
+      <button class="schedrow" @click=${() => (this._rtOpen = !this._rtOpen)}>
+        <span>Runtime · Today <b class="rt-b">${todayLabel}</b></span>
+        <span aria-hidden="true">${this._rtOpen ? '▴' : '▾'}</span>
+      </button>
+      ${this._rtOpen
+        ? html`
+            <div class="schedbody">
+              ${this._renderPill('Today', Number.isFinite(todayHours) ? todayHours : 0, true)}
+              ${days.map((d) =>
+                this._renderPill(
+                  new Date(d.day).toLocaleDateString(undefined, {
+                    weekday: 'short',
+                    day: 'numeric',
+                  }),
+                  d.hours,
+                  false,
+                ),
+              )}
+              ${days.length === 0
+                ? html`<p class="muted" style="font-size:11px;margin:6px 0;">
+                    History accrues daily - past days appear as statistics build up.
+                  </p>`
+                : nothing}
+            </div>
+          `
+        : nothing}
+    `;
+  }
+
+  private _renderPill(label: string, hours: number, isToday: boolean) {
+    const pct = Math.min(100, Math.max(0, (hours / 24) * 100));
+    return html`
+      <div class="pillrow">
+        <span class="pill-label">${label}</span>
+        <span class="pill-track">
+          <span
+            class="pill-fill ${isToday ? 'today-fill' : ''}"
+            style="width: ${pct.toFixed(1)}%"
+          ></span>
+        </span>
+        <span class="pill-hours">${formatHoursQuarter(hours)}</span>
+      </div>
     `;
   }
 
@@ -966,6 +1040,43 @@ export class MzcsCard extends LitElement {
       gap: 10px;
       font-size: 12px;
       padding: 3px 0;
+    }
+    .rt-b {
+      color: var(--primary-text-color, #fff);
+      font-weight: 500;
+    }
+    .pillrow {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 0;
+      font-size: 12px;
+    }
+    .pill-label {
+      width: 56px;
+      flex: none;
+    }
+    .pill-track {
+      flex: 1;
+      height: 12px;
+      border-radius: 6px;
+      background: var(--card-background-color, #16202a);
+      overflow: hidden;
+      display: block;
+    }
+    .pill-fill {
+      display: block;
+      height: 12px;
+      border-radius: 6px;
+      background: #1e88e5;
+    }
+    .pill-fill.today-fill {
+      background: #42a5f5;
+    }
+    .pill-hours {
+      width: 48px;
+      text-align: right;
+      flex: none;
     }
     .managerow.master {
       font-weight: 500;
