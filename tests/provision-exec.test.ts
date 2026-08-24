@@ -79,11 +79,16 @@ function fakeHass(failOn?: (c: Call) => boolean): {
   hass: HassLike;
   calls: Call[];
   autos: Map<string, Record<string, unknown>>;
+  reg: Map<string, string>;
 } {
   const calls: Call[] = [];
   let flowN = 0;
   const flowSteps = new Map<string, number>();
+  const flowData = new Map<string, Record<string, unknown>>();
   const autos = new Map<string, Record<string, unknown>>();
+  // entity_id -> owning config_entry_id (flow-created entities)
+  const reg = new Map<string, string>();
+  const slug = (n: string) => n.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   const hass: HassLike = {
     states: {},
     callService: async (domain, service, data) => {
@@ -94,7 +99,20 @@ function fakeHass(failOn?: (c: Call) => boolean): {
       const c: Call = { via: 'ws', key: String(msg.type), data: msg };
       calls.push(c);
       if (failOn?.(c)) throw new Error(`forced failure at ${c.key}`);
-      if (c.key === 'config/entity_registry/get_entries') return {};
+      if (c.key === 'config/entity_registry/get_entries') {
+        const ids = (msg.entity_ids as string[]) ?? [];
+        return Object.fromEntries(
+          ids.map((id) => [id, reg.has(id) ? { config_entry_id: reg.get(id), labels: [] } : null]),
+        );
+      }
+      if (c.key === 'config/entity_registry/update' && msg.new_entity_id) {
+        const from = String(msg.entity_id);
+        if (reg.has(from)) {
+          reg.set(String(msg.new_entity_id), reg.get(from)!);
+          reg.delete(from);
+        }
+        return {};
+      }
       if (c.key.endsWith('/create')) return { id: String(msg.name ?? 'x').toLowerCase().replace(/[^a-z0-9]+/g, '_') };
       return {};
     },
@@ -119,6 +137,8 @@ function fakeHass(failOn?: (c: Call) => boolean): {
         const id = m[1]!;
         const step = (flowSteps.get(id) ?? 0) + 1;
         flowSteps.set(id, step);
+        const merged = { ...(flowData.get(id) ?? {}), ...(data ?? {}) };
+        flowData.set(id, merged);
         if (data && 'next_step_id' in data) {
           return {
             flow_id: id,
@@ -133,7 +153,16 @@ function fakeHass(failOn?: (c: Call) => boolean): {
             ],
           };
         }
-        if (step >= 2) return { flow_id: id, type: 'create_entry', result: { entry_id: `e_${id}` } };
+        if (step >= 2) {
+          // Register the created entity like HA would: slug of the name,
+          // suffixed when the base id is already taken.
+          const name = String(merged.name ?? id);
+          const domain = String(merged.device_class ?? '') === 'running' ? 'binary_sensor' : 'sensor';
+          let entity = `${domain}.${slug(name)}`;
+          while (reg.has(entity)) entity = `${entity}_2`;
+          reg.set(entity, `e_${id}`);
+          return { flow_id: id, type: 'create_entry', result: { entry_id: `e_${id}` } };
+        }
         return {
           flow_id: id,
           type: 'form',
@@ -155,7 +184,7 @@ function fakeHass(failOn?: (c: Call) => boolean): {
       return { result: 'ok' };
     },
   };
-  return { hass, calls, autos };
+  return { hass, calls, autos, reg };
 }
 
 function ctx(log: string[] = []): ExecContext {
@@ -428,5 +457,58 @@ describe('automation signatures + safe regeneration', () => {
     expect(r3.skipped).toBe(1);
     expect(log.some((l) => l.includes('customized'))).toBe(true);
     expect(autos.get('climate_mzcs_engine')!.mode).toBe('single');
+  });
+});
+
+describe('flow-entity resolution (S12c incident regression)', () => {
+  it('renames the NEW entity, never a same-name bystander', async () => {
+    const { hass, calls, reg } = fakeHass();
+    // A pre-existing entity already owns the base slug (e.g. the production
+    // sensor when a second-prefix card uses the same display name).
+    reg.set('binary_sensor.climate_owner_s_office_running', 'someone_elses_entry');
+    const officeCtx: ExecContext = {
+      prefix: 'climate',
+      zones: [{ slug: 'owners_office', name: "the owner's Office", climate: 'climate.x' }],
+      seasons: SEASONS,
+      log: () => undefined,
+    };
+    const p = emptyPlan();
+    p.create.push(
+      create('binary_sensor.climate_owners_office_running', 'template_sensor', {
+        name: "Climate the owner's Office running",
+        source: 'hvac_action',
+      }),
+    );
+    const res = await executePlan(hass, p, officeCtx);
+    expect(res.ok).toBe(true);
+    const rename = calls.find(
+      (x) => x.key === 'config/entity_registry/update' && x.data!.new_entity_id !== undefined,
+    )!;
+    // The suffixed NEW entity moves; the bystander keeps its id and entry.
+    expect(rename.data!.entity_id).toBe('binary_sensor.climate_owner_s_office_running_2');
+    expect(rename.data!.new_entity_id).toBe('binary_sensor.climate_owners_office_running');
+    expect(reg.get('binary_sensor.climate_owner_s_office_running')).toBe('someone_elses_entry');
+    expect(reg.get('binary_sensor.climate_owners_office_running')).toBe('e_f1');
+  });
+
+  it('display names are prefix-derived so two instances cannot collide', async () => {
+    const { buildDesired } = await import('../src/lib/provisioning');
+    const mk = (prefix: string) => buildDesired({
+      prefix,
+      zones: [{ slug: 'office', name: 'Office', climate: 'climate.office' }],
+      seasons: SEASONS,
+      schedules: { office: { summer: { granularity: 'all', sets: { all: [{ time: '06:00', name: 'Day', mode: 'cool', cool_temp: 78, heat_temp: null }] } }, winter: { granularity: 'all', sets: { all: [{ time: '06:00', name: 'Day', mode: 'heat_cool', cool_temp: 84, heat_temp: 66 }] } } } },
+      features: { fan_timer: true, anomaly_alerts: true, steering: false },
+    });
+    const a = mk('climate');
+    const b = mk('mzcsqa');
+    const nameOf = (d: ReturnType<typeof mk>, id: string) => d.find((x) => x.id.endsWith(id))!.spec.name;
+    expect(nameOf(a, '_outdoor_daily_mean')).toBe('Climate outdoor daily mean');
+    expect(nameOf(b, '_outdoor_daily_mean')).toBe('Mzcsqa outdoor daily mean');
+    expect(nameOf(b, '_next_block')).toBe('Mzcsqa next block');
+    const aNames = new Set(a.map((x) => x.spec.name).filter((n) => typeof n === 'string'));
+    for (const x of b) {
+      if (typeof x.spec.name === 'string') expect(aNames.has(x.spec.name)).toBe(false);
+    }
   });
 });

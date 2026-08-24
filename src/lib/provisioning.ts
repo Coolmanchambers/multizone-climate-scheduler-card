@@ -107,62 +107,67 @@ function weeklySpec(set: ScheduleSet): Record<DayKey, TimeRange[]> {
 export function buildDesired(input: ProvisionInput): DesiredObject[] {
   const out: DesiredObject[] = [];
   const p = input.prefix;
+  // Display names are PREFIX-DERIVED so two card instances never share a name.
+  // Shared names collide in HA's name->object_id slugification and made the
+  // QA install rename the production daily-mean sensor (S12c incident).
+  // For the default prefix 'climate' this yields the historical 'Climate ...'.
+  const label = p.charAt(0).toUpperCase() + p.slice(1);
 
   for (const z of input.zones) {
     if (input.features.fan_timer) {
       out.push({
         id: zoneEntityId('fan_timer', p, z.slug),
         kind: 'helper',
-        spec: { name: `Climate ${z.name} fan`, restore: true },
+        spec: { name: `${label} ${z.name} fan`, restore: true },
       });
     }
     out.push({
       id: zoneEntityId('running_sensor', p, z.slug),
       kind: 'template_sensor',
-      spec: { name: `Climate ${z.name} running`, source: 'hvac_action' },
+      spec: { name: `${label} ${z.name} running`, source: 'hvac_action' },
     });
     out.push({
       id: zoneEntityId('runtime_today', p, z.slug),
       kind: 'stats_sensor',
-      spec: { name: `Climate ${z.name} runtime today`, state_class: 'total_increasing' },
+      spec: { name: `${label} ${z.name} runtime today`, state_class: 'total_increasing' },
     });
     out.push({
       id: zoneEntityId('expected_runtime', p, z.slug),
       kind: 'template_sensor',
-      spec: { name: `Climate ${z.name} expected runtime`, model: 'k_x_cdd' },
+      spec: { name: `${label} ${z.name} expected runtime`, model: 'k_x_cdd' },
     });
     out.push({
       id: zoneEntityId('applied_block_marker', p, z.slug),
       kind: 'helper',
-      spec: { name: `Climate ${z.name} applied block` },
+      spec: { name: `${label} ${z.name} applied block` },
     });
     // CONTRACT §7c: spec is config-only (name) - NEVER state/initial. Reconfiguration
     // must be unable to flip a user's enable choice; creation defaults to off.
     out.push({
       id: zoneEntityId('zone_enabled', p, z.slug),
       kind: 'helper',
-      spec: { name: `Climate ${z.name} enabled` },
+      spec: { name: `${label} ${z.name} enabled` },
     });
     out.push({
       id: zoneEntityId('k_factor', p, z.slug),
       kind: 'helper',
-      spec: { name: `Climate ${z.name} K`, min: 0, max: 10, step: 0.01 },
+      spec: { name: `${label} ${z.name} K`, min: 0, max: 10, step: 0.01 },
     });
     if (input.features.steering) {
       out.push({
         id: zoneEntityId('target_room_select', p, z.slug),
         kind: 'helper',
-        spec: { name: `Climate ${z.name} target room`, options: ['Thermostat'] },
+        spec: { name: `${label} ${z.name} target room`, options: ['Thermostat'] },
       });
       out.push({
         id: zoneEntityId('room_override_timer', p, z.slug),
         kind: 'helper',
-        spec: { name: `Climate ${z.name} room override`, restore: true },
+        spec: { name: `${label} ${z.name} room override`, restore: true },
       });
       out.push({
         id: zoneEntityId('sensor_schedule', p, z.slug),
         kind: 'schedule',
-        spec: { name: `Climate ${z.name} sensor schedule` },
+        spec: { name: `${label} ${z.name} sensor schedule` },
       });
     }
     for (const s of input.seasons) {
@@ -171,7 +176,7 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
       out.push({
         id: zoneScheduleId(p, z.slug, s.key),
         kind: 'schedule',
-        spec: { name: `Climate ${z.name} ${s.name}`, week: weeklySpec(set) },
+        spec: { name: `${label} ${z.name} ${s.name}`, week: weeklySpec(set) },
       });
     }
   }
@@ -179,12 +184,12 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
   out.push({
     id: globalEntityId('season_select', p),
     kind: 'helper',
-    spec: { name: 'Climate season', options: input.seasons.map((s) => s.name) },
+    spec: { name: `${label} season`, options: input.seasons.map((s) => s.name) },
   });
   out.push({
     id: globalEntityId('season_mode', p),
     kind: 'helper',
-    spec: { name: 'Climate season mode', options: ['Manual', 'Semi-auto', 'Full-auto'] },
+    spec: { name: `${label} season mode`, options: ['Manual', 'Semi-auto', 'Full-auto'] },
   });
   // `seed` is the default VALUE the executor sets once at creation via
   // input_number.set_value. It is deliberately NOT HA's `initial` config field:
@@ -195,7 +200,7 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
       id: globalEntityId(n.cls, p),
       kind: 'helper',
       spec: {
-        name: `Climate ${n.cls.replace(/_/g, ' ')}`,
+        name: `${label} ${n.cls.replace(/_/g, ' ')}`,
         min: n.min,
         max: n.max,
         step: n.step,
@@ -216,7 +221,7 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
   out.push({
     id: globalEntityId('next_block_sensor', p),
     kind: 'template_sensor',
-    spec: { name: 'Climate next block' },
+    spec: { name: `${label} next block` },
   });
   // Outdoor temperature chain feeding CDD learning (QA-R gap G1). The daily
   // mean is ALWAYS desired so an already-provisioned one is never planned for
@@ -224,17 +229,17 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
   out.push({
     id: globalEntityId('outdoor_temp_sensor', p),
     kind: 'template_sensor',
-    spec: { name: 'Climate outdoor temp', source: 'weather' },
+    spec: { name: `${label} outdoor temp`, source: 'weather' },
   });
   out.push({
     id: globalEntityId('outdoor_daily_mean', p),
     kind: 'stats_sensor',
-    spec: { name: 'Climate outdoor daily mean', model: 'statistics_mean' },
+    spec: { name: `${label} outdoor daily mean`, model: 'statistics_mean' },
   });
   out.push({
     id: globalEntityId('theme', p),
     kind: 'helper',
-    spec: { name: 'Climate theme' },
+    spec: { name: `${label} theme` },
   });
 
   // Signatures of the current-generation automation payloads. A live automation

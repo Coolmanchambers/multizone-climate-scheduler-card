@@ -78,6 +78,34 @@ function zoneFor(entityId: string, ctx: ExecContext): ZoneRef | null {
   return ctx.zones.find((z) => z.slug === parsed.zone) ?? null;
 }
 
+/**
+ * Locate the entity created by a config-entry flow. HA derives the entity id
+ * from the display name; when a same-slug entity already exists the NEW one
+ * gets a _2 suffix - renaming by computed slug alone moves the WRONG
+ * (pre-existing) entity. This is exactly how the QA install renamed the
+ * PRODUCTION daily-mean sensor (S12c incident): only the candidate whose
+ * registry entry belongs to the new config entry may be touched.
+ */
+async function flowEntityId(hass: HassLike, domain: string, name: string, entryId: string): Promise<string> {
+  const base = `${domain}.${haSlug(name)}`;
+  const candidates = [base, ...[2, 3, 4, 5].map((n) => `${base}_${n}`)];
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const entries = (await hass.callWS!({
+        type: 'config/entity_registry/get_entries',
+        entity_ids: candidates,
+      })) as Record<string, { config_entry_id?: string } | null>;
+      for (const c of candidates) {
+        if (entries?.[c]?.config_entry_id === entryId) return c;
+      }
+    } catch {
+      // registry lag - retry below
+    }
+    await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+  }
+  throw new Error(`Could not locate the entity created by flow entry ${entryId} (expected around ${base})`);
+}
+
 /** Rename an entity to its contract id when HA's name-derived id differs.
  * Retries because registry entries for flow-created sensors can lag the
  * create. FAILURE THROWS: later creates reference the contract id, so
@@ -378,7 +406,7 @@ async function createOne(
           percentile: 50,
           precision: 1,
         });
-        await ensureEntityId(hass, `sensor.${haSlug(statsName)}`, a.id, ctx);
+        await ensureEntityId(hass, await flowEntityId(hass, 'sensor', statsName, entryId), a.id, ctx);
         return { kind: 'config_entry', entryId };
       }
       const zone = zoneFor(a.id, ctx);
@@ -394,7 +422,7 @@ async function createOne(
         start: '{{ today_at() }}',
         end: '{{ now() }}',
       });
-      await ensureEntityId(hass, `sensor.${haSlug(statsName)}`, a.id, ctx);
+      await ensureEntityId(hass, await flowEntityId(hass, 'sensor', statsName, entryId), a.id, ctx);
       return { kind: 'config_entry', entryId };
     }
     const flow = templateFlowSpec(a.id, spec, ctx);
@@ -408,7 +436,7 @@ async function createOne(
     }
     const entryId = await driveFlow(hass, flow.handler, flow.menu, flow.fields);
     const flowDomain = flow.menu === 'binary_sensor' ? 'binary_sensor' : 'sensor';
-    await ensureEntityId(hass, `${flowDomain}.${haSlug(String(flow.fields.name))}`, a.id, ctx);
+    await ensureEntityId(hass, await flowEntityId(hass, flowDomain, String(flow.fields.name), entryId), a.id, ctx);
     return { kind: 'config_entry', entryId };
   }
   ctx.log(`SKIP ${a.id} - unsupported kind ${a.kind}`);

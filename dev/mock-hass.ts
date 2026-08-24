@@ -139,7 +139,30 @@ export class MockHass implements HassLike {
       this.scheduleFixture = { ...this.scheduleFixture, ...days };
       return this.scheduleFixture;
     }
-    if (t === 'config/entity_registry/get_entries') return {};
+    if (t === 'config/entity_registry/get_entries') {
+      const ids = (msg.entity_ids as string[]) ?? [];
+      return Object.fromEntries(
+        ids.map((id) => [
+          id,
+          this.flowReg.has(id) ? { config_entry_id: this.flowReg.get(id), labels: [] } : null,
+        ]),
+      );
+    }
+    if (t === 'config/entity_registry/update' && msg.new_entity_id) {
+      const from = String(msg.entity_id);
+      const to = String(msg.new_entity_id);
+      if (this.flowReg.has(from)) {
+        this.flowReg.set(to, this.flowReg.get(from)!);
+        this.flowReg.delete(from);
+      }
+      this.mutate(() => {
+        if (this.states[from]) {
+          this.states[to] = this.states[from];
+          delete this.states[from];
+        }
+      });
+      return {};
+    }
     if (t === 'history/history_during_period') {
       const ids = (msg.entity_ids as string[]) ?? [];
       const start = Date.parse(String(msg.start_time));
@@ -192,6 +215,8 @@ export class MockHass implements HassLike {
   private flowData = new Map<string, Record<string, unknown>>();
   private flowCount = 0;
   public autoConfigs = new Map<string, Record<string, unknown>>();
+  /** entity_id -> owning config_entry_id for flow-created entities */
+  public flowReg = new Map<string, string>();
   public async callApi(method: string, path: string, data?: Record<string, unknown>): Promise<unknown> {
     this.log.push({ domain: 'api', service: `${method} ${path}`, data });
     if (method === 'POST' && path === 'config/config_entries/flow') {
@@ -233,8 +258,12 @@ export class MockHass implements HassLike {
         const name = String(merged.name ?? `entry_${flowId}`);
         const objectId = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
         const domain = String(merged.device_class ?? '') === 'running' ? 'binary_sensor' : 'sensor';
+        let entityId = `${domain}.${objectId}`;
+        while (this.states[entityId] || this.flowReg.has(entityId)) entityId = `${entityId}_2`;
+        this.flowReg.set(entityId, `entry_${flowId}`);
+        const finalId = entityId;
         this.mutate(() => {
-          this.states[`${domain}.${objectId}`] = { state: 'unknown', attributes: { friendly_name: name } };
+          this.states[finalId] = { state: 'unknown', attributes: { friendly_name: name } };
         });
         return { flow_id: flowId, type: 'create_entry', result: { entry_id: `entry_${flowId}` } };
       }
