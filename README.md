@@ -312,11 +312,32 @@ Expect it to read "learning" for several warm days after setup, and note that it
 days with meaningful cooling demand. No weather entity means no learning and no alerts — the
 rest of the card is unaffected.
 
-### Running more than one instance of the card
+### Moving or copying the card to another dashboard
 
-Each card instance owns everything under its entity **prefix** (default `climate`). If you run a
-second instance — a test copy, or a separate building — give it a *different* prefix, or the two
-will manage the same objects and fight.
+**Good news: you can move the card freely and nothing needs redoing.** The card is only a
+window onto objects that live in Home Assistant — your schedules, helpers, and automations
+aren't stored in the card or in the dashboard. Cut and paste the card to a different dashboard,
+or rebuild it there from the same config, and it reconnects to everything as soon as it loads.
+Nothing is re-provisioned and no schedule is lost.
+
+The one rule: **keep the config identical** — same `prefix`, same zone names, same seasons. What
+ties a card to its objects is the prefix plus the zone names, so as long as those match, any
+number of copies on any number of dashboards all drive the same system. Having the card on your
+wall tablet *and* your phone dashboard is completely normal.
+
+> [!WARNING]
+> Copies with **different** configs are the thing to avoid. Because each card computes what
+> *should* exist from its own config, running **Apply** on a copy that is missing a zone or
+> season will plan to **delete** that zone's objects — the ones the other copy still expects.
+> The preview will show you those deletions before anything happens, but it's an easy trap. If
+> you want a genuinely separate setup (a test copy, a guest house), give it a *different*
+> `prefix` so the two never touch each other's objects.
+
+Two related gotchas, both of which are rename-then-recreate rather than in-place edits:
+**changing the `prefix`** orphans everything under the old one and builds a fresh set, and
+**renaming a zone** changes its entity ids, so the differ plans new objects plus deletion of the
+old ones. Both are previewed before they run, but neither is a quick cosmetic tweak — rename
+deliberately.
 
 ### Deleting a zone or season deletes its objects
 
@@ -337,6 +358,7 @@ contents are written to the log first, but the deletion is real.
 | Stop all automation immediately | Gear icon → **Manage** → switch the zone (or the master) **Off**. |
 | See how much the system ran | Tap the **Runtime ·** row; tap a day for its individual runs. |
 | Change the look | Gear icon → **Manage** → **Theme**. |
+| Move the card to another dashboard | Just move it — see [Moving or copying the card](#moving-or-copying-the-card-to-another-dashboard). Nothing is re-provisioned. |
 
 You can also edit any schedule from **Settings → Devices & Services → Helpers** using Home
 Assistant's own schedule editor — the card reads whatever is there.
