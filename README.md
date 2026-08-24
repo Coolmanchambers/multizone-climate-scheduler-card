@@ -17,7 +17,7 @@ schedules that live in Home Assistant, not in your thermostat's cloud app.**
 >
 > It creates and manages real Home Assistant objects and, once you enable a zone, it will
 > **change the temperature in your house**. Everything is preview-before-write and every zone
-> ships switched off — but please read [Important things to know](#-important-things-to-know)
+> ships switched off — but please read [Important things to know](#important-things-to-know)
 > in full before you enable anything, and start with a single zone.
 >
 > Feedback and issue reports are genuinely welcome; that is how this gets better.
@@ -236,7 +236,7 @@ wrong, switch the zone back **Off** — control returns to your thermostat's app
 
 ---
 
-## ⚠️ Important things to know
+## Important things to know
 
 These are the things most likely to surprise you. Please read them before enabling a zone.
 
