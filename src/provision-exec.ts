@@ -297,7 +297,9 @@ async function createOne(
   a: Extract<PlanAction, { op: 'create' }>,
   ctx: ExecContext,
 ): Promise<CreatedRecord | null> {
-  const spec = a.spec;
+  // Creation sees the compared spec PLUS the creation-only meta payload
+  // (seed values, seeded week, template types). Only spec is ever diffed.
+  const spec = { ...a.spec, ...(a.meta ?? {}) };
   if (a.id.startsWith('automation:')) {
     const uid = a.id.slice('automation:'.length);
     const payload = automationPayload(uid, ctx);
@@ -499,7 +501,7 @@ export async function executePlan(hass: HassLike, plan: Plan, ctx: ExecContext):
     for (const a of plan.update) {
       if (a.kind === 'helper') {
         const { domain, objectId } = splitId(a.id);
-        const { unit, seed: _seed, ...rest } = a.spec;
+        const { unit, ...rest } = a.spec;
         const payload = { ...rest, ...(unit ? { unit_of_measurement: unit } : {}) };
         try {
           await hass.callWS!({ type: `${domain}/update`, [`${domain}_id`]: objectId, ...payload });
@@ -534,6 +536,36 @@ export async function executePlan(hass: HassLike, plan: Plan, ctx: ExecContext):
             result.skipped++;
             ctx.log(`KEEP ${a.id} - could not read its config to verify`);
           }
+        }
+      } else if ((a.kind === 'template_sensor' || a.kind === 'stats_sensor') && hass.callWS) {
+        // Sensor specs are name-only, so an Update can only be display-name
+        // drift. A registry name override is display-scoped: it never touches
+        // the entity_id or the flow's template/statistics config.
+        try {
+          await hass.callWS({ type: 'config/entity_registry/update', entity_id: a.id, name: String(a.spec.name ?? '') });
+          result.updated++;
+          ctx.log(`Renamed ${a.id} to "${String(a.spec.name)}"`);
+        } catch {
+          result.skipped++;
+          ctx.log(`SKIP update ${a.id} - could not set its display name`);
+        }
+      } else if (a.kind === 'schedule' && hass.callWS) {
+        // Schedule specs are name-only by design: live BLOCKS are owned by the
+        // card's schedule editor after provisioning and a re-run Apply must
+        // never stomp them. A rename carries the live days through unchanged.
+        const { objectId } = splitId(a.id);
+        try {
+          const items = (await hass.callWS({ type: 'schedule/list' })) as Array<Record<string, unknown>>;
+          const item = items.find((i) => i.id === objectId);
+          if (!item) throw new Error('not listed');
+          const days: Record<string, unknown> = {};
+          for (const d of DAY_KEYS) days[d] = item[d] ?? [];
+          await hass.callWS({ type: 'schedule/update', schedule_id: objectId, name: String(a.spec.name ?? objectId), ...days });
+          result.updated++;
+          ctx.log(`Renamed ${a.id} to "${String(a.spec.name)}" (blocks preserved)`);
+        } catch {
+          result.skipped++;
+          ctx.log(`SKIP update ${a.id} - could not rename without touching its blocks`);
         }
       } else {
         result.skipped++;

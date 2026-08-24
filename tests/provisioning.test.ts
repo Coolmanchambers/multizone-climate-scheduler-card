@@ -70,7 +70,10 @@ describe('buildDesired inventory (CONTRACT §5)', () => {
     expect(numbers.length).toBe(8);
     for (const n of numbers) {
       expect('initial' in n.spec).toBe(false);
-      expect(typeof n.spec.seed).toBe('number');
+      // Seed lives in creation-only meta so the differ never compares it -
+      // a user-tuned live value must not read as drift (extraction parity).
+      expect('seed' in n.spec).toBe(false);
+      expect(typeof n.meta?.seed).toBe('number');
     }
   });
 
@@ -189,9 +192,16 @@ describe('plan + idempotence', () => {
   });
 });
 
-describe('granularity transitions are pure updates (Option A payoff)', () => {
-  it('wdwe → days rewrites schedule payloads without create/delete', () => {
-    const installed = applyPlan(plan(buildDesired(baseInput()), []), []);
+describe('schedule blocks are creation seeds, never reprovisioned (extraction parity)', () => {
+  it('week payloads ride on create meta; wizard block edits never replan an installed schedule', () => {
+    const d = buildDesired(baseInput());
+    const schedCreates = plan(d, []).create.filter((a) => a.kind === 'schedule');
+    expect(schedCreates.length).toBeGreaterThan(0);
+    for (const a of schedCreates) {
+      expect(a.meta?.week).toBeDefined();
+      expect('week' in a.spec).toBe(false);
+    }
+    const installed = applyPlan(plan(d, []), []);
     const input = baseInput();
     for (const z of Object.keys(input.schedules)) {
       const summer = input.schedules[z]!.summer!;
@@ -200,15 +210,39 @@ describe('granularity transitions are pure updates (Option A payoff)', () => {
         sets: transitionSets('wdwe', 'days', summer.sets),
       };
     }
-    const p = plan(buildDesired(input), installed);
-    expect(p.create).toHaveLength(0);
-    expect(p.delete).toHaveLength(0);
-    // Cloned days produce identical weekly payloads → actually zero updates,
-    // proving expand-by-clone is a true no-op until the user diverges a day.
-    expect(p.update).toHaveLength(0);
-    // Diverge one day, replan: exactly that zone's summer schedule updates.
+    // Diverge a day too: live schedule BLOCKS are owned by the card's schedule
+    // editor after provisioning, so even a changed wizard week must not plan an
+    // Update (an Apply re-run would otherwise stomp the user's live edits).
     input.schedules.upstairs!.summer!.sets.saturday = [cool('09:00', 'Lazy', 79)];
     const p2 = plan(buildDesired(input), installed);
-    expect(p2.update.map((a) => a.id)).toEqual(['schedule.climate_upstairs_summer']);
+    expect(p2.create).toHaveLength(0);
+    expect(p2.delete).toHaveLength(0);
+    expect(p2.update).toHaveLength(0);
+  });
+});
+
+describe('extraction parity contract (every compared spec key is registry-readable)', () => {
+  // fetchExisting() can only read these keys back per domain/kind. Any desired
+  // spec key OUTSIDE this set can never compare equal against a live snapshot
+  // and makes the plan non-converging (the S13 Update-28 asymmetry). Creation
+  // payloads that are not readable back (seed, week, template types) belong in
+  // meta, never spec.
+  const READABLE: Array<{ match: (id: string, kind: string) => boolean; keys: string[] }> = [
+    { match: (id) => id.startsWith('input_number.'), keys: ['name', 'min', 'max', 'step', 'unit'] },
+    { match: (id) => id.startsWith('input_select.'), keys: ['name', 'options'] },
+    { match: (id) => id.startsWith('timer.'), keys: ['name', 'restore'] },
+    { match: (id) => id.startsWith('schedule.'), keys: ['name'] },
+    { match: (id) => id.startsWith('automation:'), keys: ['alias', 'sig'] },
+    { match: () => true, keys: ['name'] }, // sensors, input_text, input_boolean: friendly_name only
+  ];
+  it('all desired specs (steering on) stay within the readable key sets', () => {
+    const input = baseInput();
+    input.features.steering = true;
+    for (const d of buildDesired(input)) {
+      const allowed = READABLE.find((r) => r.match(d.id, d.kind))!.keys;
+      for (const k of Object.keys(d.spec)) {
+        expect(allowed, `${d.id} spec key "${k}" is not registry-readable - move it to meta`).toContain(k);
+      }
+    }
   });
 });

@@ -141,13 +141,17 @@ export async function fetchExisting(
     const st = hass.states[c.id];
     let spec: Record<string, unknown> = {};
     if (c.id.startsWith('input_number.') && cfg) {
-      spec = { min: cfg.min, max: cfg.max, step: cfg.step };
+      const unit = (cfg as { unit_of_measurement?: string }).unit_of_measurement;
+      spec = { name: cfg.name, min: cfg.min, max: cfg.max, step: cfg.step, ...(unit != null ? { unit } : {}) };
     } else if (c.id.startsWith('input_select.') && cfg) {
       spec = { name: cfg.name, options: cfg.options };
     } else if (c.id.startsWith('timer.') && cfg) {
       spec = { name: cfg.name, restore: cfg.restore ?? false };
     } else if (c.id.startsWith('schedule.') && cfg) {
-      spec = { name: cfg.name, raw: true };
+      // Name-only by design: live schedule BLOCKS are owned by the card's
+      // schedule editor after provisioning; the wizard's week is a creation
+      // seed (meta), so a re-run Apply never stomps user schedule edits.
+      spec = { name: cfg.name };
     } else if (st) {
       spec = { name: st.attributes.friendly_name ?? c.id };
     }

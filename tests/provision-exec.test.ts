@@ -115,6 +115,15 @@ function fakeHass(failOn?: (c: Call) => boolean): {
         }
         return {};
       }
+      if (c.key === 'schedule/list') {
+        return [
+          {
+            id: 'climate_upstairs_summer',
+            name: 'Climate Upstairs Summer',
+            monday: [{ from: '08:00:00', to: '22:00:00', data: { mode: 'cool' } }],
+          },
+        ];
+      }
       if (c.key.endsWith('/create')) return { id: String(msg.name ?? 'x').toLowerCase().replace(/[^a-z0-9]+/g, '_') };
       return {};
     },
@@ -243,21 +252,25 @@ describe('executePlan', () => {
     expect('initial' in ib.data!).toBe(false);
   });
 
-  it('never overwrites schedule/automation content on update; helper updates go through', async () => {
+  it('schedule updates rename but preserve live blocks; automation content is never overwritten; helper updates go through', async () => {
     const { hass, calls } = fakeHass();
     const p = emptyPlan();
     p.update.push(
-      { op: 'update', id: 'schedule.climate_upstairs_summer', kind: 'schedule', spec: { week: {} }, from: {} },
+      { op: 'update', id: 'schedule.climate_upstairs_summer', kind: 'schedule', spec: { name: 'Climate Upstairs Summertime' }, from: { name: 'Climate Upstairs Summer' } },
       { op: 'update', id: 'automation:climate_mzcs_engine', kind: 'automation', spec: {}, from: {} },
       { op: 'update', id: 'input_select.climate_season', kind: 'helper', spec: { name: 'Climate season', options: ['Summer'] }, from: {} },
     );
     const log: string[] = [];
     const res = await executePlan(hass, p, ctx(log));
-    expect(res.updated).toBe(1);
-    expect(res.skipped).toBe(2);
-    expect(calls.some((c) => c.key === 'schedule/update')).toBe(false);
+    expect(res.updated).toBe(2);
+    expect(res.skipped).toBe(1);
+    // The rename carries the LIVE days through unchanged - spec has no week,
+    // so the executor reads them back from schedule/list first.
+    const schedUpd = calls.find((c) => c.key === 'schedule/update');
+    expect(schedUpd?.data?.name).toBe('Climate Upstairs Summertime');
+    expect(schedUpd?.data?.monday).toEqual([{ from: '08:00:00', to: '22:00:00', data: { mode: 'cool' } }]);
     expect(calls.some((c) => c.key === 'input_select/update')).toBe(true);
-    expect(log.filter((l) => l.startsWith('KEEP'))).toHaveLength(2);
+    expect(log.filter((l) => l.startsWith('KEEP'))).toHaveLength(1);
   });
 
   it('adopt only labels; delete removes helpers and PRISTINE automations only', async () => {

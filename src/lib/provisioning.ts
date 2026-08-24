@@ -55,8 +55,14 @@ export interface DesiredObject {
   /** entity_id, or `automation:{unique_id}` for automations */
   id: string;
   kind: ObjectKind;
-  /** Creation/update payload subset the differ owns and compares. */
+  /**
+   * The COMPARED identity of the object - only keys the live registry can
+   * faithfully read back (extraction parity: plan(fetchExisting(apply(...)))
+   * must be empty). Creation-only payloads live in `meta`.
+   */
   spec: Record<string, unknown>;
+  /** Creation-time payload (seed values, seeded week, template types). NEVER compared. */
+  meta?: Record<string, unknown>;
 }
 
 export interface ExistingObject {
@@ -68,7 +74,7 @@ export interface ExistingObject {
 }
 
 export type PlanAction =
-  | { op: 'create'; id: string; kind: ObjectKind; spec: Record<string, unknown> }
+  | { op: 'create'; id: string; kind: ObjectKind; spec: Record<string, unknown>; meta?: Record<string, unknown> }
   | { op: 'adopt'; id: string; kind: ObjectKind; spec: Record<string, unknown> }
   | { op: 'update'; id: string; kind: ObjectKind; spec: Record<string, unknown>; from: Record<string, unknown> }
   | { op: 'delete'; id: string; kind: ObjectKind }
@@ -124,17 +130,20 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
     out.push({
       id: zoneEntityId('running_sensor', p, z.slug),
       kind: 'template_sensor',
-      spec: { name: `${label} ${z.name} running`, source: 'hvac_action' },
+      spec: { name: `${label} ${z.name} running` },
+      meta: { source: 'hvac_action' },
     });
     out.push({
       id: zoneEntityId('runtime_today', p, z.slug),
       kind: 'stats_sensor',
-      spec: { name: `${label} ${z.name} runtime today`, state_class: 'total_increasing' },
+      spec: { name: `${label} ${z.name} runtime today` },
+      meta: { model: 'history_stats' },
     });
     out.push({
       id: zoneEntityId('expected_runtime', p, z.slug),
       kind: 'template_sensor',
-      spec: { name: `${label} ${z.name} expected runtime`, model: 'k_x_cdd' },
+      spec: { name: `${label} ${z.name} expected runtime` },
+      meta: { model: 'k_x_cdd' },
     });
     out.push({
       id: zoneEntityId('applied_block_marker', p, z.slug),
@@ -176,7 +185,8 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
       out.push({
         id: zoneScheduleId(p, z.slug, s.key),
         kind: 'schedule',
-        spec: { name: `${label} ${z.name} ${s.name}`, week: weeklySpec(set) },
+        spec: { name: `${label} ${z.name} ${s.name}` },
+        meta: { week: weeklySpec(set) },
       });
     }
   }
@@ -204,9 +214,9 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
         min: n.min,
         max: n.max,
         step: n.step,
-        seed: n.initial,
         ...(n.unit ? { unit: n.unit } : {}),
       },
+      meta: { seed: n.initial },
     });
   }
   if (input.features.steering) {
@@ -214,7 +224,8 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
       out.push({
         id: globalEntityId(n.cls, p),
         kind: 'helper',
-        spec: { min: n.min, max: n.max, step: n.step, seed: n.initial },
+        spec: { name: `${label} ${n.cls.replace(/_/g, ' ')}`, min: n.min, max: n.max, step: n.step },
+        meta: { seed: n.initial },
       });
     }
   }
@@ -229,12 +240,14 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
   out.push({
     id: globalEntityId('outdoor_temp_sensor', p),
     kind: 'template_sensor',
-    spec: { name: `${label} outdoor temp`, source: 'weather' },
+    spec: { name: `${label} outdoor temp` },
+    meta: { source: 'weather' },
   });
   out.push({
     id: globalEntityId('outdoor_daily_mean', p),
     kind: 'stats_sensor',
-    spec: { name: `${label} outdoor daily mean`, model: 'statistics_mean' },
+    spec: { name: `${label} outdoor daily mean` },
+    meta: { model: 'statistics_mean' },
   });
   out.push({
     id: globalEntityId('theme', p),
@@ -316,7 +329,7 @@ export function plan(desired: DesiredObject[], existing: ExistingObject[]): Plan
   for (const d of desired) {
     const e = byId.get(d.id);
     if (!e) {
-      out.create.push({ op: 'create', id: d.id, kind: d.kind, spec: d.spec });
+      out.create.push({ op: 'create', id: d.id, kind: d.kind, spec: d.spec, ...(d.meta ? { meta: d.meta } : {}) });
     } else if (!e.managed) {
       out.adopt.push({ op: 'adopt', id: d.id, kind: d.kind, spec: d.spec });
     } else if (!specEqual(e.spec, d.spec)) {
