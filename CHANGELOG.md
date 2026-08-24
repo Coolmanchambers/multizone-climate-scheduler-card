@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-08-24
+
 ### Added
 - Room sensors accept the standard `{entity, name}` row form, so you can label a sensor on the
   card without renaming the entity in Home Assistant. Bare entity ids still work, and the two
