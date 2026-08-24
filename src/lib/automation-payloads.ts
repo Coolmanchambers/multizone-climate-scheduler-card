@@ -69,13 +69,14 @@ export function automationSignatures(
   zones: ZoneRef[],
   seasons: ProvisionSeason[],
   fanGuard?: string,
+  ecoPreset: string | null = 'eco',
 ): Record<string, string> {
   // Each generator returns signed(...), so the payload's own embedded token IS
   // its content hash (contentHash(signed(c)) === contentHash(c) by the SIG_RE
   // strip) - reading it back avoids a second full canonicalization per payload.
   const sigOf = (p: Record<string, unknown>): string => parseSignature(p.description)!;
   const out: Record<string, string> = {
-    [automationUniqueId(prefix, 'engine')]: sigOf(engineAutomation(prefix, zones, seasons)),
+    [automationUniqueId(prefix, 'engine')]: sigOf(engineAutomation(prefix, zones, seasons, ecoPreset)),
     [automationUniqueId(prefix, 'watchdog')]: sigOf(watchdogAutomation(prefix)),
     [automationUniqueId(prefix, 'runtime_learning')]: sigOf(learningAutomation(prefix, zones)),
     [automationUniqueId(prefix, 'runtime_alert')]: sigOf(runtimeAlertAutomation(prefix, zones)),
@@ -90,7 +91,25 @@ export function engineAutomation(
   prefix: string,
   zones: ZoneRef[],
   seasons: ProvisionSeason[],
+  ecoPreset: string | null = 'eco',
 ): Record<string, unknown> {
+  // For the default 'eco' every string below is byte-identical to the
+  // pre-0.9.1 generator, so existing installs keep their signature and plan
+  // NO engine update. Only a changed setting regenerates.
+  const preset = ecoPreset === null ? null : ecoPreset.replace(/['"\\]/g, '').trim() || 'eco';
+  const standDown =
+    preset === null
+      ? ''
+      : preset === 'eco'
+        ? ' Zones stand down while their Eco preset is active.'
+        : ` Zones stand down while their '${preset}' preset is active.`;
+  const skipAlias =
+    preset === null
+      ? 'Skip when zone disabled, already applied, or no block data'
+      : preset === 'eco'
+        ? 'Skip when zone disabled, already applied, Eco active, or no block data'
+        : 'Skip when zone disabled, already applied, standby preset active, or no block data';
+  const presetClause = preset === null ? '' : ` and state_attr(repeat.item.climate, 'preset_mode') != '${preset}'`;
   const schedules = zones.flatMap((z) => seasons.map((s) => zoneScheduleId(prefix, z.slug, s.key)));
   const enables = zones.map((z) => zoneEntityId('zone_enabled', prefix, z.slug));
   // Season keys are STABLE while display names can be renamed - resolve the
@@ -100,7 +119,7 @@ export function engineAutomation(
   return signed({
     id: automationUniqueId(prefix, 'engine'),
     alias: automationAlias(prefix, 'engine'),
-    description: `${MANAGED} Applies the active season's schedule block to each ENABLED zone at block transitions. Per-zone applied-block markers mean manual changes and external raises HOLD until the next block; the 15-minute tick only recovers missed transitions. Zones stand down while their Eco preset is active. heat_cool blocks apply dual setpoints.`,
+    description: `${MANAGED} Applies the active season's schedule block to each ENABLED zone at block transitions. Per-zone applied-block markers mean manual changes and external raises HOLD until the next block; the 15-minute tick only recovers missed transitions.${standDown} heat_cool blocks apply dual setpoints.`,
     mode: 'queued',
     max: 5,
     triggers: [
@@ -138,10 +157,9 @@ export function engineAutomation(
               },
             },
             {
-              alias: 'Skip when zone disabled, already applied, Eco active, or no block data',
+              alias: skipAlias,
               condition: 'template',
-              value_template:
-                "{{ is_state(repeat.item.enabled, 'on') and blk is not none and blk != states(repeat.item.marker) and state_attr(repeat.item.climate, 'preset_mode') != 'eco' }}",
+              value_template: `{{ is_state(repeat.item.enabled, 'on') and blk is not none and blk != states(repeat.item.marker)${presetClause} }}`,
             },
             {
               alias: 'Apply the block (dual range, off, or single target)',

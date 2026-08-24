@@ -279,6 +279,44 @@ export class MzcsCardEditor extends LitElement {
           />
           Runtime anomaly alerts
         </label>
+        <label class="checkrow">
+          <input
+            type="checkbox"
+            .checked=${c.features?.eco_preset !== false}
+            @change=${(e: Event) => {
+              const on = (e.target as HTMLInputElement).checked;
+              const features = { ...c.features };
+              if (on) delete features.eco_preset;
+              else features.eco_preset = false;
+              this._emit({ features });
+            }}
+          />
+          Stand down while a standby preset is active
+        </label>
+        ${c.features?.eco_preset !== false
+          ? html`
+              <label class="fieldrow">
+                Standby preset name
+                <input
+                  .value=${typeof c.features?.eco_preset === 'string' ? c.features.eco_preset : 'eco'}
+                  @change=${(e: Event) => {
+                    const el = e.target as HTMLInputElement;
+                    const name = el.value.replace(/['"\\]/g, '').trim() || 'eco';
+                    el.value = name;
+                    const features = { ...c.features };
+                    if (name === 'eco') delete features.eco_preset;
+                    else features.eco_preset = name;
+                    this._emit({ features });
+                  }}
+                />
+              </label>
+              <p class="muted">
+                The engine leaves a zone alone while its thermostat reports this preset.
+                'eco' matches Nest; other brands may use 'away', 'sleep', or similar - check
+                the thermostat's preset list in Home Assistant.
+              </p>
+            `
+          : nothing}
 
         <h4>Advanced</h4>
         <label class="fieldrow">

@@ -100,20 +100,20 @@ if (shot) {
 }
 
 // Harness controls
-document.getElementById('btn-fan')!.addEventListener('click', () => {
+document.getElementById('btn-fan')?.addEventListener('click', () => {
   void hass.callService('timer', 'start', { entity_id: 'timer.climate_upstairs_fan' });
 });
-document.getElementById('btn-cool')!.addEventListener('click', () => {
+document.getElementById('btn-cool')?.addEventListener('click', () => {
   hass.set('climate.nest_upstairs', {
     attributes: { hvac_action: 'cooling' },
   });
 });
-document.getElementById('btn-unavail')!.addEventListener('click', () => {
+document.getElementById('btn-unavail')?.addEventListener('click', () => {
   hass.set('climate.nest_downstairs', { state: 'unavailable' });
 });
-const logEl = document.getElementById('svc-log')!;
+const logEl = document.getElementById('svc-log');
 setInterval(() => {
-  logEl.textContent = hass.log
+  if (logEl) logEl.textContent = hass.log
     .slice(-5)
     .map((l) => `${l.domain}.${l.service} ${JSON.stringify(l.data ?? {})}`)
     .join('\n');

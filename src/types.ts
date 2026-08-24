@@ -26,5 +26,23 @@ export interface MzcsCardConfig {
     anomaly_alerts?: boolean;
     /** helper entity the fan-off automations must respect (skip while 'on') */
     fan_guard?: string;
+    /**
+     * Thermostat preset that makes the engine stand down for a zone.
+     * Omitted = 'eco' (Nest-style, the pre-0.9.1 behavior); a string names a
+     * different preset (e.g. 'away'); false disables the stand-down entirely
+     * so Home Assistant owns standby behavior.
+     */
+    eco_preset?: string | false;
   };
+}
+
+/**
+ * Resolve the standby-preset setting to what the engine/UI consume:
+ * a preset name, or null when the stand-down is disabled.
+ */
+export function resolveEcoPreset(features?: { eco_preset?: string | false }): string | null {
+  const v = features?.eco_preset;
+  if (v === false) return null;
+  if (typeof v === 'string' && v.trim()) return v.trim();
+  return 'eco';
 }

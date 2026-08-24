@@ -34,6 +34,8 @@ export interface ExecContext {
   seasons: ProvisionSeason[];
   /** optional helper the fan-off automations must respect (features.fan_guard) */
   fanGuard?: string;
+  /** resolved standby preset: a name, or null = stand-down disabled; absent = 'eco' */
+  ecoPreset?: string | null;
   /** weather entity feeding the outdoor-temperature chain (CDD learning) */
   weatherEntity?: string;
   log: (line: string) => void;
@@ -293,7 +295,7 @@ function templateFlowSpec(id: string, spec: Record<string, unknown>, ctx: ExecCo
 
 function automationPayload(uid: string, ctx: ExecContext): Record<string, unknown> | null {
   const p = ctx.prefix;
-  if (uid === `${p}_mzcs_engine`) return engineAutomation(p, ctx.zones, ctx.seasons);
+  if (uid === `${p}_mzcs_engine`) return engineAutomation(p, ctx.zones, ctx.seasons, ctx.ecoPreset === undefined ? 'eco' : ctx.ecoPreset);
   if (uid === `${p}_mzcs_watchdog`) return watchdogAutomation(p);
   if (uid === `${p}_mzcs_runtime_learning`) return learningAutomation(p, ctx.zones);
   if (uid === `${p}_mzcs_runtime_alert`) return runtimeAlertAutomation(p, ctx.zones);

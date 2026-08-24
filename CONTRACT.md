@@ -102,8 +102,10 @@ never collide in HA's name→object_id slugification (S12c incident rule).
 
 **Automations (label `mzcs`):**
 - "Climate: schedule engine" (block transitions → climate.set_temperature / set_hvac_mode incl.
-  heat_cool dual range and off; per-zone enable + applied-block-marker + Eco gates; 15-min
-  safety tick; season name→key map)
+  heat_cool dual range and off; per-zone enable + applied-block-marker + standby-preset gates;
+  15-min safety tick; season name→key map). The standby gate is configurable via
+  `features.eco_preset` (default `'eco'` = Nest behavior and byte-identical to the 0.9.0
+  generator; a string names a different preset; `false` removes the gate)
 - "Climate: <Zone> fan timer finished" (per zone; stands down while the configured fan-guard
   helper is on)
 - "Climate: runtime learning" (nightly 23:58 EMA of k per zone; skips mild days; first valid
@@ -134,6 +136,8 @@ seasons:
 season_switch: manual        # manual (semi | full reserved for the post-v1 recommender)
 weather_entity: weather.openweathermap   # optional; enables the CDD learning chain
 features: { fan_timer: [15, 30, 60], anomaly_alerts: true, fan_guard: input_boolean.help_hvac_fan }
+# features.eco_preset: 'away'   # optional: standby preset the engine respects ('eco' default;
+#                               # false disables the stand-down gate)
 ```
 `fan_guard` is optional. `room_sensors` per zone drives the read-only deviation chips.
 

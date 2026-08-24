@@ -266,13 +266,15 @@ If you nudge the temperature by hand, the engine will **not** fight you — your
 until the next scheduled block, then the schedule resumes. This is deliberate. If you want the
 schedule re-applied right now, use **Apply now** in the schedule editor.
 
-### Eco makes a zone stand down
+### A standby preset makes a zone stand down
 
-While a zone's thermostat reports its **Eco** preset, the engine leaves that zone completely
-alone. This is handy for away modes, and confusing if you forgot Eco was on. Note that today
-this is fixed to the preset literally named `eco` — thermostats that use a different preset
-name for the same idea aren't recognized yet, and it can't be switched off. Making this
-configurable is [landing in 0.9.1](#not-in-this-release).
+While a zone's thermostat reports its standby preset — **`eco` by default**, matching Nest —
+the engine leaves that zone completely alone. This is handy for away modes, and confusing if
+you forgot the preset was on. If your thermostat uses a different name for the same idea
+(`away`, `sleep`, ...), set it in the editor under **Features → Standby preset name**; the
+card's Eco chip follows the same setting. You can also switch the behavior off entirely so
+Home Assistant owns standby. Check your thermostat's preset list in Home Assistant for the
+exact name it reports.
 
 <p align="center">
   <img src="docs/controls.png" alt="The controls expander showing Heat, Cool, Heat-Cool, Off and Eco buttons plus fan timer chips" width="420">
@@ -391,6 +393,8 @@ features:
   anomaly_alerts: true
   fan_guard: input_boolean.help_fan   # optional: fan-off automations stand
                                       # down while this helper is on
+  eco_preset: away                    # optional: standby preset the engine
+                                      # respects ('eco' default; false disables)
 ```
 
 | Key | Type | Default | Notes |
@@ -404,6 +408,7 @@ features:
 | `features.fan_timer` | list | `[15,30,60]` | Fan timer presets, in minutes. |
 | `features.anomaly_alerts` | bool | `true` | Creates the evening runtime alert automation. |
 | `features.fan_guard` | string | — | A helper that suppresses fan-off while it is on. |
+| `features.eco_preset` | string \| `false` | `eco` | Standby preset the engine stands down for; `false` disables the gate. |
 
 ---
 
@@ -461,9 +466,6 @@ healthy install settles to "Unchanged" for everything after one apply.
 
 Being upfront so nothing surprises you. These are planned, not shipped:
 
-- **A configurable Eco/standby preset — landing in 0.9.1.** Today the engine stands down only
-  for a preset named `eco`, which suits Nest-style thermostats. 0.9.1 will let you choose which
-  preset counts, and switch the behavior off entirely so Home Assistant owns it instead.
 - **Automatic season switching.** The Manual selector works; the Semi-auto and Full-auto options
   are disabled placeholders for a forecast-driven recommender.
 - **Comfort steering** (compensating a thermostat's setpoint from a room sensor's reading).

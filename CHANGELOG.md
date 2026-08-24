@@ -6,10 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 
 ## [Unreleased]
 
+### Added
+- Configurable Eco/standby preset (`features.eco_preset`): choose which thermostat preset
+  makes the engine stand down for a zone (the default stays `eco`, matching Nest), or set it
+  to `false` so Home Assistant owns standby behaviour entirely. The card's Eco chip follows
+  the same setting. Existing installs are untouched: with the default, the generated engine
+  is byte-identical to 0.9.0, so no automation update is planned on upgrade.
+
 ### Planned for 0.9.1
-- Configurable Eco/standby preset: choose which thermostat preset makes the engine stand
-  down, or switch the behaviour off entirely (today it is hard-coded to a preset named
-  `eco`, which only suits Nest-style thermostats).
 - Tabbed settings screen, so the gear panel is no longer one long scroll.
 - Safer removal: the danger zone moves onto its own tab (it currently sits next to Close),
   and "Remove everything" gains an are-you-sure step plus a typed confirmation.

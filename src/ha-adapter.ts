@@ -53,13 +53,13 @@ export function hvacModes(hass: HassLike, entityId: string): string[] {
   return Array.isArray(m) ? m.filter((x): x is string => typeof x === 'string') : [];
 }
 
-export function ecoSupported(hass: HassLike, entityId: string): boolean {
+export function ecoSupported(hass: HassLike, entityId: string, preset = 'eco'): boolean {
   const p = hass.states[entityId]?.attributes.preset_modes;
-  return Array.isArray(p) && p.includes('eco');
+  return Array.isArray(p) && p.includes(preset);
 }
 
-export function ecoActive(hass: HassLike, entityId: string): boolean {
-  return hass.states[entityId]?.attributes.preset_mode === 'eco';
+export function ecoActive(hass: HassLike, entityId: string, preset = 'eco'): boolean {
+  return hass.states[entityId]?.attributes.preset_mode === preset;
 }
 
 export function numberHelperValue(hass: HassLike, entityId: string): number | null {
@@ -89,10 +89,10 @@ export function setHvacMode(hass: HassLike, entityId: string, mode: string): Pro
   return hass.callService('climate', 'set_hvac_mode', { entity_id: entityId, hvac_mode: mode });
 }
 
-export function setEco(hass: HassLike, entityId: string, on: boolean): Promise<unknown> {
+export function setEco(hass: HassLike, entityId: string, on: boolean, preset = 'eco'): Promise<unknown> {
   return hass.callService('climate', 'set_preset_mode', {
     entity_id: entityId,
-    preset_mode: on ? 'eco' : 'none',
+    preset_mode: on ? preset : 'none',
   });
 }
 

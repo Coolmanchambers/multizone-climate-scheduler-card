@@ -2,6 +2,7 @@ import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { CARD_TYPE, CARD_NAME, CARD_VERSION, EDITOR_TYPE } from './const';
 import type { MzcsCardConfig, ZoneConfig } from './types';
+import { resolveEcoPreset } from './types';
 import type { HassLike } from './ha-types';
 import {
   climateSummary,
@@ -273,6 +274,7 @@ export class MzcsCard extends LitElement {
         anomaly_alerts: this._config?.features?.anomaly_alerts ?? true,
         steering: false,
         fan_guard: this._config?.features?.fan_guard,
+        eco_preset: this._config?.features?.eco_preset,
       },
       weather_entity: this._config?.weather_entity,
     };
@@ -370,6 +372,7 @@ export class MzcsCard extends LitElement {
         zones: zoneRefs,
         seasons: input.seasons,
         fanGuard: cfg.features?.fan_guard,
+        ecoPreset: resolveEcoPreset(cfg.features),
         weatherEntity: cfg.weather_entity,
         log: (line) => {
           this._execLog = [...this._execLog, line];
@@ -428,6 +431,7 @@ export class MzcsCard extends LitElement {
         zones: zoneRefs,
         seasons: input.seasons,
         fanGuard: cfg.features?.fan_guard,
+        ecoPreset: resolveEcoPreset(cfg.features),
         weatherEntity: cfg.weather_entity,
         log: (line) => {
           this._execLog = [...this._execLog, line];
@@ -1544,7 +1548,11 @@ export class MzcsCard extends LitElement {
     if (!zone) return nothing;
     const modes = hvacModes(hass, entity);
     const cur = hass.states[entity]?.state;
-    const eco = ecoSupported(hass, entity);
+    // The chip mirrors the engine's stand-down gate: hidden when disabled,
+    // and it toggles whichever preset the config names (default 'eco').
+    const ecoPreset = resolveEcoPreset(this._config?.features);
+    const eco = ecoPreset !== null && ecoSupported(hass, entity, ecoPreset);
+    const ecoLabel = ecoPreset === 'eco' ? 'Eco' : (ecoPreset ?? '').charAt(0).toUpperCase() + (ecoPreset ?? '').slice(1);
     const timerId = zoneEntityId('fan_timer', this._prefix, slugify(zone.name));
     const fanDurations = this._config?.features?.fan_timer ?? [15, 30, 60];
     const hasTimer = entityExists(hass, timerId);
@@ -1570,10 +1578,10 @@ export class MzcsCard extends LitElement {
                 ${eco
                   ? html`
                       <button
-                        class=${ecoActive(hass, entity) ? 'chip eco eco-on' : 'chip eco'}
-                        @click=${() => void setEco(hass, entity, !ecoActive(hass, entity))}
+                        class=${ecoActive(hass, entity, ecoPreset!) ? 'chip eco eco-on' : 'chip eco'}
+                        @click=${() => void setEco(hass, entity, !ecoActive(hass, entity, ecoPreset!), ecoPreset!)}
                       >
-                        Eco
+                        ${ecoLabel}
                       </button>
                     `
                   : nothing}

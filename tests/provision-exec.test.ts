@@ -12,6 +12,7 @@ import {
   type ZoneRef,
 } from '../src/lib/automation-payloads';
 import { buildDesired, plan } from '../src/lib/provisioning';
+import { resolveEcoPreset } from '../src/types';
 import { fetchExisting } from '../src/registry-read';
 import type { Plan, PlanAction } from '../src/lib/provisioning';
 import type { HassLike } from '../src/ha-types';
@@ -210,6 +211,58 @@ function ctx(log: string[] = []): ExecContext {
 const emptyPlan = (): Plan => ({ create: [], adopt: [], update: [], delete: [], noop: [] });
 const create = (id: string, kind: PlanAction['kind'], spec: Record<string, unknown> = {}) =>
   ({ op: 'create', id, kind, spec }) as Extract<PlanAction, { op: 'create' }>;
+
+describe('configurable eco/standby preset (0.9.1 item A)', () => {
+  const cond = (a: Record<string, unknown>): string =>
+    (JSON.stringify(a).match(/is_state.repeat.item.enabled[^"]*/) ?? [''])[0]!;
+
+  it('default output is BYTE-IDENTICAL to the pre-0.9.1 generator (no drift on upgrade)', () => {
+    const def = engineAutomation('climate', ZONES, SEASONS);
+    const explicit = engineAutomation('climate', ZONES, SEASONS, 'eco');
+    expect(contentHash(def)).toBe(contentHash(explicit));
+    // The exact legacy strings: any change here re-plans an engine Update on
+    // EVERY existing install - that is a deliberate act, never an accident.
+    expect(cond(def)).toContain("state_attr(repeat.item.climate, 'preset_mode') != 'eco'");
+    expect(String(def.description)).toContain('Zones stand down while their Eco preset is active.');
+    expect(JSON.stringify(def)).toContain('Skip when zone disabled, already applied, Eco active, or no block data');
+  });
+
+  it('a custom preset name lands in the condition and changes the signature', () => {
+    const away = engineAutomation('climate', ZONES, SEASONS, 'away');
+    expect(cond(away)).toContain("preset_mode') != 'away'");
+    expect(String(away.description)).toContain("their 'away' preset");
+    expect(parseSignature(away.description)).not.toBe(
+      parseSignature(engineAutomation('climate', ZONES, SEASONS).description),
+    );
+  });
+
+  it('null disables the stand-down gate entirely', () => {
+    const off = engineAutomation('climate', ZONES, SEASONS, null);
+    expect(JSON.stringify(off)).not.toContain('preset_mode');
+    expect(String(off.description)).not.toContain('stand down');
+    expect(JSON.stringify(off)).toContain('Skip when zone disabled, already applied, or no block data');
+  });
+
+  it('preset names are sanitized against template injection (quotes/backslashes stripped)', () => {
+    const evil = engineAutomation('climate', ZONES, SEASONS, "a'way\\");
+    expect(cond(evil)).toContain("preset_mode') != 'away'");
+  });
+
+  it('signatures and executor payload agree for a custom preset (parity)', () => {
+    const sigs = automationSignatures('climate', ZONES, SEASONS, undefined, 'away');
+    const payload = engineAutomation('climate', ZONES, SEASONS, 'away');
+    expect(sigs['climate_mzcs_engine']).toBe(parseSignature(payload.description));
+    expect(sigs['climate_mzcs_engine']).toBe(contentHash(payload));
+  });
+
+  it('resolveEcoPreset: default eco, custom name trimmed, false disables', () => {
+    expect(resolveEcoPreset(undefined)).toBe('eco');
+    expect(resolveEcoPreset({})).toBe('eco');
+    expect(resolveEcoPreset({ eco_preset: ' away ' })).toBe('away');
+    expect(resolveEcoPreset({ eco_preset: '' })).toBe('eco');
+    expect(resolveEcoPreset({ eco_preset: false })).toBe(null);
+  });
+});
 
 describe('executePlan', () => {
   it('maps each object kind to the right API', async () => {

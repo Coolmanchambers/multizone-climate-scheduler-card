@@ -4,6 +4,7 @@
 // guarantee: plan(applyPlan(plan(...)), desired) has zero actionable entries.
 
 import type { BlockMode, DayGranularity } from '../types';
+import { resolveEcoPreset } from '../types';
 import {
   zoneEntityId,
   zoneScheduleId,
@@ -44,7 +45,14 @@ export interface ProvisionInput {
   seasons: ProvisionSeason[];
   /** zone slug → season key → blocks */
   schedules: Record<string, Record<string, ScheduleSet>>;
-  features: { fan_timer: boolean; anomaly_alerts: boolean; steering: boolean; fan_guard?: string };
+  features: {
+    fan_timer: boolean;
+    anomaly_alerts: boolean;
+    steering: boolean;
+    fan_guard?: string;
+    /** standby preset for the engine's stand-down gate (see MzcsCardConfig) */
+    eco_preset?: string | false;
+  };
   /** weather entity providing the outdoor temperature for CDD learning */
   weather_entity?: string;
 }
@@ -260,7 +268,7 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
   // and gets an Update; the executor then regenerates it only when its content
   // still matches its own signature (i.e. never hand-edited).
   const zoneRefs = input.zones.map((z) => ({ ...z, climate: z.climate ?? `climate.${z.slug}` }));
-  const sigs = automationSignatures(p, zoneRefs, input.seasons, input.features.fan_guard);
+  const sigs = automationSignatures(p, zoneRefs, input.seasons, input.features.fan_guard, resolveEcoPreset(input.features));
   const auto = (key: string, zoneName?: string): DesiredObject => {
     const uid = automationUniqueId(p, zoneName ? `${key}_${zoneName.toLowerCase()}` : key);
     return {
