@@ -90,10 +90,21 @@ import {
   detectSets,
   rangesToDayBlocks,
   nextBlockAfter,
-  editBlockInSet,
+  replaceSetBlocks,
+  stripSegments,
+  timeToMin,
+  minToTime,
   type Week,
+  type DetectedSets,
 } from './lib/schedule-view';
-import type { DayKey, TimeRange } from './lib/schedule-ranges';
+import type { DayKey, TimeRange, ScheduleBlock } from './lib/schedule-ranges';
+
+/** SE2 strip color: cool blue → warm amber in RGB (no green detour). */
+function tempColor(t: number, lo: number, hi: number): string {
+  const k = hi > lo ? Math.max(0, Math.min(1, (t - lo) / (hi - lo))) : 0.5;
+  const a = [41, 121, 230], b = [226, 122, 49];
+  return `rgb(${a.map((v, i) => Math.round(v + (b[i]! - v) * k)).join(',')})`;
+}
 
 function fmtTime(t: string): string {
   const [hRaw, m] = t.split(':');
@@ -140,6 +151,8 @@ export class MzcsCard extends LitElement {
   private _schedName = '';
   @state() private _schedError?: string;
   @state() private _schedBusy = false;
+  @state() private _schedSel?: { setKey: string; idx: number };
+  @state() private _schedDrafts = new Map<string, ScheduleBlock[]>();
   @state() private _rtOpen = false;
   @state() private _rtDaily?: DailyRuntime[];
   private _rtLoadedFor?: string;
@@ -879,25 +892,51 @@ export class MzcsCard extends LitElement {
     }
   }
 
-  private async _saveBlockEdit(
-    zone: ZoneConfig,
-    setDays: DayKey[],
-    originalTime: string,
-    patch: { time?: string; cool_temp?: number },
-  ): Promise<void> {
-    if (!this.hass || !this._schedWeek) return;
+  /** Blocks for a set: unsaved draft when one exists, else the saved week. */
+  private _setBlocks(week: Week, setKey: string, days: DayKey[]): ScheduleBlock[] {
+    return (
+      this._schedDrafts.get(setKey) ??
+      rangesToDayBlocks((week[days[0]!] ?? []) as TimeRange[])
+    );
+  }
+
+  /** Mutate a set's draft (cloning from the saved week on first touch). */
+  private _mutateDraft(setKey: string, days: DayKey[], fn: (blocks: ScheduleBlock[]) => void): void {
+    if (!this._schedWeek) return;
+    const draft =
+      this._schedDrafts.get(setKey) ??
+      rangesToDayBlocks((this._schedWeek[days[0]!] ?? []) as TimeRange[]).map((b) => ({ ...b }));
+    fn(draft);
+    const m = new Map(this._schedDrafts);
+    m.set(setKey, draft);
+    this._schedDrafts = m;
+  }
+
+  private _clearSchedEdit(): void {
+    this._schedDrafts = new Map();
+    this._schedSel = undefined;
+  }
+
+  private async _saveSchedDrafts(zone: ZoneConfig): Promise<void> {
+    if (!this.hass || !this._schedWeek || this._schedDrafts.size === 0) return;
     const schedId = this._scheduleEntityId(zone);
     if (!schedId) return;
+    const det = detectSets(this._schedWeek);
     this._schedBusy = true;
     try {
-      const newWeek = editBlockInSet(this._schedWeek, setDays, originalTime, patch);
+      let week = this._schedWeek;
+      for (const [setKey, blocks] of this._schedDrafts) {
+        const days = det.sets[setKey];
+        if (days) week = replaceSetBlocks(week, days, blocks);
+      }
       await updateScheduleWeek(
         this.hass,
         schedId,
-        newWeek as unknown as Record<string, unknown>,
+        week as unknown as Record<string, unknown>,
         this._schedName,
       );
-      this._schedWeek = newWeek;
+      this._schedWeek = week;
+      this._clearSchedEdit();
       this._schedError = undefined;
     } catch (e) {
       this._schedError = errorText(e);
@@ -915,6 +954,7 @@ export class MzcsCard extends LitElement {
     if (this._schedLoadedFor !== schedId && !this._schedBusy) {
       this._schedLoadedFor = schedId;
       this._schedWeek = undefined;
+      this._clearSchedEdit();
       queueMicrotask(() => void this._loadWeek(zone));
     }
     const seasonName =
@@ -941,60 +981,223 @@ export class MzcsCard extends LitElement {
 
   private _renderScheduleBody(zone: ZoneConfig) {
     if (this._schedBusy && !this._schedWeek) return html`<p class="muted pad">Loading…</p>`;
-    if (this._schedError) return html`<p class="schederr pad">${this._schedError}</p>`;
     const week = this._schedWeek;
-    if (!week) return html`<p class="muted pad">No schedule data.</p>`;
+    if (!week) {
+      return this._schedError
+        ? html`<p class="schederr pad">${this._schedError}</p>`
+        : html`<p class="muted pad">No schedule data.</p>`;
+    }
     const det = detectSets(week);
+    const entries = Object.entries(det.sets);
     const today = new Date().getDay();
     const todayKey = (['sunday','monday','tuesday','wednesday','thursday','friday','saturday'] as DayKey[])[today]!;
+    // Shared color scale across every set so identical temps match everywhere.
+    const temps: number[] = [];
+    for (const [setKey, days] of entries) {
+      for (const b of this._setBlocks(week, setKey, days)) {
+        if (b.cool_temp != null) temps.push(b.cool_temp);
+        if (b.heat_temp != null) temps.push(b.heat_temp);
+      }
+    }
+    let lo = temps.length ? Math.min(...temps) : 70;
+    let hi = temps.length ? Math.max(...temps) : 80;
+    if (hi - lo < 6) { const mid = (hi + lo) / 2; lo = mid - 3; hi = mid + 3; }
+    const small = det.granularity === 'days';
+    const dirty = this._schedDrafts.size > 0;
     return html`
       <div class="schedbody">
-        ${Object.entries(det.sets).map(([setKey, days]) => {
-          const blocks = rangesToDayBlocks((week[days[0]!] ?? []) as TimeRange[]);
+        ${entries.map(([setKey, days], ei) => {
+          const blocks = this._setBlocks(week, setKey, days);
+          const segs = stripSegments(blocks);
           const isToday = days.includes(todayKey);
+          const hc = blocks.some((b) => b.mode === 'heat_cool');
+          const label = SET_LABELS[setKey] ?? setKey.charAt(0).toUpperCase() + setKey.slice(1);
+          const strip = html`
+            <div class="sstrip ${small ? 'small' : ''} ${hc ? 'hc' : ''}">
+              ${segs.map((s) => {
+                const idx = blocks.indexOf(s.block);
+                const sel =
+                  !s.wrap && this._schedSel?.setKey === setKey && this._schedSel?.idx === idx;
+                const w = ((s.toMin - s.fromMin) / 1440) * 100;
+                const pick = () => {
+                  this._schedSel = { setKey, idx };
+                };
+                if (hc) {
+                  const ct = s.block.cool_temp, ht = s.block.heat_temp;
+                  return html`
+                    <button class="sseg hcseg ${sel ? 'sel' : ''}" style="width:${w}%" @click=${pick}>
+                      <span class="hchalf" style="background:${ct != null ? tempColor(ct, lo, hi) : 'var(--mzcs-track)'}">
+                        <span class="segt">${ct ?? '–'}°</span>
+                        ${w > 15 && !small ? html`<span class="segn">${s.block.name}</span>` : nothing}
+                      </span>
+                      <span class="hchalf" style="background:${ht != null ? tempColor(ht, lo, hi) : 'var(--mzcs-track)'}">
+                        <span class="segt">${ht ?? '–'}°</span>
+                      </span>
+                    </button>
+                  `;
+                }
+                const t = s.block.cool_temp ?? s.block.heat_temp;
+                return html`
+                  <button
+                    class="sseg ${sel ? 'sel' : ''}"
+                    style="width:${w}%;background:${t != null ? tempColor(t, lo, hi) : 'var(--mzcs-track)'}"
+                    @click=${pick}
+                  >
+                    <span class="segt">${t ?? '–'}°</span>
+                    ${w > 9 && !small ? html`<span class="segn">${s.block.name}</span>` : nothing}
+                  </button>
+                `;
+              })}
+            </div>
+          `;
+          const showAxis = !small || ei === entries.length - 1;
           return html`
             <p class="sethead">
-              ${SET_LABELS[setKey] ?? setKey}${isToday ? html` <span class="today">today</span>` : nothing}
+              ${label}${isToday ? html` <span class="today">today</span>` : nothing}
             </p>
-            ${blocks.map(
-              (b) => html`
-                <div class="blockrow">
-                  <input
-                    class="btime"
-                    type="time"
-                    .value=${b.time}
-                    @change=${(e: Event) =>
-                      void this._saveBlockEdit(zone, days, b.time, {
-                        time: (e.target as HTMLInputElement).value,
-                      })}
-                  />
-                  <span class="bname">${b.name}</span>
-                  <input
-                    class="btemp"
-                    type="number"
-                    .value=${String(b.cool_temp ?? b.heat_temp ?? '')}
-                    @change=${(e: Event) =>
-                      void this._saveBlockEdit(zone, days, b.time, {
-                        cool_temp: Number((e.target as HTMLInputElement).value),
-                      })}
-                  />
-                </div>
-              `,
-            )}
+            ${hc
+              ? html`<div class="hcwrap">
+                  <div class="hcgutter"><span class="gc">Cool</span><span class="gh">Heat</span></div>
+                  ${strip}
+                </div>`
+              : strip}
+            ${showAxis
+              ? html`<div class="saxis ${hc ? 'indent' : ''}">
+                  <span>12A</span><span>4A</span><span>8A</span><span>12P</span><span>4P</span><span>8P</span><span>12A</span>
+                </div>`
+              : nothing}
           `;
         })}
+        ${this._renderBlockEditor(det)}
+        ${this._schedError ? html`<p class="schederr pad">${this._schedError}</p>` : nothing}
         <div class="schedactions">
+          ${dirty
+            ? html`
+                <button class="chip save" .disabled=${this._schedBusy}
+                  @click=${() => void this._saveSchedDrafts(zone)}>
+                  ${this._schedBusy ? 'Saving…' : 'Save changes'}
+                </button>
+                <button class="chip" .disabled=${this._schedBusy} @click=${() => this._clearSchedEdit()}>
+                  Discard
+                </button>
+              `
+            : html`
+                <button
+                  class="chip"
+                  .disabled=${this._schedBusy}
+                  @click=${() => {
+                    const marker = zoneEntityId('applied_block_marker', this._prefix, slugify(zone.name));
+                    void applyScheduleNow(this.hass!, marker, 'automation.climate_schedule_engine');
+                  }}
+                >
+                  Apply now
+                </button>
+                <span class="muted">Tap a block to edit. Changes apply at the next block; Apply now re-asserts immediately.</span>
+              `}
+        </div>
+      </div>
+    `;
+  }
+
+  private _renderBlockEditor(det: DetectedSets) {
+    const sel = this._schedSel;
+    const week = this._schedWeek;
+    if (!sel || !week) return nothing;
+    const days = det.sets[sel.setKey];
+    if (!days) return nothing;
+    const blocks = this._setBlocks(week, sel.setKey, days);
+    const b = blocks[sel.idx];
+    if (!b) return nothing;
+    const mut = (fn: (d: ScheduleBlock[]) => void) => this._mutateDraft(sel.setKey, days, fn);
+    const nudgeTime = (d: number) => {
+      mut((blk) => {
+        const cur = blk[sel.idx]!;
+        const t = timeToMin(cur.time) + d;
+        const loT = sel.idx > 0 ? timeToMin(blk[sel.idx - 1]!.time) + 15 : 0;
+        const hiT = sel.idx < blk.length - 1 ? timeToMin(blk[sel.idx + 1]!.time) - 15 : 1425;
+        cur.time = minToTime(Math.max(loT, Math.min(hiT, t)));
+      });
+    };
+    const nudgeTemp = (field: 'cool_temp' | 'heat_temp', d: number) => {
+      mut((blk) => {
+        const cur = blk[sel.idx]!;
+        const v = (cur[field] ?? 72) + d;
+        let loT = 50, hiT = 95;
+        if (cur.mode === 'heat_cool') {
+          if (field === 'cool_temp' && cur.heat_temp != null) loT = cur.heat_temp + 2;
+          if (field === 'heat_temp' && cur.cool_temp != null) hiT = cur.cool_temp - 2;
+        }
+        cur[field] = Math.max(loT, Math.min(hiT, v));
+      });
+    };
+    const stepper = (label: string, value: string, minus: () => void, plus: () => void) => html`
+      <div class="managerow">
+        <span>${label}</span>
+        <span class="stepgrp">
+          <button class="stepbtn" @click=${minus}>−</button>
+          <span class="stepval">${value}</span>
+          <button class="stepbtn" @click=${plus}>+</button>
+        </span>
+      </div>
+    `;
+    return html`
+      <div class="bedit">
+        <div class="managerow">
+          <span>Block name</span>
+          <input
+            class="bname-in"
+            type="text"
+            .value=${b.name}
+            @change=${(e: Event) =>
+              mut((blk) => {
+                blk[sel.idx]!.name = (e.target as HTMLInputElement).value;
+              })}
+          />
+        </div>
+        ${stepper('Starts', fmtTime(b.time), () => nudgeTime(-15), () => nudgeTime(15))}
+        ${b.mode === 'heat_cool'
+          ? html`
+              ${stepper('Cool to', `${b.cool_temp ?? '–'}°`, () => nudgeTemp('cool_temp', -1), () => nudgeTemp('cool_temp', 1))}
+              ${stepper('Heat to', `${b.heat_temp ?? '–'}°`, () => nudgeTemp('heat_temp', -1), () => nudgeTemp('heat_temp', 1))}
+            `
+          : b.mode === 'heat'
+            ? stepper('Heat to', `${b.heat_temp ?? '–'}°`, () => nudgeTemp('heat_temp', -1), () => nudgeTemp('heat_temp', 1))
+            : stepper('Cool to', `${b.cool_temp ?? '–'}°`, () => nudgeTemp('cool_temp', -1), () => nudgeTemp('cool_temp', 1))}
+        <div class="bedit-actions">
           <button
-            class="chip"
-            .disabled=${this._schedBusy}
+            class="chip danger"
+            .disabled=${blocks.length <= 1}
             @click=${() => {
-              const marker = zoneEntityId('applied_block_marker', this._prefix, slugify(zone.name));
-              void applyScheduleNow(this.hass!, marker, 'automation.climate_schedule_engine');
+              mut((blk) => {
+                blk.splice(sel.idx, 1);
+              });
+              this._schedSel = undefined;
             }}
           >
-            Apply now
+            Remove
           </button>
-          <span class="muted">Edits apply at the next block; Apply now re-asserts immediately.</span>
+          <button
+            class="chip"
+            @click=${() => {
+              const next = sel.idx < blocks.length - 1 ? timeToMin(blocks[sel.idx + 1]!.time) : 1440;
+              const cur = timeToMin(b.time);
+              if (next - cur < 45) return;
+              const t = minToTime(Math.round((cur + Math.max(30, (next - cur) / 2)) / 15) * 15);
+              mut((blk) => {
+                blk.splice(sel.idx + 1, 0, {
+                  time: t,
+                  name: 'New block',
+                  mode: b.mode,
+                  cool_temp: b.cool_temp,
+                  heat_temp: b.heat_temp,
+                });
+              });
+              this._schedSel = { setKey: sel.setKey, idx: sel.idx + 1 };
+            }}
+          >
+            Add block after
+          </button>
+          <button class="chip" @click=${() => (this._schedSel = undefined)}>Close</button>
         </div>
       </div>
     `;
@@ -1396,27 +1599,168 @@ export class MzcsCard extends LitElement {
       color: var(--mzcs-accent);
       font-weight: 400;
     }
-    .blockrow {
-      display: grid;
-      grid-template-columns: 92px 1fr 56px;
-      gap: 8px;
-      align-items: center;
-      padding: 3px 0;
-      font-size: 12px;
+    .sstrip {
+      display: flex;
+      height: 46px;
+      border-radius: 9px;
+      overflow: hidden;
+      border: 0.5px solid var(--mzcs-border);
+      flex: 1;
     }
-    .btime,
-    .btemp {
+    .sstrip.small {
+      height: 32px;
+    }
+    .sstrip.hc {
+      height: 58px;
+    }
+    .sseg {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      min-width: 0;
+      position: relative;
+      border: none;
+      border-right: 0.5px solid rgba(0, 0, 0, 0.35);
+      padding: 0;
+      cursor: pointer;
+      font: inherit;
+    }
+    .sseg:last-child {
+      border-right: none;
+    }
+    .sseg.sel::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border: 2px solid #fff;
+      pointer-events: none;
+    }
+    .segt {
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.1;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    }
+    .sstrip.small .segt {
+      font-size: 11px;
+    }
+    .segn {
+      font-size: 9px;
+      opacity: 0.9;
+      white-space: nowrap;
+      overflow: hidden;
+      max-width: 94%;
+      text-overflow: ellipsis;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    }
+    .hcseg {
+      background: transparent;
+    }
+    .hchalf {
+      flex: 1;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      min-height: 0;
+    }
+    .hchalf .segt {
+      font-size: 11.5px;
+    }
+    .hcwrap {
+      display: flex;
+      align-items: stretch;
+      gap: 5px;
+    }
+    .hcgutter {
+      width: 34px;
+      display: flex;
+      flex-direction: column;
+      border-radius: 7px;
+      overflow: hidden;
+    }
+    .hcgutter span {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      background: var(--mzcs-chip);
+    }
+    .hcgutter .gc {
+      color: #6fb1ff;
+    }
+    .hcgutter .gh {
+      color: #e8843c;
+    }
+    .saxis {
+      display: flex;
+      justify-content: space-between;
+      font-size: 9px;
+      color: var(--mzcs-text-dim);
+      margin-top: 2px;
+      padding: 0 1px;
+    }
+    .saxis.indent {
+      margin-left: 39px;
+    }
+    .bedit {
+      background: var(--mzcs-chip);
+      border: 0.5px solid var(--mzcs-border);
+      border-radius: 10px;
+      padding: 8px 10px;
+      margin-top: 10px;
+    }
+    .bedit .managerow {
+      padding: 4px 0;
+    }
+    .bname-in {
       background: var(--mzcs-track);
       border: 0.5px solid var(--mzcs-border);
       border-radius: 6px;
       color: var(--mzcs-text);
-      padding: 4px 6px;
+      padding: 5px 8px;
       font-size: 12px;
+      width: 130px;
     }
-    .bname {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+    .stepgrp {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .stepbtn {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      border: 0.5px solid var(--mzcs-border);
+      background: var(--mzcs-track);
+      color: var(--mzcs-text);
+      font-size: 15px;
+      cursor: pointer;
+      line-height: 1;
+    }
+    .stepval {
+      min-width: 62px;
+      text-align: center;
+      font-size: 12.5px;
+      font-weight: 600;
+    }
+    .bedit-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+      flex-wrap: wrap;
+    }
+    .chip.save {
+      background: var(--mzcs-accent);
+      border-color: var(--mzcs-accent);
+      color: #fff;
     }
     .schedactions {
       display: flex;

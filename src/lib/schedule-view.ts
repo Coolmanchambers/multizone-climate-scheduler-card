@@ -160,6 +160,62 @@ export function editBlockInSet(
   return out;
 }
 
+/**
+ * Replace an entire set's block list across every day it covers (SE2 editor:
+ * supports add/remove/rename, not just per-block patches). Other days keep
+ * their existing ranges untouched.
+ */
+export function replaceSetBlocks(week: Week, setDays: DayKey[], blocks: ScheduleBlock[]): Week {
+  const out: Week = {};
+  for (const day of ALL_DAYS) {
+    const ranges = week[day];
+    if (!ranges) continue;
+    out[day] = setDays.includes(day) ? blocksBackToRanges(blocks) : ranges;
+  }
+  return out;
+}
+
+export function timeToMin(time: string): number {
+  const [h, m] = time.split(':').map(Number);
+  return (h ?? 0) * 60 + (m ?? 0);
+}
+
+export function minToTime(min: number): string {
+  const v = Math.max(0, Math.min(1425, min));
+  return `${String(Math.floor(v / 60)).padStart(2, '0')}:${String(v % 60).padStart(2, '0')}`;
+}
+
+export interface StripSegment {
+  block: ScheduleBlock;
+  /** minutes from midnight */
+  fromMin: number;
+  toMin: number;
+  /** true for the pre-first-block span carrying the previous night's block */
+  wrap: boolean;
+}
+
+/**
+ * Strip geometry for the SE2 heat-strip view: each block runs from its start
+ * to the next block's start; the span before the first block belongs to the
+ * last block of the day (previous night wrapping past midnight).
+ */
+export function stripSegments(blocks: ScheduleBlock[]): StripSegment[] {
+  if (blocks.length === 0) return [];
+  const sorted = [...blocks].sort((a, b) => a.time.localeCompare(b.time));
+  const out: StripSegment[] = [];
+  const first = timeToMin(sorted[0]!.time);
+  if (first > 0) out.push({ block: sorted[sorted.length - 1]!, fromMin: 0, toMin: first, wrap: true });
+  sorted.forEach((b, i) => {
+    out.push({
+      block: b,
+      fromMin: timeToMin(b.time),
+      toMin: i < sorted.length - 1 ? timeToMin(sorted[i + 1]!.time) : 1440,
+      wrap: false,
+    });
+  });
+  return out;
+}
+
 /** blocks → contiguous ranges (mirror of schedule-ranges, local to avoid cycle). */
 function blocksBackToRanges(blocks: ScheduleBlock[]): TimeRange[] {
   const sorted = [...blocks].sort((a, b) => a.time.localeCompare(b.time));

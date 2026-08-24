@@ -5,6 +5,10 @@ import {
   currentBlockAt,
   nextBlockAfter,
   editBlockInSet,
+  replaceSetBlocks,
+  stripSegments,
+  timeToMin,
+  minToTime,
   type Week,
 } from '../src/lib/schedule-view';
 import { blocksToDayRanges, type ScheduleBlock } from '../src/lib/schedule-ranges';
@@ -113,5 +117,68 @@ describe('editBlockInSet', () => {
     const mon = edited.monday!;
     for (let i = 1; i < mon.length; i++) expect(mon[i]!.from).toBe(mon[i - 1]!.to);
     expect(rangesToDayBlocks(mon).find((b) => b.name === 'Pre-cool')!.time).toBe('13:30');
+  });
+});
+
+describe('stripSegments (SE2 heat-strip geometry)', () => {
+  it('attributes the pre-first-block span to the last block (overnight wrap)', () => {
+    const segs = stripSegments(WD);
+    expect(segs[0]!.wrap).toBe(true);
+    expect(segs[0]!.block.name).toBe('Sleep');
+    expect(segs[0]!.fromMin).toBe(0);
+    expect(segs[0]!.toMin).toBe(360);
+  });
+
+  it('covers the full day contiguously', () => {
+    const segs = stripSegments(WD);
+    expect(segs[0]!.fromMin).toBe(0);
+    expect(segs[segs.length - 1]!.toMin).toBe(1440);
+    for (let i = 1; i < segs.length; i++) {
+      expect(segs[i]!.fromMin).toBe(segs[i - 1]!.toMin);
+    }
+  });
+
+  it('a single 00:00 block is one full-day segment with no wrap', () => {
+    const segs = stripSegments([cool('00:00', 'Hold', 78)]);
+    expect(segs).toHaveLength(1);
+    expect(segs[0]).toMatchObject({ fromMin: 0, toMin: 1440, wrap: false });
+  });
+
+  it('empty blocks produce no segments', () => {
+    expect(stripSegments([])).toEqual([]);
+  });
+});
+
+describe('replaceSetBlocks (SE2 add/remove/rename)', () => {
+  it('adding a block rewrites only the set days', () => {
+    const withNew = [...WD, cool('11:00', 'Lunch', 77)];
+    const week = replaceSetBlocks(WEEK, ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'], withNew);
+    expect(rangesToDayBlocks(week.monday!)).toHaveLength(7);
+    expect(rangesToDayBlocks(week.monday!).map((b) => b.name)).toContain('Lunch');
+    expect(week.saturday).toBe(WEEK.saturday);
+  });
+
+  it('removing a block round-trips cleanly', () => {
+    const fewer = WD.filter((b) => b.name !== 'Pre-cool');
+    const week = replaceSetBlocks(WEEK, ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'], fewer);
+    expect(rangesToDayBlocks(week.friday!)).toEqual(fewer);
+  });
+
+  it('renames persist and null temps stay omitted in range data', () => {
+    const renamed = WD.map((b) => (b.name === 'Wake' ? { ...b, name: 'Morning' } : b));
+    const week = replaceSetBlocks(WEEK, ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'], renamed);
+    expect(rangesToDayBlocks(week.monday!)[0]!.name).toBe('Morning');
+    for (const r of week.monday!) {
+      expect('heat_temp' in (r.data as Record<string, unknown>)).toBe(false);
+    }
+  });
+});
+
+describe('time helpers', () => {
+  it('round-trips and clamps', () => {
+    expect(timeToMin('06:00')).toBe(360);
+    expect(minToTime(360)).toBe('06:00');
+    expect(minToTime(1500)).toBe('23:45');
+    expect(minToTime(-30)).toBe('00:00');
   });
 });
