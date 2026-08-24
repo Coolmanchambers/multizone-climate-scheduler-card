@@ -6,6 +6,7 @@ import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { HassLike } from './ha-types';
 import type { MzcsCardConfig, ZoneConfig, SeasonConfig, BlockMode } from './types';
+import { normalizeRoomSensors } from './types';
 import { slugify } from './lib/naming';
 import { EDITOR_TYPE } from './const';
 
@@ -157,9 +158,49 @@ export class MzcsCardEditor extends LitElement {
               />
               ${this._selector(
                 { entity: { domain: 'sensor', device_class: 'temperature', multiple: true } },
-                z.room_sensors ?? [],
-                (v) => this._setZone(i, { room_sensors: (v as string[]) ?? [] }),
+                normalizeRoomSensors(z.room_sensors).map((rs) => rs.entity),
+                (v) => {
+                  // Keep any labels the user already set as the selection changes.
+                  const ids = ((v as string[]) ?? []).filter(Boolean);
+                  const byId = new Map(
+                    normalizeRoomSensors(z.room_sensors).map((rs) => [rs.entity, rs]),
+                  );
+                  this._setZone(i, {
+                    room_sensors: ids.map((id) => {
+                      const kept = byId.get(id);
+                      // Bare id unless a label exists, so configs stay tidy.
+                      return kept?.name ? { entity: id, name: kept.name } : id;
+                    }),
+                  });
+                },
                 'Room sensors',
+              )}
+              ${normalizeRoomSensors(z.room_sensors).map(
+                (rs) => html`
+                  <label class="fieldrow roomlabel">
+                    <span class="rooment"
+                      >${this.hass?.states[rs.entity]?.attributes.friendly_name ?? rs.entity}</span
+                    >
+                    <input
+                      .value=${rs.name ?? ''}
+                      placeholder="Label on card (optional)"
+                      @change=${(e: Event) => {
+                        const label = (e.target as HTMLInputElement).value.trim();
+                        this._setZone(i, {
+                          room_sensors: normalizeRoomSensors(z.room_sensors).map((x) =>
+                            x.entity === rs.entity
+                              ? label
+                                ? { entity: x.entity, name: label }
+                                : x.entity
+                              : x.name
+                                ? { entity: x.entity, name: x.name }
+                                : x.entity,
+                          ),
+                        });
+                      }}
+                    />
+                  </label>
+                `,
               )}
             </div>
           `,
@@ -343,6 +384,22 @@ export class MzcsCardEditor extends LitElement {
   }
 
   static styles = css`
+    .roomlabel {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+    }
+    .roomlabel .rooment {
+      flex: 1 1 auto;
+      opacity: 0.75;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .roomlabel input {
+      flex: 0 0 45%;
+    }
     .ed {
       display: flex;
       flex-direction: column;

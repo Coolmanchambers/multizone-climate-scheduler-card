@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 
 ## [Unreleased]
 
+### Added
+- Room sensors accept the standard `{entity, name}` row form, so you can label a sensor on the
+  card without renaming the entity in Home Assistant. Bare entity ids still work, and the two
+  can be mixed. The card editor gains a label field per selected sensor.
+
+### Fixed
+- Room temperatures are rounded for display. Sensors that report at high precision (Zigbee
+  ones commonly send three decimals) were shown unrounded, e.g. "82.832".
+
 ## [0.9.2] - 2026-08-24
 
 ### Changed

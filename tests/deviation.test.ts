@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { deviationColor, formatDelta, sanitizeThresholds , formatRoomTemp } from '../src/lib/deviation';
+import { deviationColor, formatDelta, sanitizeThresholds, formatRoomTemp } from '../src/lib/deviation';
+import { normalizeRoomSensors } from '../src/types';
 
 describe('deviationColor', () => {
   it('maps contract defaults: green ≤2, amber ≤4, red beyond', () => {
@@ -57,5 +58,26 @@ describe('formatRoomTemp', () => {
     expect(formatRoomTemp(77.04)).toBe('77');
     // JS rounds .5 toward +Infinity; immaterial for a comfort readout.
     expect(formatRoomTemp(-3.25)).toBe('-3.2');
+  });
+});
+
+describe('room sensor labels (normalizeRoomSensors)', () => {
+  it('accepts bare ids, {entity, name} rows, and a mix of both', () => {
+    expect(normalizeRoomSensors(['sensor.a'])).toEqual([{ entity: 'sensor.a' }]);
+    expect(normalizeRoomSensors([{ entity: 'sensor.a', name: 'Guest Room' }])).toEqual([
+      { entity: 'sensor.a', name: 'Guest Room' },
+    ]);
+    expect(normalizeRoomSensors(['sensor.a', { entity: 'sensor.b', name: 'Loft' }])).toEqual([
+      { entity: 'sensor.a' },
+      { entity: 'sensor.b', name: 'Loft' },
+    ]);
+  });
+
+  it('is tolerant of an absent list and of junk entries', () => {
+    expect(normalizeRoomSensors(undefined)).toEqual([]);
+    expect(normalizeRoomSensors([])).toEqual([]);
+    expect(
+      normalizeRoomSensors(['', { entity: '' }, null as never, { entity: 'sensor.ok' }]),
+    ).toEqual([{ entity: 'sensor.ok' }]);
   });
 });

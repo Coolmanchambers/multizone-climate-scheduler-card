@@ -415,8 +415,9 @@ zones:
   - name: Upstairs
     entity: climate.upstairs_thermostat
     room_sensors:                     # optional, drives deviation chips
-      - sensor.guest_room_temperature
-      - sensor.loft_temperature
+      - sensor.guest_room_temperature           # uses the entity's own name
+      - entity: sensor.zb_loft_temp_sensor      # or label it yourself
+        name: Loft
 seasons:
   - name: Summer
     default_mode: cool                # cool | heat | heat_cool | off
@@ -437,7 +438,7 @@ features:
 | `prefix` | string | `climate` | Must be unique per card instance. Slugified automatically. |
 | `zones[].name` | string | — | Display name; also determines the zone's entity ids. |
 | `zones[].entity` | string | — | Any `climate.*` entity. |
-| `zones[].room_sensors` | list | — | Temperature sensors shown as deviation chips. |
+| `zones[].room_sensors` | list | — | Temperature sensors shown as deviation chips. Each item is either an entity id or `{entity, name}` when you want a different label than the entity's friendly name. |
 | `seasons[].default_mode` | enum | — | `cool`, `heat`, `heat_cool`, or `off`. |
 | `weather_entity` | string | — | Enables outdoor tracking, learning, and alerts. |
 | `features.fan_timer` | list | `[15,30,60]` | Fan timer presets, in minutes. |

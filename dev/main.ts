@@ -25,8 +25,8 @@ const config: MzcsCardConfig = {
       entity: 'climate.upstairs_thermostat',
       name: 'Upstairs',
       room_sensors: [
-        'sensor.guest_room_temperature',
-        'sensor.bedroom_1_temperature',
+        { entity: 'sensor.guest_room_temperature', name: 'Guest Room' },
+        { entity: 'sensor.bedroom_1_temperature', name: 'Bedroom 1' },
         'sensor.bedroom_2_temperature',
         'sensor.loft_temperature',
         'sensor.dead_sensor_temperature',

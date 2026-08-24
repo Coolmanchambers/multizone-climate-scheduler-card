@@ -2,7 +2,7 @@ import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { CARD_TYPE, CARD_NAME, CARD_VERSION, EDITOR_TYPE } from './const';
 import type { MzcsCardConfig, ZoneConfig } from './types';
-import { resolveEcoPreset } from './types';
+import { resolveEcoPreset, normalizeRoomSensors } from './types';
 import type { HassLike } from './ha-types';
 import {
   climateSummary,
@@ -1916,8 +1916,9 @@ export class MzcsCard extends LitElement {
     );
     return html`
       <div class="rooms">
-        ${zone.room_sensors.map((id) => {
-          const r = roomReading(hass, id);
+        ${normalizeRoomSensors(zone.room_sensors).map((rs) => {
+          const reading = roomReading(hass, rs.entity);
+          const r = { ...reading, name: rs.name?.trim() || reading.name };
           if (r.temp == null || setpoint == null) {
             return html`
               <div class="room">

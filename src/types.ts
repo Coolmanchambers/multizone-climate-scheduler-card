@@ -2,10 +2,30 @@ export type SeasonSwitchMode = 'manual' | 'semi' | 'full';
 export type DayGranularity = 'all' | 'wdwe' | 'days';
 export type BlockMode = 'cool' | 'heat' | 'heat_cool' | 'off';
 
+export interface RoomSensorConfig {
+  entity: string;
+  /** label shown on the card; falls back to the entity's friendly name */
+  name?: string;
+}
+
+/** Normalize the mixed shorthand/object form to objects. */
+export function normalizeRoomSensors(
+  list?: Array<string | RoomSensorConfig>,
+): RoomSensorConfig[] {
+  return (list ?? [])
+    .map((s) => (typeof s === 'string' ? { entity: s } : s))
+    .filter((s): s is RoomSensorConfig => !!s && typeof s.entity === 'string' && s.entity !== '');
+}
+
 export interface ZoneConfig {
   entity: string;
   name: string;
-  room_sensors?: string[];
+  /**
+   * Room temperature sensors. Either a bare entity id, or the standard
+   * `{ entity, name }` row form when you want a different label on the card
+   * than the entity's own friendly name.
+   */
+  room_sensors?: Array<string | RoomSensorConfig>;
 }
 
 export interface SeasonConfig {
