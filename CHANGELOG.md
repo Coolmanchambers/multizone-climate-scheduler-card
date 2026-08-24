@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-08-24
+
+### Changed
+- Removed third-party thermostat brand names from the project. They were only ever shorthand
+  for "a familiar thermostat UI", but this card is its own design and shouldn't imply
+  otherwise. Documentation, the card's description in the picker, the editor hints, and the
+  example entity ids are all brand-neutral now.
+- The default theme preset is renamed **Cobalt**. Installs that stored the old key keep the
+  identical look - the old value still resolves, pinned by a test - so nothing changes for
+  existing users.
+
 ### Documentation
 - Install instructions now state plainly that this is a **dashboard card, not an
   integration**, and that HACS must be given the category **Dashboard** (**Lovelace** or
@@ -17,7 +28,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 
 ### Added
 - Configurable Eco/standby preset (`features.eco_preset`): choose which thermostat preset
-  makes the engine stand down for a zone (the default stays `eco`, matching Nest), or set it
+  makes the engine stand down for a zone (the default stays `eco`, the most common name), or set it
   to `false` so Home Assistant owns standby behaviour entirely. The card's Eco chip follows
   the same setting. Existing installs are untouched: with the default, the generated engine
   is byte-identical to 0.9.0, so no automation update is planned on upgrade.
@@ -39,7 +50,7 @@ multi-zone installation, but not yet proven across many homes - hence 0.9 rather
 1.0.0 follows once real-world use confirms it.
 
 ### Card
-- Nest-style climate view for 1-4 zones: hero row with setpoint stepper, mode/fan/eco
+- Multi-zone climate view for 1-4 zones: hero row with setpoint stepper, mode/fan/eco
   controls, per-zone enable kill switches with a master toggle, next-block line, and a
   runtime drawer with 7-day pills, day drill-in, and a weather-normalized verdict.
 - Visual schedule editor: per-season colored strips (shared blue-to-amber temperature

@@ -1,6 +1,6 @@
 {
-  "_captured": "2026-08-23 via HA MCP, climate.nest_upstairs, first 30 of 200 changes in 24h (asc). Trimmed to the attributes segment-extraction uses. Real idle->cooling->idle cycling.",
-  "entity_id": "climate.nest_upstairs",
+  "_captured": "2026-08-23 via HA MCP, climate.upstairs_thermostat, first 30 of 200 changes in 24h (asc). Trimmed to the attributes segment-extraction uses. Real idle->cooling->idle cycling.",
+  "entity_id": "climate.upstairs_thermostat",
   "states": [
     { "t": "2026-08-22T12:50:31-07:00", "action": "idle", "cur": 76, "set": 77 },
     { "t": "2026-08-22T12:50:53-07:00", "action": "idle", "cur": 76, "set": 77 },

@@ -106,7 +106,7 @@ describe('round-trip: parse(generate(x)) === x', () => {
 describe('parser rejections', () => {
   it('ignores foreign entities', () => {
     expect(parseEntityId('sensor.living_room_temperature', PREFIX, ZONES, SEASONS)).toBeNull();
-    expect(parseEntityId('climate.nest_upstairs', PREFIX, ZONES, SEASONS)).toBeNull();
+    expect(parseEntityId('climate.upstairs_thermostat', PREFIX, ZONES, SEASONS)).toBeNull();
     expect(parseEntityId('sensor.climate2_next_block', PREFIX, ZONES, SEASONS)).toBeNull();
   });
 

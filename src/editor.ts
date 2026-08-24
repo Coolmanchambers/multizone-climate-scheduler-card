@@ -312,7 +312,7 @@ export class MzcsCardEditor extends LitElement {
               </label>
               <p class="muted">
                 The engine leaves a zone alone while its thermostat reports this preset.
-                'eco' matches Nest; other brands may use 'away', 'sleep', or similar - check
+                'eco' is the most common name; other brands may use 'away', 'sleep', or similar - check
                 the thermostat's preset list in Home Assistant.
               </p>
             `

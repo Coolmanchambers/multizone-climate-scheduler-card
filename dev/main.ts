@@ -20,9 +20,9 @@ const config: MzcsCardConfig = {
   type: 'custom:multizone-climate-scheduler-card',
   prefix: 'climate',
   zones: [
-    { entity: 'climate.nest_downstairs', name: 'Downstairs' },
+    { entity: 'climate.downstairs_thermostat', name: 'Downstairs' },
     {
-      entity: 'climate.nest_upstairs',
+      entity: 'climate.upstairs_thermostat',
       name: 'Upstairs',
       room_sensors: [
         'sensor.guest_room_temperature',
@@ -110,12 +110,12 @@ document.getElementById('btn-fan')?.addEventListener('click', () => {
   void hass.callService('timer', 'start', { entity_id: 'timer.climate_upstairs_fan' });
 });
 document.getElementById('btn-cool')?.addEventListener('click', () => {
-  hass.set('climate.nest_upstairs', {
+  hass.set('climate.upstairs_thermostat', {
     attributes: { hvac_action: 'cooling' },
   });
 });
 document.getElementById('btn-unavail')?.addEventListener('click', () => {
-  hass.set('climate.nest_downstairs', { state: 'unavailable' });
+  hass.set('climate.downstairs_thermostat', { state: 'unavailable' });
 });
 const logEl = document.getElementById('svc-log');
 setInterval(() => {

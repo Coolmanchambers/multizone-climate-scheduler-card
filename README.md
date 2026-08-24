@@ -36,8 +36,8 @@ you end up juggling apps, and none of it is visible to Home Assistant.
 
 This card replaces that. It gives you:
 
-- **One card for every zone** — a Nest-style view with tabs, so all your thermostats are in one
-  place regardless of brand.
+- **One card for every zone** — a clean, app-style view with tabs, so all your thermostats are
+  in one place regardless of brand.
 - **Schedules that actually live in Home Assistant** — stored as native `schedule` helpers and
   executed by Home Assistant automations, so they keep running whether or not any dashboard is
   open, and you can see and edit them anywhere in HA.
@@ -235,8 +235,8 @@ This is the checkpoint that matters. Before enabling any zone, confirm all four:
 
 - [ ] **Your schedules are complete and correct** — every zone, every season, right times, right
       temperatures. Re-read them in the card.
-- [ ] **The schedule in your thermostat's own app is turned OFF** — Nest, ecobee, Honeywell,
-      SmartThings, whatever you use. Also turn off any "learning" or "auto-schedule" feature.
+- [ ] **The schedule in your thermostat's own app is turned OFF** — whichever brand and app
+      you use. Also turn off any "learning" or "auto-schedule" feature.
       See the [warning below](#turn-off-your-thermostats-own-schedule-first) for why.
 - [ ] **The right season is selected** on the **Zones** tab.
 - [ ] **You're around to watch it.** Enable during a day you'll be home, not the night before a
@@ -265,7 +265,7 @@ These are the things most likely to surprise you. Please read them before enabli
 ### Turn off your thermostat's own schedule first
 
 > [!WARNING]
-> If your Nest/ecobee/Honeywell app still has its own schedule running, you now have **two
+> If your thermostat's own app still has its own schedule running, you now have **two
 > schedulers fighting over one thermostat.** The symptom is setpoints that appear to "change
 > themselves" at odd times. Turn off the schedule — and any learning or auto-schedule feature —
 > in the vendor app for every zone you enable here.
@@ -290,7 +290,8 @@ schedule re-applied right now, use **Apply now** in the schedule editor.
 
 ### A standby preset makes a zone stand down
 
-While a zone's thermostat reports its standby preset — **`eco` by default**, matching Nest —
+While a zone's thermostat reports its standby preset — **`eco` by default**, the most common
+name for it —
 the engine leaves that zone completely alone. This is handy for away modes, and confusing if
 you forgot the preset was on. If your thermostat uses a different name for the same idea
 (`away`, `sleep`, ...), set it in the editor under **Features → Standby preset name**; the
@@ -410,9 +411,9 @@ type: custom:multizone-climate-scheduler-card
 prefix: climate                       # namespace for all created objects
 zones:
   - name: Downstairs
-    entity: climate.nest_downstairs
+    entity: climate.downstairs_thermostat
   - name: Upstairs
-    entity: climate.nest_upstairs
+    entity: climate.upstairs_thermostat
     room_sensors:                     # optional, drives deviation chips
       - sensor.guest_room_temperature
       - sensor.loft_temperature

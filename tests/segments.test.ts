@@ -91,7 +91,7 @@ describe('extractSetpointChanges', () => {
 });
 
 describe('formatHoursQuarter', () => {
-  it('formats Nest-style', () => {
+  it('formats quarter hours', () => {
     expect(formatHoursQuarter(9.5)).toBe('9½ hr');
     expect(formatHoursQuarter(11.5)).toBe('11½ hr');
     expect(formatHoursQuarter(9.25)).toBe('9¼ hr');

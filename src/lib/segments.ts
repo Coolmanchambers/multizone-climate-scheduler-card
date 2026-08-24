@@ -1,6 +1,6 @@
 // Runtime history → run segments + setpoint changes (S10). Pure functions.
 // Consumes recorder history rows for the zone's running binary sensor and the
-// climate entity's setpoint attribute; produces the Nest-style Energy History
+// climate entity's setpoint attribute; produces the Energy History
 // primitives (segments for the timeline, changes for the bubbles).
 
 export interface HistoryPoint {
@@ -80,7 +80,7 @@ export function extractSetpointChanges(points: HistoryPoint[]): SetpointChange[]
   return out;
 }
 
-/** 9.5 → "9½ hr", 0.25 → "¼ hr", 0 → "0 hr" (Nest-style quarter formatting). */
+/** 9.5 → "9½ hr", 0.25 → "¼ hr", 0 → "0 hr" (quarter-hour formatting). */
 export function formatHoursQuarter(hours: number): string {
   if (!Number.isFinite(hours) || hours < 0) return '–';
   const q = Math.round(hours * 4) / 4;

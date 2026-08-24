@@ -104,7 +104,7 @@ never collide in HA's name→object_id slugification (S12c incident rule).
 - "Climate: schedule engine" (block transitions → climate.set_temperature / set_hvac_mode incl.
   heat_cool dual range and off; per-zone enable + applied-block-marker + standby-preset gates;
   15-min safety tick; season name→key map). The standby gate is configurable via
-  `features.eco_preset` (default `'eco'` = Nest behavior and byte-identical to the 0.9.0
+  `features.eco_preset` (default `'eco'` = pre-0.9.1 behavior and byte-identical to the 0.9.0
   generator; a string names a different preset; `false` removes the gate)
 - "Climate: <Zone> fan timer finished" (per zone; stands down while the configured fan-guard
   helper is on)
@@ -125,10 +125,10 @@ category assignment: deferred post-v1.
 type: custom:multizone-climate-scheduler-card
 prefix: climate
 zones:
-  - entity: climate.nest_upstairs
+  - entity: climate.upstairs_thermostat
     name: Upstairs
     room_sensors: [sensor.guest_room_temperature, ...]
-  - entity: climate.nest_downstairs
+  - entity: climate.downstairs_thermostat
     name: Downstairs
 seasons:
   - { key: summer, name: Summer, default_mode: cool }
@@ -141,7 +141,7 @@ features: { fan_timer: [15, 30, 60], anomaly_alerts: true, fan_guard: input_bool
 ```
 `fan_guard` is optional. `room_sensors` per zone drives the read-only deviation chips.
 
-## 7. Reference data (the owner's live Nest schedules, decoded 2026-07-26)
+## 7. Reference data (the original onboarding schedules, decoded 2026-07-26)
 
 Reference for the original onboarding, NOT what the public card seeds - a fresh install seeds
 a generic single "Day" block per season (`src/lib/default-schedules.ts`).
@@ -166,7 +166,7 @@ Not shipped in v0.9.0: `features.steering` is hard-off in the card and no steeri
 generator exists (desiring one would be a perpetual phantom Create - QA-R A2-5). The helper
 inventory below stays feature-gated and ready.
 
-HA cannot select the Nest's internal sensor (SDM limit); the engine reproduces it via
+HA cannot select some thermostats' internal sensor (vendor API limit); the engine reproduces it via
 **setpoint compensation**: commanded setpoint = `thermostat_reading - (room_reading - target)`,
 clamped, throttled, reverted on target-reached / timer expiry / sensor unavailable. v1 steers in
 single-mode cool/heat only; on-peak hold caps compensation (exact rule settled with the S7
@@ -177,10 +177,10 @@ audit).
 **Global tunables:** `input_number.climate_override_minutes` (60),
 `input_number.climate_steer_min_setpoint` (68), `input_number.climate_steer_max_setpoint` (85),
 `input_number.climate_steer_max_offset` (5).
-**Sensor schedule:** per zone, named periods each mapping to thermostat-or-sensor (Nest
-dayparts UX: Morning/Midday/Evening/Night defaults, editable times, any count). Storage follows
+**Sensor schedule:** per zone, named periods each mapping to thermostat-or-sensor (daypart
+UX: Morning/Midday/Evening/Night defaults, editable times, any count). Storage follows
 the §4 decision (blocks with data payload - identical shape).
-**Seed (the owner's live Nest config):** Upstairs - Morning/Midday/Evening = thermostat, Night =
+**Seed (original onboarding config):** Upstairs - Morning/Midday/Evening = thermostat, Night =
 a bedroom sensor.
 **Card UX:** tap room chip → 1h override with countdown + highlighted chip; sensor-schedule
 editing in Manage. Steering inputs are Aqara-class sensors only (never Blink temps).
@@ -190,7 +190,7 @@ editing in Manage. Steering inputs are Aqara-class sensors only (never Blink tem
 
 Per zone: `input_boolean.{prefix}_{zone}_enabled` (class `zone_enabled`) + a "Scheduling · all
 zones" master row on Manage. **Off = the engine stands down for that zone and the thermostat's
-own app (Nest/SmartThings/etc.) governs.** This is the user's escape hatch during setup,
+own app governs.** This is the user's escape hatch during setup,
 testing, or any issue - one tap returns full control to their existing apps.
 
 Invariants the wizard and engine MUST uphold:
@@ -219,7 +219,7 @@ a divergent display name then converges via an explicit Edit on the following ap
 
 ## 9. Non-goals (v1)
 
-Card never executes schedules (backend automations do). No Nest temp-sensor access (SDM
+Card never executes schedules (backend automations do). No vendor temp-sensor access (API
 limitation). Segment detail beyond recorder window (LTS totals only). Mini-split hero parity
 (zone on hold). Graph-based schedule editor (v1.x backlog, kneave/climate-scheduler MIT
 patterns).

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { clampSetpoint } from '../src/ha-adapter';
 
 describe('clampSetpoint', () => {
-  it('clamps within plausible bounds (Nest: 50-90°F, setpoint 77)', () => {
+  it('clamps within plausible bounds (50-90°F, setpoint 77)', () => {
     expect(clampSetpoint(91, 90, 50, 90)).toBe(90);
     expect(clampSetpoint(49, 50, 50, 90)).toBe(50);
     expect(clampSetpoint(78, 77, 50, 90)).toBe(78);

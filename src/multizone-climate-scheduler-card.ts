@@ -2696,5 +2696,5 @@ window.customCards.push({
   type: CARD_TYPE,
   name: CARD_NAME,
   description:
-    'Nest-style climate view for 1-4 zones with seasonal scheduling, fan timers, and runtime history.',
+    'Multi-zone climate view for 1-4 zones with seasonal scheduling, fan timers, and runtime history.',
 });

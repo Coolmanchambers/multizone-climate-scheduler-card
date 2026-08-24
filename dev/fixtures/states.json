@@ -1,6 +1,6 @@
 {
   "_captured": "2026-08-23 via HA MCP, live instance (America/Phoenix). Mini-split quirk: min_temp/max_temp are Celsius bounds (7/35) while temps are Fahrenheit - adapter must not trust min/max on that zone. timer.* entities are synthetic (not yet provisioned).",
-  "climate.nest_upstairs": {
+  "climate.upstairs_thermostat": {
     "state": "cool",
     "attributes": {
       "hvac_modes": ["heat", "cool", "heat_cool", "off"],
@@ -16,11 +16,11 @@
       "fan_mode": "off",
       "hvac_action": "idle",
       "preset_mode": "none",
-      "friendly_name": "Nest - Upstairs",
+      "friendly_name": "Upstairs Thermostat",
       "supported_features": 411
     }
   },
-  "climate.nest_downstairs": {
+  "climate.downstairs_thermostat": {
     "state": "cool",
     "attributes": {
       "hvac_modes": ["heat", "cool", "heat_cool", "off"],
@@ -36,7 +36,7 @@
       "fan_mode": "off",
       "hvac_action": "cooling",
       "preset_mode": "none",
-      "friendly_name": "Nest - Downstairs",
+      "friendly_name": "Downstairs Thermostat",
       "supported_features": 411
     }
   },
@@ -121,7 +121,7 @@
     "attributes": { "friendly_name": "Climate Upstairs Summer", "block": "Wake", "mode": "cool", "cool_temp": 78 }
   },
   "input_text.climate_theme": {
-    "state": "nest-blue",
+    "state": "cobalt",
     "attributes": { "friendly_name": "Climate Theme" }
   },
   "sensor.climate_upstairs_runtime_today": {

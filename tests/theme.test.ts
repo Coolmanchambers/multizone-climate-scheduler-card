@@ -50,11 +50,17 @@ describe('resolveTheme', () => {
     expect(r.tokens).toEqual(tokens);
   });
 
-  it('accepts legacy 5-part customs with Nest Blue surfaces', () => {
+  it('the pre-0.9.2 theme key still resolves to the same look (rename back-compat)', () => {
+    const legacy = resolveTheme('nest-blue');
+    expect(legacy.presetKey).toBe('cobalt');
+    expect(legacy.tokens).toEqual(THEME_PRESETS['cobalt']!.tokens);
+  });
+
+  it('accepts legacy 5-part customs with default-preset surfaces', () => {
     const r = resolveTheme('custom:#123456,#654321,#00aa00,#ffcc00,#cc0000');
     expect(r.presetKey).toBe('custom');
     expect(r.tokens.accent).toBe('#123456');
-    expect(r.tokens.bg).toBe(THEME_PRESETS['nest-blue']!.tokens.bg);
+    expect(r.tokens.bg).toBe(THEME_PRESETS['cobalt']!.tokens.bg);
   });
 
   it('rejects custom strings with bad hex', () => {
@@ -65,10 +71,10 @@ describe('resolveTheme', () => {
 });
 
 describe('customSeedFrom', () => {
-  it('passes hex palettes through and replaces var() palettes with Nest Blue', () => {
+  it('passes hex palettes through and replaces var() palettes with the default preset', () => {
     expect(customSeedFrom(THEME_PRESETS.ember!.tokens)).toEqual(THEME_PRESETS.ember!.tokens);
     expect(customSeedFrom(THEME_PRESETS['ha-default']!.tokens)).toEqual(
-      THEME_PRESETS['nest-blue']!.tokens,
+      THEME_PRESETS['cobalt']!.tokens,
     );
   });
 });

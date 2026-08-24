@@ -18,7 +18,7 @@ export interface ThemeTokens {
   textDim: string;
 }
 
-const NEST_BLUE: ThemeTokens = {
+const COBALT: ThemeTokens = {
   accent: '#1e88e5',
   accentBright: '#42a5f5',
   good: '#2bb673',
@@ -34,7 +34,7 @@ const NEST_BLUE: ThemeTokens = {
 };
 
 export const THEME_PRESETS: Record<string, { label: string; tokens: ThemeTokens }> = {
-  'nest-blue': { label: 'Nest Blue', tokens: NEST_BLUE },
+  cobalt: { label: 'Cobalt', tokens: COBALT },
   ember: {
     label: 'Ember',
     tokens: {
@@ -105,7 +105,7 @@ export const THEME_PRESETS: Record<string, { label: string; tokens: ThemeTokens 
   },
 };
 
-export const DEFAULT_THEME = 'nest-blue';
+export const DEFAULT_THEME = 'cobalt';
 const HEX = /^#[0-9a-f]{6}$/i;
 const ORDER: Array<keyof ThemeTokens> = [
   'accent',
@@ -129,11 +129,11 @@ export function serializeCustomTheme(tokens: ThemeTokens): string {
 /**
  * Custom themes are always all-hex (var() references belong to presets only),
  * so serialization stays stable and portable. A custom seeded from ha-default
- * starts from Nest Blue's hex values instead.
+ * starts from the default preset's hex values instead.
  */
 export function customSeedFrom(tokens: ThemeTokens): ThemeTokens {
   const allHex = ORDER.every((k) => HEX.test(tokens[k]));
-  return allHex ? { ...tokens } : { ...NEST_BLUE };
+  return allHex ? { ...tokens } : { ...COBALT };
 }
 
 export function resolveTheme(stored: string | undefined | null): {
@@ -142,16 +142,19 @@ export function resolveTheme(stored: string | undefined | null): {
 } {
   const fallback = { presetKey: DEFAULT_THEME, tokens: THEME_PRESETS[DEFAULT_THEME]!.tokens };
   if (!stored) return fallback;
-  const preset = THEME_PRESETS[stored];
-  if (preset) return { presetKey: stored, tokens: preset.tokens };
+  // The default preset was renamed in 0.9.2; installs that stored the old key
+  // must keep the same look rather than silently reverting.
+  const key = stored === 'nest-blue' ? DEFAULT_THEME : stored;
+  const preset = THEME_PRESETS[key];
+  if (preset) return { presetKey: key, tokens: preset.tokens };
   if (stored.startsWith('custom:')) {
     const parts = stored.slice('custom:'.length).split(',');
-    // Back-compat: 5-part accent-only customs keep Nest Blue surfaces.
+    // Back-compat: 5-part accent-only customs keep the default surfaces.
     if (parts.length === 5 && parts.every((p) => HEX.test(p.trim()))) {
       const [accent, accentBright, good, warn, bad] = parts.map((p) => p.trim().toLowerCase());
       return {
         presetKey: 'custom',
-        tokens: { ...NEST_BLUE, accent: accent!, accentBright: accentBright!, good: good!, warn: warn!, bad: bad! },
+        tokens: { ...COBALT, accent: accent!, accentBright: accentBright!, good: good!, warn: warn!, bad: bad! },
       };
     }
     if (parts.length === ORDER.length && parts.every((p) => HEX.test(p.trim()))) {
