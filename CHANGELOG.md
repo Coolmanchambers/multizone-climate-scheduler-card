@@ -10,6 +10,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 - Configurable Eco/standby preset: choose which thermostat preset makes the engine stand
   down, or switch the behaviour off entirely (today it is hard-coded to a preset named
   `eco`, which only suits Nest-style thermostats).
+- Tabbed settings screen, so the gear panel is no longer one long scroll.
+- Safer removal: the danger zone moves onto its own tab (it currently sits next to Close),
+  and "Remove everything" gains an are-you-sure step plus a typed confirmation.
+- New "Objects" tab listing every helper, schedule, sensor, and automation the card manages,
+  with per-object status (managed / missing / customized / unmanaged).
 
 ## [0.9.0] - 2026-08-24
 
