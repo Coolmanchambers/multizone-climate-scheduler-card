@@ -71,6 +71,23 @@ if (shot) {
   for (const [id, friendly_name] of Object.entries(demoRooms)) {
     hass.set(id, { attributes: { friendly_name } });
   }
+  // A realistic post-Apply install, so the Setup/Manage screenshot shows the
+  // per-zone kill switches (all OFF, exactly as a fresh Apply leaves them)
+  // and the full tuning set rather than the sparse fixture subset.
+  for (const slug of ['downstairs', 'upstairs', 'office']) {
+    hass.set(`input_boolean.climate_${slug}_enabled`, {
+      state: 'off',
+      attributes: { friendly_name: `Climate ${slug} enabled` },
+    });
+    hass.set(`input_text.climate_${slug}_applied_block`, { state: '' });
+  }
+  for (const [cls, value] of [
+    ['runtime_alert_margin', '35'],
+    ['runtime_learn_days', '30'],
+    ['cdd_base', '75'],
+  ] as const) {
+    hass.set(`input_number.climate_${cls}`, { state: value });
+  }
   const c = card as unknown as Record<string, unknown>;
   const openPanel = () => {
     // Upstairs is the fully-fixtured zone (schedule + runtime + room sensors).

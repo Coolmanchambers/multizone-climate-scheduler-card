@@ -2,10 +2,25 @@
 
 [![HACS: Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz)
 [![Release](https://img.shields.io/github/v/release/Coolmanchambers/multizone-climate-scheduler-card?display_name=tag)](https://github.com/Coolmanchambers/multizone-climate-scheduler-card/releases)
+[![Status: Work in progress](https://img.shields.io/badge/status-work%20in%20progress-orange.svg)](#-project-status-work-in-progress)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 **Run your whole house's heating and cooling from one Home Assistant card — with real
 schedules that live in Home Assistant, not in your thermostat's cloud app.**
+
+## 🚧 Project status: work in progress
+
+> [!IMPORTANT]
+> This card is **actively being developed and is not yet battle-tested across many homes.** It
+> has been built and run against a single real multi-zone installation, so expect rough edges,
+> gaps, and changes between releases.
+>
+> It creates and manages real Home Assistant objects and, once you enable a zone, it will
+> **change the temperature in your house**. Everything is preview-before-write and every zone
+> ships switched off — but please read [Important things to know](#-important-things-to-know)
+> in full before you enable anything, and start with a single zone.
+>
+> Feedback and issue reports are genuinely welcome; that is how this gets better.
 
 <p align="center">
   <img src="docs/hero.png" alt="The card showing zone tabs, the current setpoint, room temperature deviations, the next scheduled block, and today's runtime" width="460">
@@ -58,8 +73,8 @@ or you want the card to control equipment directly (it never does — automation
 
 | Change-set preview | Setup and Manage |
 |---|---|
-| <img src="docs/preview.png" alt="Setup screen listing every object that will be created, with an Apply 48 changes button" width="380"> | <img src="docs/setup.png" alt="Setup and Manage screen with active season, tunables, theme picker and a danger zone remove-everything button" width="380"> |
-| **Nothing is ever written silently.** Every apply shows exactly what will be created, adopted, edited, or deleted — by name — and waits for you to confirm. | Active season, tuning values, themes, and the one-click removal of everything the card created. |
+| <img src="docs/preview.png" alt="Setup screen listing every object that will be created, with an Apply 48 changes button" width="380"> | <img src="docs/setup.png" alt="Setup and Manage screen with per-zone scheduling toggles, tunables, theme picker and a danger zone remove-everything button" width="380"> |
+| **Nothing is ever written silently.** Every apply shows exactly what will be created, adopted, edited, or deleted — by name — and waits for you to confirm. | Per-zone scheduling switches, active season, tuning values, themes, and the one-click removal of everything the card created. |
 
 ---
 
@@ -86,7 +101,7 @@ objects, all tagged with the label `mzcs` so you can audit them at any time unde
 | Object | Purpose |
 |---|---|
 | `schedule.<prefix>_<zone>_<season>` | Your schedule, one per zone per season |
-| `input_boolean.<prefix>_<zone>_enabled` | The zone's kill switch (created **off**) |
+| `input_boolean.<prefix>_<zone>_enabled` | The zone's scheduling switch (created **off**) |
 | `timer.<prefix>_<zone>_fan` | Backs the one-tap fan timer |
 | `binary_sensor.<prefix>_<zone>_running` | True while the zone is actively heating/cooling |
 | `sensor.<prefix>_<zone>_runtime_today` | Hours run today |
@@ -148,32 +163,76 @@ HACS registers the dashboard resource for you.
 
 ## Quick start
 
-Budget about five minutes. Nothing touches your thermostats until the last step — and that step
-is entirely up to you.
+Budget about ten minutes. **Nothing touches your thermostats until step 7 — and step 7 is
+entirely up to you.** Steps 1 to 6 are safe to do at any time of day.
 
-**1. Add the card.** On any dashboard: **Edit dashboard → Add card → search "Multi-Zone
-Climate Scheduler"**. Everything below is configured in the visual editor; you never need YAML.
+### 1. Add the card
 
-**2. Add your zones.** For each zone, give it a display name (e.g. "Upstairs") and pick its
-`climate` entity. Optionally add room temperature sensors to get the deviation chips.
+On any dashboard: **Edit dashboard → Add card → search "Multi-Zone Climate Scheduler"**.
+Everything below is configured in the visual editor; you never need to write YAML.
 
-**3. Set up your seasons.** Two are created by default — *Summer* (cool) and *Winter*
-(heat·cool). Rename, add, or remove them to match how you actually run your house. A season's
-default mode decides whether its blocks are cooling setpoints, heating setpoints, or a
-heat·cool range with both.
+### 2. Add your zones
 
-**4. Preview and apply.** Open the card's gear icon → **Setup** → **Run dry-run preview**. You
-get an itemized list of everything that will be created. Read it, then press **Apply**. This
-creates the backend objects — but every zone is created **disabled**, so your house behaves
-exactly as it did before.
+For each zone, give it a display name (e.g. "Upstairs") and pick its `climate` entity.
+Optionally add room temperature sensors — those become the deviation chips on the card.
 
-**5. Build your schedule.** Tap the **Next ·** row to open the schedule editor. Choose your
-granularity (every day / weekday-weekend / individual days), then tap a block to set its time,
-name, and temperature.
+### 3. Set up your seasons
 
-**6. Turn a zone on when you're ready.** Gear icon → **Manage** → toggle the zone's kill switch.
-From that moment the engine applies your schedule to that zone. **Before you do this, read the
-warnings below.**
+Two are created for you: *Summer* (cool) and *Winter* (heat·cool). Rename, add, or remove them
+to match how you actually run your house. A season's default mode decides whether its blocks
+are cooling setpoints, heating setpoints, or a heat·cool range with both.
+
+### 4. Preview, then apply
+
+Open the card's gear icon → **Setup** → **Run dry-run preview**. You get an itemized list of
+every object that will be created. Read it, then press **Apply**.
+
+<p align="center">
+  <img src="docs/preview.png" alt="The dry-run preview listing every object to be created, with an Apply 48 changes button underneath" width="420">
+</p>
+
+This creates the backend objects. **Every zone is created with scheduling switched off**, so at
+this point your house still behaves exactly as it did before.
+
+### 5. Build your schedule
+
+Tap the **Next ·** row to open the schedule editor. Pick your granularity (every day /
+weekday·weekend / individual days), then tap any block to set its time, name, and temperature.
+Changes stage locally until you press **Save**.
+
+<p align="center">
+  <img src="docs/schedule.png" alt="The schedule editor with granularity chips and colored temperature strips for weekdays and weekend" width="420">
+</p>
+
+Do this for **every zone and every season** you configured. A season with no schedule of its own
+will do nothing when it becomes active.
+
+### 6. Verify before you hand over control ✅
+
+This is the checkpoint that matters. Before enabling any zone, confirm all four:
+
+- [ ] **Your schedules are complete and correct** — every zone, every season, right times, right
+      temperatures. Re-read them in the card.
+- [ ] **The schedule in your thermostat's own app is turned OFF** — Nest, ecobee, Honeywell,
+      SmartThings, whatever you use. Also turn off any "learning" or "auto-schedule" feature.
+      See the [warning below](#turn-off-your-thermostats-own-schedule-first) for why.
+- [ ] **The right season is selected** on the Manage screen.
+- [ ] **You're around to watch it.** Enable during a day you'll be home, not the night before a
+      trip.
+
+### 7. Enable scheduling, one zone at a time
+
+Gear icon → **Manage**. Every zone ships **Off**, meaning the engine stands down and your
+thermostat's own app is still in charge. Turn a zone **On** and the engine starts applying your
+schedule to it at the next block.
+
+<p align="center">
+  <img src="docs/killswitch.png" alt="The Manage screen showing a Scheduling all zones master switch and per-zone switches, all reading Off" width="460">
+</p>
+
+**Start with a single zone.** Watch it through at least one scheduled block change and confirm
+the setpoint lands where you expect. Once you trust it, enable the rest. If anything looks
+wrong, switch the zone back **Off** — control returns to your thermostat's app immediately.
 
 ---
 
@@ -182,54 +241,85 @@ warnings below.**
 These are the things most likely to surprise you. Please read them before enabling a zone.
 
 ### Turn off your thermostat's own schedule first
-This is the big one. If your Nest/ecobee/Honeywell app still has its own schedule running, you
-now have **two schedulers fighting over one thermostat**. Symptoms are setpoints that "change
-themselves" at odd times. Turn off the schedule (and any learning/auto-schedule feature) in the
-vendor app for every zone you enable here.
 
-### Every zone has a kill switch, and it's off by default
-Zones are created disabled, and no reconfiguration, rename, or re-apply can ever flip that
-choice — enabling is always a deliberate act by you. Turning a zone **off** at any time makes
-the engine stand down immediately and hands full control back to your thermostat's own app.
-That is your escape hatch during setup, testing, or any problem. There's an all-zones master
-toggle on the Manage screen too.
+> [!WARNING]
+> If your Nest/ecobee/Honeywell app still has its own schedule running, you now have **two
+> schedulers fighting over one thermostat.** The symptom is setpoints that appear to "change
+> themselves" at odd times. Turn off the schedule — and any learning or auto-schedule feature —
+> in the vendor app for every zone you enable here.
+
+### Every zone ships switched off, and only you can turn it on
+
+Zones are created with scheduling **Off**. No reconfiguration, rename, or re-apply can ever flip
+that for you — enabling is always a deliberate act. Switching a zone back **Off** at any time
+makes the engine stand down immediately and hands full control to your thermostat's own app.
+That is your escape hatch during setup, testing, or any problem, and there's an all-zones master
+switch above the per-zone ones.
+
+<p align="center">
+  <img src="docs/killswitch.png" alt="Manage screen scheduling switches, all reading Off, with the caption Off equals the engine stands down" width="460">
+</p>
 
 ### Manual changes hold until the next block
+
 If you nudge the temperature by hand, the engine will **not** fight you — your change holds
 until the next scheduled block, then the schedule resumes. This is deliberate. If you want the
 schedule re-applied right now, use **Apply now** in the schedule editor.
 
 ### Eco makes a zone stand down
-While a zone's thermostat is in its Eco preset, the engine leaves it alone entirely. Handy for
-away modes; confusing if you forgot Eco was on.
 
-### Removing the card does *not* remove what it created
-The helpers, schedules, sensors, and automations are real Home Assistant objects and they keep
-running without the card. **Always use "Remove everything this card manages" before deleting
-the card or uninstalling from HACS** — see [Uninstalling](#uninstalling).
+While a zone's thermostat reports its **Eco** preset, the engine leaves that zone completely
+alone. This is handy for away modes, and confusing if you forgot Eco was on. Note that today
+this is fixed to the preset literally named `eco` — thermostats that use a different preset
+name for the same idea aren't recognized yet, and it can't be switched off. Making this
+configurable is [on the list](#not-in-this-release).
+
+<p align="center">
+  <img src="docs/controls.png" alt="The controls expander showing Heat, Cool, Heat-Cool, Off and Eco buttons plus fan timer chips" width="420">
+</p>
+
+### Removing the card does NOT remove what it created
+
+> [!CAUTION]
+> The helpers, schedules, sensors, and automations are real Home Assistant objects, and they
+> **keep running your thermostats even after the card is gone.** Deleting the card from your
+> dashboard — or uninstalling it from HACS — does not stop them, and afterwards you no longer
+> have the UI that cleans them up.
+>
+> **Always run "Remove everything this card manages" _before_ deleting the card.** See
+> [Uninstalling](#uninstalling) for the correct order.
+
+<p align="center">
+  <img src="docs/danger.png" alt="The Danger zone section of the Setup screen with the Remove everything this card manages button" width="460">
+</p>
 
 ### Hand-edit a generated automation and you own it from then on
+
 Each generated automation carries a content signature. If you edit one, the card detects that
 and will **never** overwrite or delete it — which also means it stops receiving improvements
-when your config changes. That's the trade: edit freely, but the card steps back permanently
-for that automation.
+when your config changes. That's the trade: edit freely, but the card steps back permanently for
+that automation.
 
 ### heat·cool blocks need both temperatures
+
 A heat·cool block sets a target *range*. Both the cool and heat values must be present, and the
 card keeps a minimum gap between them.
 
 ### Learning takes time, and needs a weather entity
+
 The runtime anomaly alert stays quiet until it has learned each zone's runtime-per-degree-day.
 Expect it to read "learning" for several warm days after setup, and note that it only learns on
 days with meaningful cooling demand. No weather entity means no learning and no alerts — the
 rest of the card is unaffected.
 
 ### Running more than one instance of the card
-Each card instance owns everything under its entity **prefix** (default `climate`). If you run
-a second instance — a test copy, or a separate building — give it a *different* prefix, or the
-two will manage the same objects and fight.
+
+Each card instance owns everything under its entity **prefix** (default `climate`). If you run a
+second instance — a test copy, or a separate building — give it a *different* prefix, or the two
+will manage the same objects and fight.
 
 ### Deleting a zone or season deletes its objects
+
 Removing a zone or season from the config plans deletion of the objects that belonged to it,
 including that zone's schedules. You always see this in the preview before confirming, and the
 contents are written to the log first, but the deletion is real.
@@ -244,7 +334,7 @@ contents are written to the log first, but the deletion is real.
 | Change today's schedule permanently | Tap the **Next ·** row → tap the block → edit → **Save**. |
 | Run the fan for a bit | Expand **Mode** → tap **15m / 30m / 60m**. It shuts off automatically. |
 | Switch seasons | Gear icon → **Manage** → **Active season**. |
-| Stop all automation immediately | Gear icon → **Manage** → turn off the zone (or the master). |
+| Stop all automation immediately | Gear icon → **Manage** → switch the zone (or the master) **Off**. |
 | See how much the system ran | Tap the **Runtime ·** row; tap a day for its individual runs. |
 | Change the look | Gear icon → **Manage** → **Theme**. |
 
@@ -297,15 +387,21 @@ features:
 
 ## Uninstalling
 
-**Do this in order.** The backend objects outlive the card, so removing the card first would
-leave orphaned automations still driving your thermostats.
+> [!CAUTION]
+> **Do these steps in order.** The backend objects outlive the card. If you delete the card
+> first, its automations keep driving your thermostats and the cleanup UI is gone.
 
 1. On the card: gear icon → **Setup** → scroll to **Danger zone** → **Remove everything this
    card manages…**
+
+   <p align="center">
+     <img src="docs/danger.png" alt="Danger zone with the Remove everything this card manages button" width="460">
+   </p>
+
 2. Read the red preview. It lists every object that will be deleted.
-3. Confirm. The card disables all zones *first* (so your thermostats hand back to their own
-   apps immediately), then removes the automations, sensors, schedules, and helpers in
-   dependency order. Contents are written to the log as it goes.
+3. Confirm. The card switches all zones **off first** (so your thermostats hand back to their own
+   apps immediately), then removes the automations, sensors, schedules, and helpers in dependency
+   order, writing contents to the log as it goes.
 4. Delete the card from your dashboard.
 5. Uninstall from HACS if you're done with it.
 
@@ -320,13 +416,13 @@ If you skip step 1 and later want to clean up by hand, everything the card creat
 use **Settings → Companion App → Troubleshooting → Reset frontend cache**, then force-quit and
 reopen.
 
-**My schedule isn't being applied.** Check, in this order: (1) the zone's kill switch is on;
-(2) the thermostat isn't in Eco; (3) the correct season is selected on the Manage screen;
-(4) `automation.<prefix>_schedule_engine` is enabled. The engine watchdog will notify you if
-that automation goes missing or off for five minutes.
+**My schedule isn't being applied.** Check, in this order: (1) the zone's scheduling switch is
+**On**; (2) the thermostat isn't in Eco; (3) the correct season is selected on the Manage screen;
+(4) `automation.<prefix>_schedule_engine` is enabled. The engine watchdog will notify you if that
+automation goes missing or off for five minutes.
 
 **Setpoints change at times I didn't schedule.** Almost always the vendor app's own schedule is
-still active — see the warning above.
+still active — see [the warning above](#turn-off-your-thermostats-own-schedule-first).
 
 **Runtime says "learning" forever.** You need a weather entity configured, and enough warm days
 for the nightly learning to run. It skips mild days by design.
@@ -343,8 +439,11 @@ healthy install settles to "Unchanged" for everything after one apply.
 
 Being upfront so nothing surprises you. These are planned, not shipped:
 
-- **Automatic season switching.** The Manual selector works; the Semi-auto and Full-auto
-  options are disabled placeholders for a forecast-driven recommender.
+- **A configurable Eco/standby preset.** Today the engine stands down only for a preset named
+  `eco`, which suits Nest-style thermostats. A future release will let you choose which preset
+  counts, and let you switch the behavior off entirely so Home Assistant owns it instead.
+- **Automatic season switching.** The Manual selector works; the Semi-auto and Full-auto options
+  are disabled placeholders for a forecast-driven recommender.
 - **Comfort steering** (compensating a thermostat's setpoint from a room sensor's reading).
 - **Consecutive-day anomaly alerts and actionable mobile notifications.** Today's alert is a
   single-evening check delivered as a persistent notification.
@@ -371,14 +470,17 @@ The pure logic (schedule resolution, naming, the provisioning differ, degree-day
 `src/lib/` with no Lit or Home Assistant imports, and is unit-tested. All Home Assistant
 touchpoints are isolated in `src/ha-adapter.ts`.
 
+Documentation screenshots are real renders of the card, captured from the dev harness — see
+`scripts/shoot.py`.
+
 See [CONTRACT.md](CONTRACT.md) for the frozen naming and schema contract, and
 [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## Contributing
 
-Issues and pull requests are welcome. For bugs, the most useful report includes your Home
-Assistant version, the card version, and — for provisioning problems — the contents of the
-dry-run preview.
+Issues and pull requests are welcome — and while the project is still finding its feet, bug
+reports are especially valuable. For bugs, the most useful report includes your Home Assistant
+version, the card version, and — for provisioning problems — the contents of the dry-run preview.
 
 ## License
 

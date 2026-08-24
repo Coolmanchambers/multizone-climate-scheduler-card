@@ -620,6 +620,8 @@ export class MzcsCard extends LitElement {
             })}
             <p class="muted" style="font-size:11px;margin:2px 0 6px;">
               Off = the engine stands down and the thermostat's own app schedule takes over.
+              Turn a zone On only once its schedule is complete and you have disabled the
+              schedule in the thermostat's own app - otherwise the two will fight.
             </p>
           `
         : nothing}

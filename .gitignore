@@ -8,3 +8,6 @@ Thumbs.db
 
 !dist/multizone-climate-scheduler-card.js
 dist/multizone-climate-scheduler-card-dev.js
+
+# Agent/editor tooling, not repo content
+.claude/
