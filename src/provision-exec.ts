@@ -51,6 +51,19 @@ interface CreatedRecord {
 
 const DAY_KEYS: DayKey[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 
+function errText(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (e && typeof e === 'object') return JSON.stringify(e);
+  return String(e);
+}
+
+/** True only for a definite does-not-exist response (REST 404 / "not found"). */
+function isNotFound(e: unknown): boolean {
+  const status = (e as { status_code?: number; status?: number } | null | undefined);
+  if (status && (status.status_code === 404 || status.status === 404)) return true;
+  return /\b404\b|not.found/i.test(errText(e));
+}
+
 function splitId(entityId: string): { domain: string; objectId: string } {
   const dot = entityId.indexOf('.');
   return { domain: entityId.slice(0, dot), objectId: entityId.slice(dot + 1) };
@@ -310,12 +323,15 @@ async function createOne(
     // Guarded upsert: the config API's POST is an EDIT for existing uids. An
     // automation can exist in storage without a live state entity (disabled,
     // failed reload) and would otherwise be silently overwritten and then
-    // DELETED by rollback (QA-R B1-1/B2-1).
+    // DELETED by rollback (QA-R B1-1/B2-1). Only a real 404 means "new" - a
+    // transient error must NOT be read as absence, or the POST would edit an
+    // existing automation this run then rollback-DELETE it (scan S13-D1).
     let preexisting: Record<string, unknown> | null = null;
     try {
       preexisting = (await hass.callApi!('GET', `config/automation/config/${uid}`)) as Record<string, unknown>;
-    } catch {
-      preexisting = null; // 404 = genuinely new
+    } catch (e) {
+      if (!isNotFound(e)) throw new Error(`Could not verify whether ${a.id} already exists: ${errText(e)}`);
+      preexisting = null;
     }
     if (preexisting) {
       const stored = parseSignature(preexisting.description);
@@ -553,19 +569,35 @@ export async function executePlan(hass: HassLike, plan: Plan, ctx: ExecContext):
         // Schedule specs are name-only by design: live BLOCKS are owned by the
         // card's schedule editor after provisioning and a re-run Apply must
         // never stomp them. A rename carries the live days through unchanged.
+        // The storage item is joined via the entity's registry unique_id (for
+        // helper entities, unique_id == storage id) - the entity-derived
+        // object_id can differ for adopted schedules, and matching on it could
+        // rename a DIFFERENT user's schedule whose entity was renamed away
+        // (scan S13-A1/F2). Fallback to object_id when the registry is silent.
         const { objectId } = splitId(a.id);
         try {
+          let storageId = objectId;
+          try {
+            const entries = (await hass.callWS({
+              type: 'config/entity_registry/get_entries',
+              entity_ids: [a.id],
+            })) as Record<string, { unique_id?: string } | null>;
+            const uniq = entries?.[a.id]?.unique_id;
+            if (typeof uniq === 'string' && uniq) storageId = uniq;
+          } catch {
+            // registry unreadable → object_id fallback (pre-S13 behavior)
+          }
           const items = (await hass.callWS({ type: 'schedule/list' })) as Array<Record<string, unknown>>;
-          const item = items.find((i) => i.id === objectId);
-          if (!item) throw new Error('not listed');
+          const item = items.find((i) => i.id === storageId);
+          if (!item) throw new Error(`no storage item "${storageId}"`);
           const days: Record<string, unknown> = {};
           for (const d of DAY_KEYS) days[d] = item[d] ?? [];
-          await hass.callWS({ type: 'schedule/update', schedule_id: objectId, name: String(a.spec.name ?? objectId), ...days });
+          await hass.callWS({ type: 'schedule/update', schedule_id: storageId, name: String(a.spec.name ?? objectId), ...days });
           result.updated++;
           ctx.log(`Renamed ${a.id} to "${String(a.spec.name)}" (blocks preserved)`);
-        } catch {
+        } catch (e) {
           result.skipped++;
-          ctx.log(`SKIP update ${a.id} - could not rename without touching its blocks`);
+          ctx.log(`SKIP update ${a.id} - could not rename without touching its blocks (${errText(e)})`);
         }
       } else {
         result.skipped++;

@@ -54,8 +54,12 @@ async function listDomain(hass: HassLike, domain: string): Promise<ListItem[]> {
   try {
     const res = await hass.callWS({ type: `${domain}/list` });
     return Array.isArray(res) ? (res as ListItem[]) : [];
-  } catch {
-    return [];
+  } catch (e) {
+    // A failed list must FAIL the snapshot, not degrade it: swallowing it
+    // makes every managed item of this domain extract a state-fallback spec,
+    // and the differ then plans spurious Updates off a wrong picture
+    // (scan S13-D2). The wizard surfaces this as the dry-run error.
+    throw new Error(`Could not read the ${domain} list from Home Assistant: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 

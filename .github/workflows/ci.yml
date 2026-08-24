@@ -27,6 +27,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # @main is what HACS documents: validation rules evolve with HACS itself,
+      # so a pinned tag would validate against stale requirements. Read-only
+      # token; worst case is a CI-reliability blip, never the release artifact.
       - uses: hacs/action@main
         with:
           category: plugin
