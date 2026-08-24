@@ -92,6 +92,8 @@ import {
   nextBlockAfter,
   replaceSetBlocks,
   stripSegments,
+  stripSegmentsFromRanges,
+  weekHasGaps,
   timeToMin,
   minToTime,
   type Week,
@@ -153,6 +155,7 @@ export class MzcsCard extends LitElement {
   @state() private _schedBusy = false;
   @state() private _schedSel?: { setKey: string; idx: number };
   @state() private _schedDrafts = new Map<string, ScheduleBlock[]>();
+  @state() private _schedNotice?: string;
   @state() private _rtOpen = false;
   @state() private _rtDaily?: DailyRuntime[];
   private _rtLoadedFor?: string;
@@ -171,19 +174,39 @@ export class MzcsCard extends LitElement {
   @state() private _execResult?: ExecResult;
 
   public setConfig(config: MzcsCardConfig): void {
-    if (!config.zones || !Array.isArray(config.zones) || config.zones.length < 1) {
-      throw new Error('At least one zone with a climate entity is required.');
+    // Tolerant validation (QA-R C2-2/C2-3): incomplete configs (empty zones,
+    // zone still being picked in the editor, missing names, scalar fan_timer)
+    // must render a helpful placeholder, not brick the card/preview. Only
+    // structurally hopeless configs throw.
+    if (!config || !Array.isArray(config.zones ?? [])) {
+      throw new Error('zones must be a list of { entity, name } items.');
     }
-    if (config.zones.length > 4) {
-      throw new Error('A maximum of 4 zones is supported.');
-    }
-    for (const z of config.zones) {
-      if (!z.entity || !z.entity.startsWith('climate.')) {
-        throw new Error(`Zone "${z.name ?? z.entity}" needs a climate.* entity.`);
-      }
-    }
-    this._config = config;
-    if (this._zoneIndex >= config.zones.length) this._zoneIndex = 0;
+    const rawZones = config.zones ?? [];
+    if (rawZones.length > 4) throw new Error('A maximum of 4 zones is supported.');
+    const zones = rawZones.map((z) => ({
+      ...z,
+      name:
+        typeof z.name === 'string' && z.name.trim()
+          ? z.name
+          : z.entity
+            ? z.entity.split('.')[1]!.replace(/_/g, ' ')
+            : 'Zone',
+    }));
+    const ft = config.features?.fan_timer as unknown;
+    const features = config.features
+      ? {
+          ...config.features,
+          fan_timer: Array.isArray(ft) ? (ft as number[]) : typeof ft === 'number' ? [ft] : undefined,
+        }
+      : undefined;
+    this._config = { ...config, zones, ...(features ? { features } : {}) };
+    if (this._zoneIndex >= Math.max(zones.length, 1)) this._zoneIndex = 0;
+    // A config change invalidates any previewed plan (QA-R C1-1): Apply must
+    // never execute a plan computed for a different config.
+    this._dryRun = undefined;
+    this._execConfirm = false;
+    this._execResult = undefined;
+    this._execLog = [];
   }
 
   public static async getConfigElement(): Promise<HTMLElement> {
@@ -244,6 +267,7 @@ export class MzcsCard extends LitElement {
         steering: false,
         fan_guard: this._config?.features?.fan_guard,
       },
+      weather_entity: this._config?.weather_entity,
     };
   }
 
@@ -289,11 +313,36 @@ export class MzcsCard extends LitElement {
         name: z.name,
         climate: z.entity,
       }));
-      const result = await executePlan(hass, p, {
+      // Freshness gate (QA-R B1-3/C1-1): recompute the plan against the LIVE
+      // registry and refuse to execute if it no longer matches the preview -
+      // protects against stale previews, config edits, and a second device
+      // applying concurrently.
+      const preExisting = await fetchExisting(
+        hass,
+        input.prefix,
+        input.zones.map((z) => z.slug),
+        input.seasons.map((s) => s.key),
+      );
+      const fresh = plan(buildDesired(input), preExisting);
+      const shape = (pl: Plan) =>
+        JSON.stringify([
+          pl.create.map((x) => x.id).sort(),
+          pl.adopt.map((x) => x.id).sort(),
+          pl.update.map((x) => x.id).sort(),
+          pl.delete.map((x) => x.id).sort(),
+        ]);
+      if (shape(fresh) !== shape(p)) {
+        this._dryRun = fresh;
+        this._execRunning = false;
+        this._execLog = ['The registry changed since this preview was made. Review the refreshed plan and apply again.'];
+        return;
+      }
+      const result = await executePlan(hass, fresh, {
         prefix: input.prefix,
         zones: zoneRefs,
         seasons: input.seasons,
         fanGuard: cfg.features?.fan_guard,
+        weatherEntity: cfg.weather_entity,
         log: (line) => {
           this._execLog = [...this._execLog, line];
         },
@@ -324,7 +373,11 @@ export class MzcsCard extends LitElement {
           Preview first, then apply. Nothing is written until you confirm; existing schedules and
           customized automations are never overwritten.
         </p>
-        <button class="chip" .disabled=${this._dryRunning} @click=${() => void this._runDryRun()}>
+        <button
+          class="chip"
+          .disabled=${this._dryRunning || this._execRunning || this._execConfirm}
+          @click=${() => void this._runDryRun()}
+        >
           ${this._dryRunning ? 'Reading registry…' : 'Run dry-run preview'}
         </button>
         ${this._dryRunError ? html`<p class="setup-err">${this._dryRunError}</p>` : nothing}
@@ -374,7 +427,7 @@ export class MzcsCard extends LitElement {
               </div>
             `
           : html`
-              <button class="chip" @click=${() => (this._execConfirm = true)}>
+              <button class="chip" .disabled=${this._dryRunning} @click=${() => (this._execConfirm = true)}>
                 Apply ${n} change${n === 1 ? '' : 's'}…
               </button>
             `
@@ -417,6 +470,7 @@ export class MzcsCard extends LitElement {
       };
     }).filter((z) => entityExists(hass, z.enableId));
     const allOn = zones.length > 0 && zones.every((z) => hass.states[z.enableId]?.state === 'on');
+    const anyOn = zones.some((z) => hass.states[z.enableId]?.state === 'on');
     return html`
       <p class="setup-title" style="margin-top:12px;">Manage</p>
       ${zones.length > 0
@@ -426,10 +480,13 @@ export class MzcsCard extends LitElement {
               <button
                 class=${allOn ? 'chip togg on' : 'chip togg'}
                 @click=${() => {
-                  for (const z of zones) void setZoneEnabled(hass, z.enableId, z.markerId, !allOn);
+                  // Kill switch bias: with ANY zone on, the master acts as
+                  // all-off. It must never re-enable a zone the user
+                  // deliberately disabled (QA-R C1-5).
+                  for (const z of zones) void setZoneEnabled(hass, z.enableId, z.markerId, !anyOn);
                 }}
               >
-                ${allOn ? 'On' : 'Off'}
+                ${allOn ? 'On' : anyOn ? 'Mixed' : 'Off'}
               </button>
             </div>
             ${zones.map((z) => {
@@ -473,8 +530,19 @@ export class MzcsCard extends LitElement {
             <input
               type="number"
               .value=${hass.states[t.id]?.state ?? ''}
-              @change=${(e: Event) =>
-                void setNumberHelper(hass, t.id, Number((e.target as HTMLInputElement).value))}
+              @change=${(e: Event) => {
+                const el = e.target as HTMLInputElement;
+                const v = el.value.trim();
+                const n = Number(v);
+                // Clearing the field must not write 0 to a live helper (QA-R C2 note).
+                if (v === '' || !Number.isFinite(n)) {
+                  el.value = hass.states[t.id]?.state ?? '';
+                  return;
+                }
+                void setNumberHelper(hass, t.id, n).catch(() => {
+                  el.value = hass.states[t.id]?.state ?? '';
+                });
+              }}
             />
           </div>
         `,
@@ -548,7 +616,11 @@ export class MzcsCard extends LitElement {
     if (!this._config || !this.hass) return nothing;
     this._applyTheme();
     const zone = this._zone();
-    if (!zone) return nothing;
+    if (!zone || !zone.entity || !zone.entity.startsWith('climate.')) {
+      return html`<ha-card>
+        <div class="wrap"><p class="muted pad">Pick a thermostat for each zone in the card editor to get started.</p></div>
+      </ha-card>`;
+    }
     if (this._setupOpen) {
       return html`<ha-card><div class="wrap">${this._renderSetup()}</div></ha-card>`;
     }
@@ -559,15 +631,23 @@ export class MzcsCard extends LitElement {
     );
     const cooling = s.action === 'cooling';
     const heating = s.action === 'heating';
+    // heat_cool thermostats carry target_temp_low/high instead of a single
+    // temperature - never render "Cooling to null" (QA-R C2-7).
+    const zattrs = this.hass.states[zone.entity]?.attributes ?? {};
+    const range =
+      zattrs.target_temp_low != null && zattrs.target_temp_high != null
+        ? `${zattrs.target_temp_low}–${zattrs.target_temp_high}`
+        : null;
+    const target = s.setpoint ?? range ?? '–';
     const statusHead = !s.available
       ? 'Unavailable'
       : cooling
-        ? `Cooling to ${s.setpoint}`
+        ? `Cooling to ${target}`
         : heating
-          ? `Heating to ${s.setpoint}`
+          ? `Heating to ${target}`
           : s.mode === 'off'
             ? 'Off'
-            : `Idle · set ${s.setpoint ?? '–'}`;
+            : `Idle · set ${target}`;
 
     return html`
       <ha-card>
@@ -580,7 +660,14 @@ export class MzcsCard extends LitElement {
                   aria-selected=${i === this._zoneIndex}
                   class=${i === this._zoneIndex ? 'tab on' : 'tab'}
                   @click=${() => {
+                    if (this._zoneIndex === i) return;
                     this._zoneIndex = i;
+                    // Runtime caches are zone-specific - never serve another
+                    // zone's 30-day chart or day details (QA-R C2-6).
+                    this._rt30 = undefined;
+                    this._rtDayCache.clear();
+                    this._rtDayOpen = null;
+                    this._rtDayDetail = undefined;
                   }}
                 >
                   ${z.name}
@@ -888,11 +975,14 @@ export class MzcsCard extends LitElement {
     this._schedBusy = true;
     try {
       const cfg = await fetchScheduleConfig(this.hass, schedId);
+      // Token guard (QA-R C1-7): the zone/season may have changed while this
+      // fetch was in flight - never render another schedule's week here.
+      if (this._schedLoadedFor !== schedId) return;
       this._schedWeek = (cfg?.week as Week | undefined) ?? undefined;
       this._schedName = cfg?.name ?? '';
       this._schedError = cfg ? undefined : 'Could not load schedule config.';
     } catch (e) {
-      this._schedError = errorText(e);
+      if (this._schedLoadedFor === schedId) this._schedError = errorText(e);
     } finally {
       this._schedBusy = false;
     }
@@ -916,6 +1006,7 @@ export class MzcsCard extends LitElement {
     const m = new Map(this._schedDrafts);
     m.set(setKey, draft);
     this._schedDrafts = m;
+    this._schedNotice = undefined;
   }
 
   private _clearSchedEdit(): void {
@@ -923,14 +1014,20 @@ export class MzcsCard extends LitElement {
     this._schedSel = undefined;
   }
 
-  private async _saveSchedDrafts(zone: ZoneConfig): Promise<void> {
-    if (!this.hass || !this._schedWeek || this._schedDrafts.size === 0) return;
-    const schedId = this._scheduleEntityId(zone);
-    if (!schedId) return;
+  private async _saveSchedDrafts(): Promise<void> {
+    // Save target is PINNED to the schedule the drafts were edited against
+    // (QA-R C1-4) - a season flip racing the click must not write the old
+    // season's week over the new season's entity.
+    const schedId = this._schedLoadedFor;
+    if (!this.hass || !this._schedWeek || this._schedDrafts.size === 0 || !schedId) return;
     const det = detectSets(this._schedWeek);
     this._schedBusy = true;
     try {
-      let week = this._schedWeek;
+      // Fresh-base merge (QA-R C1-2): refetch the week so days edited
+      // concurrently elsewhere (native HA editor, another device) survive -
+      // only the sets drafted HERE are replaced.
+      const freshCfg = await fetchScheduleConfig(this.hass, schedId);
+      let week = ((freshCfg?.week as Week | undefined) ?? this._schedWeek) as Week;
       for (const [setKey, blocks] of this._schedDrafts) {
         const days = det.sets[setKey];
         if (days) week = replaceSetBlocks(week, days, blocks);
@@ -939,11 +1036,13 @@ export class MzcsCard extends LitElement {
         this.hass,
         schedId,
         week as unknown as Record<string, unknown>,
-        this._schedName,
+        freshCfg?.name ?? this._schedName,
       );
-      this._schedWeek = week;
-      this._clearSchedEdit();
-      this._schedError = undefined;
+      if (this._schedLoadedFor === schedId) {
+        this._schedWeek = week;
+        this._clearSchedEdit();
+        this._schedError = undefined;
+      }
     } catch (e) {
       this._schedError = errorText(e);
     } finally {
@@ -957,7 +1056,11 @@ export class MzcsCard extends LitElement {
     if (!this.hass) return nothing;
     const schedId = this._scheduleEntityId(zone);
     if (!schedId || !entityExists(this.hass, schedId)) return nothing;
-    if (this._schedLoadedFor !== schedId && !this._schedBusy) {
+    if (this._schedLoadedFor !== schedId) {
+      if (this._schedDrafts.size > 0) {
+        // QA-R C1-3: never silently eat unsaved edits - tell the user.
+        this._schedNotice = 'Unsaved schedule edits were discarded (zone or season changed).';
+      }
       this._schedLoadedFor = schedId;
       this._schedWeek = undefined;
       this._clearSchedEdit();
@@ -967,8 +1070,9 @@ export class MzcsCard extends LitElement {
       this.hass.states[globalEntityId('season_select', this._prefix)]?.state ?? '';
     const week = this._schedWeek;
     const next = week ? nextBlockAfter(week, new Date()) : null;
+    const nextTemp = next ? (next.cool_temp ?? next.heat_temp) : null;
     const nextLine = next
-      ? `Next · ${fmtTime(next.time)} ${next.name} → ${next.cool_temp ?? next.heat_temp}°`
+      ? `Next · ${fmtTime(next.time)} ${next.name}${nextTemp != null ? ` → ${nextTemp}°` : ''}`
       : 'Schedule';
     return html`
       <button
@@ -1010,6 +1114,45 @@ export class MzcsCard extends LitElement {
     if (hi - lo < 6) { const mid = (hi + lo) / 2; lo = mid - 3; hi = mid + 3; }
     const small = det.granularity === 'days';
     const dirty = this._schedDrafts.size > 0;
+    // Schedules with OFF gaps (authored in HA's native grid editor) are shown
+    // read-only: the card's contiguous block model would silently convert the
+    // inactive periods into active coverage on save (QA-R A1-3).
+    const gaps = weekHasGaps(week);
+    if (gaps) {
+      return html`
+        <div class="schedbody">
+          ${entries.map(([setKey, days], ei) => {
+            const rsegs = stripSegmentsFromRanges((week[days[0]!] ?? []) as TimeRange[]);
+            const isToday = days.includes(todayKey);
+            const label = SET_LABELS[setKey] ?? setKey.charAt(0).toUpperCase() + setKey.slice(1);
+            return html`
+              <p class="sethead">${label}${isToday ? html` <span class="today">today</span>` : nothing}</p>
+              <div class="sstrip ${small ? 'small' : ''}">
+                ${rsegs.map((s) => {
+                  const w = ((s.toMin - s.fromMin) / 1440) * 100;
+                  const t = s.block ? (s.block.cool_temp ?? s.block.heat_temp) : null;
+                  return html`<span
+                    class="sseg ro"
+                    style="width:${w}%;background:${s.block && t != null ? tempColor(t, lo, hi) : 'var(--mzcs-track)'}"
+                  >
+                    <span class="segt">${s.block ? `${t ?? '–'}°` : 'Off'}</span>
+                  </span>`;
+                })}
+              </div>
+              ${!small || ei === entries.length - 1
+                ? html`<div class="saxis">
+                    <span>12A</span><span>4A</span><span>8A</span><span>12P</span><span>4P</span><span>8P</span><span>12A</span>
+                  </div>`
+                : nothing}
+            `;
+          })}
+          <p class="muted pad">
+            This schedule has inactive (off) periods set in Home Assistant's own editor. Edit it
+            there - the card leaves it untouched to preserve those periods.
+          </p>
+        </div>
+      `;
+    }
     return html`
       <div class="schedbody">
         ${entries.map(([setKey, days], ei) => {
@@ -1075,12 +1218,13 @@ export class MzcsCard extends LitElement {
           `;
         })}
         ${this._renderBlockEditor(det)}
+        ${this._schedNotice ? html`<p class="muted pad">${this._schedNotice}</p>` : nothing}
         ${this._schedError ? html`<p class="schederr pad">${this._schedError}</p>` : nothing}
         <div class="schedactions">
           ${dirty
             ? html`
                 <button class="chip save" .disabled=${this._schedBusy}
-                  @click=${() => void this._saveSchedDrafts(zone)}>
+                  @click=${() => void this._saveSchedDrafts()}>
                   ${this._schedBusy ? 'Saving…' : 'Save changes'}
                 </button>
                 <button class="chip" .disabled=${this._schedBusy} @click=${() => this._clearSchedEdit()}>
@@ -1093,7 +1237,7 @@ export class MzcsCard extends LitElement {
                   .disabled=${this._schedBusy}
                   @click=${() => {
                     const marker = zoneEntityId('applied_block_marker', this._prefix, slugify(zone.name));
-                    void applyScheduleNow(this.hass!, marker, 'automation.climate_schedule_engine');
+                    void applyScheduleNow(this.hass!, marker, `automation.${this._prefix}_schedule_engine`);
                   }}
                 >
                   Apply now
@@ -1118,17 +1262,25 @@ export class MzcsCard extends LitElement {
     const nudgeTime = (d: number) => {
       mut((blk) => {
         const cur = blk[sel.idx]!;
-        const t = timeToMin(cur.time) + d;
+        const curMin = timeToMin(cur.time);
+        const t = curMin + d;
         const loT = sel.idx > 0 ? timeToMin(blk[sel.idx - 1]!.time) + 15 : 0;
-        const hiT = sel.idx < blk.length - 1 ? timeToMin(blk[sel.idx + 1]!.time) - 15 : 1425;
+        // Never move a late-night block EARLIER because of the 23:45 cap:
+        // a block already past the cap simply cannot advance (QA-R A1-6).
+        const hiT = sel.idx < blk.length - 1 ? timeToMin(blk[sel.idx + 1]!.time) - 15 : Math.max(1425, curMin);
         cur.time = minToTime(Math.max(loT, Math.min(hiT, t)));
       });
     };
     const nudgeTemp = (field: 'cool_temp' | 'heat_temp', d: number) => {
       mut((blk) => {
         const cur = blk[sel.idx]!;
-        const v = (cur[field] ?? 72) + d;
-        let loT = 50, hiT = 95;
+        // Unit-aware clamps (QA-R C2-1): hardcoded Fahrenheit bounds slam a
+        // Celsius setpoint to 50. Values below 45 read as °C.
+        const ref = cur[field] ?? cur.cool_temp ?? cur.heat_temp ?? 72;
+        const celsius = ref < 45;
+        const v = (cur[field] ?? (celsius ? 22 : 72)) + d;
+        let loT = celsius ? 5 : 45;
+        let hiT = celsius ? 35 : 95;
         if (cur.mode === 'heat_cool') {
           if (field === 'cool_temp' && cur.heat_temp != null) loT = cur.heat_temp + 2;
           if (field === 'heat_temp' && cur.cool_temp != null) hiT = cur.cool_temp - 2;
@@ -1635,6 +1787,9 @@ export class MzcsCard extends LitElement {
     }
     .sseg:last-child {
       border-right: none;
+    }
+    .sseg.ro {
+      cursor: default;
     }
     .sseg.sel::after {
       content: '';

@@ -1,11 +1,17 @@
-// Wizard executor (S12b): turns the differ's plan into real Home Assistant
-// objects via the same websocket/REST APIs the core UI uses. Policies
-// (CONTRACT §8 executor notes):
-//   - CREATE + ADOPT always; DELETE always; helper config UPDATEs applied.
-//   - Schedule/template/stats/automation UPDATEs are SKIPPED with a note:
-//     schedules are user data (never overwrite blocks), and existing
-//     automations may carry user customizations (e.g. extra guards).
-//   - Everything created is labeled mzcs; ordered rollback on error.
+// Wizard executor (S12b, hardened in S12c): turns the differ's plan into real
+// Home Assistant objects via the same websocket/REST APIs the core UI uses.
+// Policies (CONTRACT §8 executor notes):
+//   - CREATE: guarded upsert - an automation config that already exists in
+//     storage (even without a live state entity) is never blindly overwritten;
+//     the same pristine-signature rule as updates applies (QA-R B1-1/B2-1).
+//   - UPDATE: helper configs applied; schedule/template/stats content NEVER
+//     overwritten; automations regenerated only while pristine.
+//   - DELETE: automations require a matching pristine signature (customized or
+//     unverifiable ones are kept with a warning - QA-R B2-2); schedule and
+//     automation configs are snapshotted into the log before deletion.
+//   - Everything created is labeled mzcs; ordered rollback of THIS RUN'S
+//     CREATES on error (already-executed updates/deletes are reported, not
+//     reverted - see the failure log line).
 
 import type { HassLike } from './ha-types';
 import type { Plan, PlanAction, ProvisionSeason } from './lib/provisioning';
@@ -19,6 +25,7 @@ import {
   contentHash,
   type ZoneRef,
 } from './lib/automation-payloads';
+import { parseEntityId } from './lib/naming';
 import type { TimeRange, DayKey } from './lib/schedule-ranges';
 
 export interface ExecContext {
@@ -27,6 +34,8 @@ export interface ExecContext {
   seasons: ProvisionSeason[];
   /** optional helper the fan-off automations must respect (features.fan_guard) */
   fanGuard?: string;
+  /** weather entity feeding the outdoor-temperature chain (CDD learning) */
+  weatherEntity?: string;
   log: (line: string) => void;
 }
 
@@ -36,6 +45,8 @@ interface CreatedRecord {
   itemId?: string;
   entryId?: string;
   automationId?: string;
+  /** object existed before this run - rollback must never delete it */
+  preexisted?: boolean;
 }
 
 const DAY_KEYS: DayKey[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
@@ -50,20 +61,43 @@ function haSlug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 }
 
-/** Rename an entity to its contract id when HA's name-derived id differs. Retries because
- * registry entries for flow-created sensors can lag the create by a moment. */
+/**
+ * Resolve which configured zone an entity id belongs to via the naming parser
+ * (longest-slug-first). Substring matching is forbidden here: with zones
+ * "den" and "garden", `includes()` wires garden's sensors to the den
+ * thermostat (QA-R finding A2-2).
+ */
+function zoneFor(entityId: string, ctx: ExecContext): ZoneRef | null {
+  const parsed = parseEntityId(
+    entityId,
+    ctx.prefix,
+    ctx.zones.map((z) => z.slug),
+    ctx.seasons.map((s) => s.key),
+  );
+  if (!parsed?.zone) return null;
+  return ctx.zones.find((z) => z.slug === parsed.zone) ?? null;
+}
+
+/** Rename an entity to its contract id when HA's name-derived id differs.
+ * Retries because registry entries for flow-created sensors can lag the
+ * create. FAILURE THROWS: later creates reference the contract id, so
+ * continuing would cascade into wrong wiring and duplicates (QA-R B1-4). */
 async function ensureEntityId(hass: HassLike, actual: string, desired: string, ctx: ExecContext): Promise<void> {
   if (actual === desired) return;
+  let lastErr: unknown;
   for (let i = 0; i < 3; i++) {
     try {
       await hass.callWS!({ type: 'config/entity_registry/update', entity_id: actual, new_entity_id: desired });
       ctx.log(`Renamed ${actual} -> ${desired}`);
       return;
-    } catch {
+    } catch (e) {
+      lastErr = e;
       await new Promise((r) => setTimeout(r, 400 * (i + 1)));
     }
   }
-  ctx.log(`WARN: could not rename ${actual} -> ${desired} - rename it manually in the entity registry`);
+  throw new Error(
+    `Could not rename ${actual} to its contract id ${desired} (${lastErr instanceof Error ? lastErr.message : 'registry error'})`,
+  );
 }
 
 async function ensureLabel(hass: HassLike, ctx: ExecContext): Promise<void> {
@@ -94,7 +128,15 @@ async function labelEntity(hass: HassLike, entityId: string): Promise<void> {
   }
 }
 
-/** Drive a config-entry flow (template / history_stats) with pending fields. */
+/** Entity id of an automation config uid, resolved from live states. */
+function automationEntityId(hass: HassLike, uid: string): string | null {
+  for (const [entityId, st] of Object.entries(hass.states)) {
+    if (entityId.startsWith('automation.') && st?.attributes.id === uid) return entityId;
+  }
+  return null;
+}
+
+/** Drive a config-entry flow (template / history_stats / statistics) with pending fields. */
 async function driveFlow(
   hass: HassLike,
   handler: string,
@@ -108,7 +150,12 @@ async function driveFlow(
   })) as { flow_id: string; type: string; step_id?: string; data_schema?: Array<{ name: string }>; result?: { entry_id: string } };
   const pending = { ...fields };
   for (let hop = 0; hop < 8; hop++) {
-    if (resp.type === 'create_entry') return resp.result?.entry_id ?? '';
+    if (resp.type === 'create_entry') {
+      const entryId = resp.result?.entry_id;
+      // A missing entry id would poison rollback with a malformed DELETE (QA-R B1-8).
+      if (!entryId) throw new Error(`Flow ${handler}: created an entry but returned no entry_id`);
+      return entryId;
+    }
     if (resp.type === 'menu') {
       if (!menuChoice) throw new Error(`Flow ${handler}: unexpected menu`);
       resp = (await hass.callApi('POST', `config/config_entries/flow/${resp.flow_id}`, {
@@ -133,13 +180,18 @@ async function driveFlow(
   throw new Error(`Flow ${handler}: did not complete`);
 }
 
+function seasonMapJinja(ctx: ExecContext): string {
+  return `{${ctx.seasons.map((s) => `'${s.name.replace(/'/g, '')}': '${s.key}'`).join(', ')}}`;
+}
+
 function templateFlowSpec(id: string, spec: Record<string, unknown>, ctx: ExecContext):
   | { handler: string; menu: string | null; fields: Record<string, unknown> }
   | null {
   const { objectId } = splitId(id);
   const name = String(spec.name ?? objectId);
+  const p = ctx.prefix;
   if (id.startsWith('binary_sensor.') && spec.source === 'hvac_action') {
-    const zone = ctx.zones.find((z) => objectId.includes(z.slug));
+    const zone = zoneFor(id, ctx);
     if (!zone) return null;
     return {
       handler: 'template',
@@ -152,9 +204,8 @@ function templateFlowSpec(id: string, spec: Record<string, unknown>, ctx: ExecCo
     };
   }
   if (id.startsWith('sensor.') && spec.model === 'k_x_cdd') {
-    const zone = ctx.zones.find((z) => objectId.includes(z.slug));
+    const zone = zoneFor(id, ctx);
     if (!zone) return null;
-    const p = ctx.prefix;
     return {
       handler: 'template',
       menu: 'sensor',
@@ -166,17 +217,33 @@ function templateFlowSpec(id: string, spec: Record<string, unknown>, ctx: ExecCo
       },
     };
   }
-  if (id === `sensor.${ctx.prefix}_next_block`) {
-    const p = ctx.prefix;
-    const attrs = ctx.zones
-      .map((z) => `state_attr('schedule.${p}_${z.slug}_' ~ season, 'next_event')`)
-      .join(', ');
+  if (id === `sensor.${p}_next_block`) {
+    // Zone-agnostic on purpose: enumerating schedules dynamically means the
+    // template never goes stale when zones are added, and the season name→key
+    // map survives renames (QA-R finding A2-7).
+    const sel = `input_select.${p}_season`;
     return {
       handler: 'template',
       menu: 'sensor',
       fields: {
         name,
-        state: `{% set season = states('input_select.${p}_season') | lower %}{% set evs = [${attrs}] | reject('none') | list %}{{ evs | min if evs | count > 0 else 'unknown' }}`,
+        state:
+          `{% set season = ${seasonMapJinja(ctx)}.get(states('${sel}'), states('${sel}') | lower) %}` +
+          `{% set evs = states.schedule | selectattr('entity_id', 'search', '^schedule\\.${p}_[a-z0-9_]+_' ~ season ~ '$') | map(attribute='attributes.next_event') | reject('none') | list %}` +
+          `{{ evs | min if evs | count > 0 else 'unknown' }}`,
+      },
+    };
+  }
+  if (id === `sensor.${p}_outdoor_temp` && spec.source === 'weather') {
+    if (!ctx.weatherEntity) return null;
+    return {
+      handler: 'template',
+      menu: 'sensor',
+      fields: {
+        name,
+        state: `{{ state_attr('${ctx.weatherEntity}', 'temperature') }}`,
+        unit_of_measurement: '°F',
+        state_class: 'measurement',
       },
     };
   }
@@ -210,6 +277,26 @@ async function createOne(
       ctx.log(`SKIP ${a.id} - no payload generator`);
       return null;
     }
+    // Guarded upsert: the config API's POST is an EDIT for existing uids. An
+    // automation can exist in storage without a live state entity (disabled,
+    // failed reload) and would otherwise be silently overwritten and then
+    // DELETED by rollback (QA-R B1-1/B2-1).
+    let preexisting: Record<string, unknown> | null = null;
+    try {
+      preexisting = (await hass.callApi!('GET', `config/automation/config/${uid}`)) as Record<string, unknown>;
+    } catch {
+      preexisting = null; // 404 = genuinely new
+    }
+    if (preexisting) {
+      const stored = parseSignature(preexisting.description);
+      if (stored && contentHash(preexisting) === stored) {
+        await hass.callApi!('POST', `config/automation/config/${uid}`, payload);
+        ctx.log(`Recreated ${a.id} (existed in storage, pristine)`);
+        return { kind: 'automation', automationId: uid, preexisted: true };
+      }
+      ctx.log(`KEEP ${a.id} - exists in storage but is customized/unsigned; not overwritten`);
+      return null;
+    }
     await hass.callApi!('POST', `config/automation/config/${uid}`, payload);
     return { kind: 'automation', automationId: uid };
   }
@@ -229,7 +316,9 @@ async function createOne(
         max: spec.max ?? 100,
         step: spec.step ?? 1,
         ...(spec.unit ? { unit_of_measurement: spec.unit } : {}),
-        ...(typeof spec.initial === 'number' ? { initial: spec.initial } : {}),
+        // NEVER `initial`: a configured initial resets the helper's state on
+        // every HA restart, reverting user-tuned values (QA-R B1-5). The
+        // default value is seeded once via set_value below.
       });
     }
     if (domain === 'schedule') {
@@ -238,6 +327,17 @@ async function createOne(
     }
     const res = (await hass.callWS!({ type: `${domain}/create`, ...body, name: objectId })) as { id?: string };
     const itemId = res?.id ?? objectId;
+    if (itemId !== objectId) {
+      // HA minted a different id (collision with an entity the registry hid
+      // from us). A silent divergence becomes an invisible orphan (QA-R B1-3):
+      // undo this create and abort.
+      try {
+        await hass.callWS!({ type: `${domain}/delete`, [`${domain}_id`]: itemId });
+      } catch {
+        ctx.log(`WARN: could not remove stray ${domain} item ${itemId}`);
+      }
+      throw new Error(`HA assigned id "${itemId}" instead of "${objectId}" for ${a.id} - an object with that id likely already exists (possibly registry-disabled)`);
+    }
     if (prettyName !== itemId) {
       try {
         await hass.callWS!({ type: `${domain}/update`, [`${domain}_id`]: itemId, ...body, name: prettyName });
@@ -245,16 +345,42 @@ async function createOne(
         ctx.log(`NOTE: created ${a.id} but could not set its display name to "${prettyName}"`);
       }
     }
+    if (domain === 'input_number' && typeof spec.seed === 'number') {
+      try {
+        await hass.callService('input_number', 'set_value', { entity_id: a.id, value: spec.seed });
+      } catch {
+        ctx.log(`NOTE: created ${a.id} but could not seed its default value ${spec.seed}`);
+      }
+    }
     return { kind: 'collection', domain, itemId };
   }
   if (a.kind === 'template_sensor' || a.kind === 'stats_sensor') {
     if (a.kind === 'stats_sensor') {
-      const zone = ctx.zones.find((z) => objectId.includes(z.slug));
+      const statsName = String(spec.name ?? objectId);
+      if (spec.model === 'statistics_mean') {
+        // Outdoor daily mean (G1): statistics over the outdoor-temp template.
+        if (!ctx.weatherEntity) {
+          ctx.log(`SKIP ${a.id} - no weather entity configured (CDD learning stays off)`);
+          return null;
+        }
+        const entryId = await driveFlow(hass, 'statistics', null, {
+          name: statsName,
+          entity_id: `sensor.${ctx.prefix}_outdoor_temp`,
+          state_characteristic: 'mean',
+          sampling_size: 500,
+          max_age: { hours: 24, minutes: 0, seconds: 0 },
+          keep_last_sample: false,
+          percentile: 50,
+          precision: 1,
+        });
+        await ensureEntityId(hass, `sensor.${haSlug(statsName)}`, a.id, ctx);
+        return { kind: 'config_entry', entryId };
+      }
+      const zone = zoneFor(a.id, ctx);
       if (!zone) {
         ctx.log(`SKIP ${a.id} - no zone match`);
         return null;
       }
-      const statsName = String(spec.name ?? objectId);
       const entryId = await driveFlow(hass, 'history_stats', null, {
         name: statsName,
         entity_id: `binary_sensor.${ctx.prefix}_${zone.slug}_running`,
@@ -268,7 +394,11 @@ async function createOne(
     }
     const flow = templateFlowSpec(a.id, spec, ctx);
     if (!flow) {
-      ctx.log(`SKIP ${a.id} - not flow-creatable (computed by the card)`);
+      if (spec.source === 'weather' && !ctx.weatherEntity) {
+        ctx.log(`SKIP ${a.id} - no weather entity configured`);
+      } else {
+        ctx.log(`SKIP ${a.id} - not flow-creatable`);
+      }
       return null;
     }
     const entryId = await driveFlow(hass, flow.handler, flow.menu, flow.fields);
@@ -309,12 +439,13 @@ export interface ExecResult {
 export async function executePlan(hass: HassLike, plan: Plan, ctx: ExecContext): Promise<ExecResult> {
   const result: ExecResult = { created: 0, adopted: 0, updated: 0, deleted: 0, skipped: 0, ok: true };
   const createdRecords: CreatedRecord[] = [];
+  let phase = 'create';
   await ensureLabel(hass, ctx);
   try {
     for (const a of plan.create) {
       const rec = await createOne(hass, a, ctx);
       if (rec) {
-        createdRecords.push(rec);
+        if (!rec.preexisted) createdRecords.push(rec);
         result.created++;
         ctx.log(`Created ${a.id}`);
         if (!a.id.startsWith('automation:')) await labelEntity(hass, a.id);
@@ -322,15 +453,20 @@ export async function executePlan(hass: HassLike, plan: Plan, ctx: ExecContext):
         result.skipped++;
       }
     }
+    phase = 'adopt';
     for (const a of plan.adopt) {
-      await labelEntity(hass, a.id);
+      const target = a.id.startsWith('automation:')
+        ? automationEntityId(hass, a.id.slice('automation:'.length))
+        : a.id;
+      if (target) await labelEntity(hass, target);
       result.adopted++;
       ctx.log(`Adopted ${a.id}`);
     }
+    phase = 'update';
     for (const a of plan.update) {
       if (a.kind === 'helper') {
         const { domain, objectId } = splitId(a.id);
-        const { unit, ...rest } = a.spec;
+        const { unit, seed: _seed, ...rest } = a.spec;
         const payload = { ...rest, ...(unit ? { unit_of_measurement: unit } : {}) };
         try {
           await hass.callWS!({ type: `${domain}/update`, [`${domain}_id`]: objectId, ...payload });
@@ -371,11 +507,44 @@ export async function executePlan(hass: HassLike, plan: Plan, ctx: ExecContext):
         ctx.log(`KEEP ${a.id} - ${a.kind} updates never overwrite existing content`);
       }
     }
+    phase = 'delete';
     for (const a of plan.delete) {
       if (a.id.startsWith('automation:')) {
-        await hass.callApi!('DELETE', `config/automation/config/${a.id.slice('automation:'.length)}`);
+        const uid = a.id.slice('automation:'.length);
+        // Deleting is a stronger act than overwriting: only signature-pristine
+        // (machine-generated, untouched) automations may be removed (QA-R B2-2).
+        let cfg: Record<string, unknown> | null = null;
+        try {
+          cfg = (await hass.callApi!('GET', `config/automation/config/${uid}`)) as Record<string, unknown>;
+        } catch {
+          cfg = null;
+        }
+        if (!cfg) {
+          result.skipped++;
+          ctx.log(`SKIP delete ${a.id} - config not readable`);
+          continue;
+        }
+        const stored = parseSignature(cfg.description);
+        if (!(stored && contentHash(cfg) === stored)) {
+          result.skipped++;
+          ctx.log(`KEEP ${a.id} - customized or unsigned; delete it manually if intended`);
+          continue;
+        }
+        ctx.log(`snapshot ${uid}: ${JSON.stringify(cfg)}`);
+        await hass.callApi!('DELETE', `config/automation/config/${uid}`);
       } else {
         const { domain, objectId } = splitId(a.id);
+        if (domain === 'schedule') {
+          // Snapshot the week into the log so an intentional-but-regretted
+          // season/zone removal is recoverable (QA-R B2-5).
+          try {
+            const items = (await hass.callWS!({ type: 'schedule/list' })) as Array<Record<string, unknown>>;
+            const item = items.find((i) => i.id === objectId);
+            if (item) ctx.log(`snapshot ${objectId}: ${JSON.stringify(item)}`);
+          } catch {
+            ctx.log(`NOTE: could not snapshot ${a.id} before delete`);
+          }
+        }
         await hass.callWS!({ type: `${domain}/delete`, [`${domain}_id`]: objectId });
       }
       result.deleted++;
@@ -383,7 +552,10 @@ export async function executePlan(hass: HassLike, plan: Plan, ctx: ExecContext):
     }
   } catch (e) {
     result.ok = false;
-    ctx.log(`ERROR: ${e instanceof Error ? e.message : String(e)} - rolling back this run's creates`);
+    ctx.log(
+      `ERROR during ${phase}: ${e instanceof Error ? e.message : String(e)} - rolling back this run's creates. ` +
+        `Already-applied updates/deletes from this run are NOT reverted; see the log above for what landed.`,
+    );
     await rollback(hass, createdRecords, ctx);
   }
   return result;

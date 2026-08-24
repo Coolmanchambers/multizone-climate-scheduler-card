@@ -137,7 +137,7 @@ describe('reserved slugs and automations', () => {
 
   it('builds automation ids and aliases', () => {
     expect(automationUniqueId(PREFIX, 'engine')).toBe('climate_mzcs_engine');
-    expect(automationAlias('engine')).toBe('Climate: schedule engine');
-    expect(automationAlias('fan_timer', 'Upstairs')).toBe('Climate: Upstairs fan timer finished');
+    expect(automationAlias(PREFIX, 'engine')).toBe('Climate: schedule engine');
+    expect(automationAlias(PREFIX, 'fan_timer', 'Upstairs')).toBe('Climate: Upstairs fan timer finished');
   });
 });

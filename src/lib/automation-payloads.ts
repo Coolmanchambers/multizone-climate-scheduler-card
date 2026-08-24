@@ -36,13 +36,14 @@ export function parseSignature(description: unknown): string | null {
 }
 
 /**
- * Hash of an automation config EXCLUDING its description (where the signature
- * itself lives). An automation whose content hash equals its embedded signature
- * has never been hand-edited since the generator wrote it - safe to regenerate.
+ * Hash of an automation config with only the [mzcs-sig:...] token stripped from
+ * the description. Description-only hand edits (user notes) therefore count as
+ * customization too - an automation whose content hash equals its embedded
+ * signature has never been touched since the generator wrote it.
  */
 export function contentHash(config: Record<string, unknown>): string {
-  const { description: _d, ...rest } = config;
-  return canonicalHash(rest);
+  const desc = String(config.description ?? '').replace(SIG_RE, '').trimEnd();
+  return canonicalHash({ ...config, description: desc });
 }
 
 /** Stamp a generated config with its own content signature. */
@@ -87,7 +88,7 @@ export function engineAutomation(
   const seasonMap = `{${seasons.map((s) => `'${s.name.replace(/'/g, '')}': '${s.key}'`).join(', ')}}`;
   return signed({
     id: automationUniqueId(prefix, 'engine'),
-    alias: automationAlias('engine'),
+    alias: automationAlias(prefix, 'engine'),
     description: `${MANAGED} Applies the active season's schedule block to each ENABLED zone at block transitions. Per-zone applied-block markers mean manual changes and external raises HOLD until the next block; the 15-minute tick only recovers missed transitions. Zones stand down while their Eco preset is active. heat_cool blocks apply dual setpoints.`,
     mode: 'queued',
     max: 5,
@@ -132,7 +133,11 @@ export function engineAutomation(
                 "{{ is_state(repeat.item.enabled, 'on') and blk is not none and blk != states(repeat.item.marker) and state_attr(repeat.item.climate, 'preset_mode') != 'eco' }}",
             },
             {
-              alias: 'Apply dual setpoints for heat_cool, single target otherwise',
+              alias: 'Apply the block (dual range, off, or single target)',
+              // One zone's service failure must not starve the zones after it
+              // in the loop; the marker below still records the attempt so the
+              // engine does not retry-spam every trigger.
+              continue_on_error: true,
               choose: [
                 {
                   conditions: [{ condition: 'template', value_template: "{{ blk_mode == 'heat_cool' }}" }],
@@ -145,18 +150,38 @@ export function engineAutomation(
                     },
                   ],
                 },
-              ],
-              default: [
                 {
-                  alias: 'Apply single target',
-                  action: 'climate.set_temperature',
-                  target: { entity_id: '{{ repeat.item.climate }}' },
-                  data: {
-                    temperature: '{{ blk_cool if blk_cool is not none else blk_heat }}',
-                    hvac_mode: '{{ blk_mode }}',
-                  },
+                  conditions: [{ condition: 'template', value_template: "{{ blk_mode == 'off' }}" }],
+                  sequence: [
+                    {
+                      alias: 'Turn the zone off',
+                      action: 'climate.set_hvac_mode',
+                      target: { entity_id: '{{ repeat.item.climate }}' },
+                      data: { hvac_mode: 'off' },
+                    },
+                  ],
+                },
+                {
+                  conditions: [
+                    {
+                      condition: 'template',
+                      value_template: '{{ blk_cool is not none or blk_heat is not none }}',
+                    },
+                  ],
+                  sequence: [
+                    {
+                      alias: 'Apply single target',
+                      action: 'climate.set_temperature',
+                      target: { entity_id: '{{ repeat.item.climate }}' },
+                      data: {
+                        temperature: '{{ blk_cool if blk_cool is not none else blk_heat }}',
+                        hvac_mode: '{{ blk_mode }}',
+                      },
+                    },
+                  ],
                 },
               ],
+              default: [],
             },
             {
               alias: 'Record the applied block',
@@ -174,7 +199,7 @@ export function engineAutomation(
 export function fanAutomation(prefix: string, zone: ZoneRef, guard?: string): Record<string, unknown> {
   return signed({
     id: automationUniqueId(prefix, `fan_timer_${zone.slug}`),
-    alias: automationAlias('fan_timer', zone.name),
+    alias: automationAlias(prefix, 'fan_timer', zone.name),
     description: `${MANAGED} Turns the ${zone.name} fan off when its fan timer ends.`,
     mode: 'single',
     triggers: [
@@ -209,7 +234,7 @@ export function fanAutomation(prefix: string, zone: ZoneRef, guard?: string): Re
 export function learningAutomation(prefix: string, zones: ZoneRef[]): Record<string, unknown> {
   return signed({
     id: automationUniqueId(prefix, 'runtime_learning'),
-    alias: automationAlias('runtime_learning'),
+    alias: automationAlias(prefix, 'runtime_learning'),
     description: `${MANAGED} Nightly EMA update of each zone's runtime-per-cooling-degree-day factor. Skips mild days; first valid day seeds directly.`,
     mode: 'single',
     triggers: [{ trigger: 'time', at: '23:58:00', alias: 'Nightly close' }],
@@ -256,10 +281,10 @@ export function learningAutomation(prefix: string, zones: ZoneRef[]): Record<str
 }
 
 export function watchdogAutomation(prefix: string): Record<string, unknown> {
-  const engineEntity = 'automation.' + automationAlias('engine').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  const engineEntity = 'automation.' + automationAlias(prefix, 'engine').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   return signed({
     id: automationUniqueId(prefix, 'watchdog'),
-    alias: automationAlias('watchdog'),
+    alias: automationAlias(prefix, 'watchdog'),
     description: `${MANAGED} Alerts when the schedule engine automation is off or unavailable for 5 minutes while any zone is enabled.`,
     mode: 'single',
     triggers: [
@@ -283,7 +308,7 @@ export function watchdogAutomation(prefix: string): Record<string, unknown> {
 export function runtimeAlertAutomation(prefix: string, zones: ZoneRef[]): Record<string, unknown> {
   return signed({
     id: automationUniqueId(prefix, 'runtime_alert'),
-    alias: automationAlias('runtime_alert'),
+    alias: automationAlias(prefix, 'runtime_alert'),
     description: `${MANAGED} Evening check: notifies when a zone's runtime is over the weather-normalized expectation by the alert margin. Uses learned k; silent while learning.`,
     mode: 'single',
     triggers: [{ trigger: 'time', at: '20:00:00', alias: 'Evening check' }],

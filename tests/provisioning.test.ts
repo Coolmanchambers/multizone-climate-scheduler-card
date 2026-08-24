@@ -56,12 +56,45 @@ describe('buildDesired inventory (CONTRACT §5)', () => {
     const d = buildDesired(baseInput());
     const byKind = (k: string) => d.filter((x) => x.kind === k).length;
     expect(byKind('helper')).toBe(23); // 3 fan timers + 3 markers + 3 enables + 3 k + 2 selects + 8 numbers + theme
-    expect(byKind('template_sensor')).toBe(7); // 3 running + 3 expected + next_block
-    expect(byKind('stats_sensor')).toBe(3);
+    expect(byKind('template_sensor')).toBe(8); // 3 running + 3 expected + next_block + outdoor_temp
+    expect(byKind('stats_sensor')).toBe(4); // 3 runtime_today + outdoor_daily_mean
     expect(byKind('schedule')).toBe(6);
     expect(byKind('automation')).toBe(7); // engine, watchdog, learning, alert, 3 fan
-    expect(d).toHaveLength(46);
-    expect(new Set(d.map((x) => x.id)).size).toBe(46); // no id collisions
+    expect(d).toHaveLength(48);
+    expect(new Set(d.map((x) => x.id)).size).toBe(48); // no id collisions
+  });
+
+  it('number helper specs seed defaults without HA `initial` (restart-reset hazard, QA-R B1-5)', () => {
+    const d = buildDesired(baseInput());
+    const numbers = d.filter((x) => x.id.startsWith('input_number.') && !x.id.includes('_k'));
+    expect(numbers.length).toBe(8);
+    for (const n of numbers) {
+      expect('initial' in n.spec).toBe(false);
+      expect(typeof n.spec.seed).toBe('number');
+    }
+  });
+
+  it('outdoor chain (G1) is always desired so an existing daily mean is never orphaned', () => {
+    const d = buildDesired(baseInput());
+    expect(d.some((x) => x.id === 'sensor.climate_outdoor_temp')).toBe(true);
+    expect(d.some((x) => x.id === 'sensor.climate_outdoor_daily_mean')).toBe(true);
+  });
+
+  it('compound zone x season id collisions are rejected (QA-R A2-8)', () => {
+    const input = baseInput();
+    input.zones = [
+      { slug: 'up', name: 'Up' },
+      { slug: 'up_late', name: 'Up Late' },
+    ];
+    input.seasons = [
+      { key: 'late_summer', name: 'Late Summer', default_mode: 'cool' },
+      { key: 'summer', name: 'Summer', default_mode: 'cool' },
+    ];
+    input.schedules = {
+      up: { late_summer: { granularity: 'all', sets: { all: WD } }, summer: { granularity: 'all', sets: { all: WD } } },
+      up_late: { late_summer: { granularity: 'all', sets: { all: WD } }, summer: { granularity: 'all', sets: { all: WD } } },
+    };
+    expect(() => buildDesired(input)).toThrow(/Naming collision/);
   });
 
   it('kill switch: every zone gets a toggle whose spec can never flip state (CONTRACT 7c)', () => {
@@ -87,14 +120,15 @@ describe('buildDesired inventory (CONTRACT §5)', () => {
     expect(p.delete.map((a) => a.id)).toContain('input_boolean.climate_owners_office_enabled');
   });
 
-  it('steering feature adds its object group', () => {
+  it('steering feature adds its helpers but NOT the ungenerated automation (QA-R A2-5)', () => {
     const input = baseInput();
     input.features.steering = true;
     const d = buildDesired(input);
     expect(d.some((x) => x.id === 'input_select.climate_upstairs_target_room')).toBe(true);
     expect(d.some((x) => x.id === 'schedule.climate_upstairs_sensor_schedule')).toBe(true);
     expect(d.some((x) => x.id === 'input_number.climate_override_minutes')).toBe(true);
-    expect(d.some((x) => x.id === 'automation:climate_mzcs_steering')).toBe(true);
+    // No generator exists yet - desiring it would be a perpetual phantom Create.
+    expect(d.some((x) => x.id === 'automation:climate_mzcs_steering')).toBe(false);
   });
 
   it('recommender deferred; learning automation always present', () => {
@@ -109,7 +143,7 @@ describe('plan + idempotence', () => {
   it('fresh install = all creates; apply → replan = zero actionable', () => {
     const desired = buildDesired(baseInput());
     const p1 = plan(desired, []);
-    expect(p1.create).toHaveLength(46);
+    expect(p1.create).toHaveLength(48);
     expect(actionable(plan(desired, applyPlan(p1, [])))).toHaveLength(0);
   });
 
@@ -125,7 +159,7 @@ describe('plan + idempotence', () => {
     ];
     const p = plan(desired, existing);
     expect(p.adopt.map((a) => a.id)).toEqual(['binary_sensor.climate_upstairs_running']);
-    expect(p.create).toHaveLength(45);
+    expect(p.create).toHaveLength(47);
     expect(actionable(plan(desired, applyPlan(p, existing)))).toHaveLength(0);
   });
 

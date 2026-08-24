@@ -45,6 +45,8 @@ export interface ProvisionInput {
   /** zone slug → season key → blocks */
   schedules: Record<string, Record<string, ScheduleSet>>;
   features: { fan_timer: boolean; anomaly_alerts: boolean; steering: boolean; fan_guard?: string };
+  /** weather entity providing the outdoor temperature for CDD learning */
+  weather_entity?: string;
 }
 
 export type ObjectKind = 'helper' | 'schedule' | 'template_sensor' | 'stats_sensor' | 'automation';
@@ -184,6 +186,10 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
     kind: 'helper',
     spec: { name: 'Climate season mode', options: ['Manual', 'Semi-auto', 'Full-auto'] },
   });
+  // `seed` is the default VALUE the executor sets once at creation via
+  // input_number.set_value. It is deliberately NOT HA's `initial` config field:
+  // a configured `initial` resets the helper's state on EVERY HA restart,
+  // silently reverting user-tuned values (QA-R finding B1-5).
   for (const n of NUMBER_HELPERS) {
     out.push({
       id: globalEntityId(n.cls, p),
@@ -193,7 +199,7 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
         min: n.min,
         max: n.max,
         step: n.step,
-        initial: n.initial,
+        seed: n.initial,
         ...(n.unit ? { unit: n.unit } : {}),
       },
     });
@@ -203,7 +209,7 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
       out.push({
         id: globalEntityId(n.cls, p),
         kind: 'helper',
-        spec: { min: n.min, max: n.max, step: n.step, initial: n.initial },
+        spec: { min: n.min, max: n.max, step: n.step, seed: n.initial },
       });
     }
   }
@@ -211,6 +217,19 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
     id: globalEntityId('next_block_sensor', p),
     kind: 'template_sensor',
     spec: { name: 'Climate next block' },
+  });
+  // Outdoor temperature chain feeding CDD learning (QA-R gap G1). The daily
+  // mean is ALWAYS desired so an already-provisioned one is never planned for
+  // delete; creation is skipped with a note when no weather entity is set.
+  out.push({
+    id: globalEntityId('outdoor_temp_sensor', p),
+    kind: 'template_sensor',
+    spec: { name: 'Climate outdoor temp', source: 'weather' },
+  });
+  out.push({
+    id: globalEntityId('outdoor_daily_mean', p),
+    kind: 'stats_sensor',
+    spec: { name: 'Climate outdoor daily mean', model: 'statistics_mean' },
   });
   out.push({
     id: globalEntityId('theme', p),
@@ -229,7 +248,7 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
     return {
       id: `automation:${uid}`,
       kind: 'automation',
-      spec: { alias: automationAlias(key, zoneName), sig: sigs[uid] ?? AUTOMATION_REVISION },
+      spec: { alias: automationAlias(p, key, zoneName), sig: sigs[uid] ?? AUTOMATION_REVISION },
     };
   };
   out.push(auto('engine'));
@@ -244,12 +263,27 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
       out.push({
         id: `automation:${uid}`,
         kind: 'automation',
-        spec: { alias: automationAlias('fan_timer', z.name), sig: sigs[uid] ?? AUTOMATION_REVISION },
+        spec: { alias: automationAlias(p, 'fan_timer', z.name), sig: sigs[uid] ?? AUTOMATION_REVISION },
       });
     }
   }
-  if (input.features.steering) out.push(auto('steering'));
+  // NOTE: the steering AUTOMATION is intentionally not desired yet - no
+  // generator exists for it (S9.5). Desiring it would produce a perpetual
+  // non-converging Create (QA-R finding A2-5). Steering helpers above remain
+  // feature-gated so their provisioning is ready when the generator lands.
 
+  // Guard against compound id collisions the reserved-slug check cannot see
+  // (e.g. zones 'up'/'up_late' with seasons 'late_summer'/'summer' both
+  // resolving to schedule.<p>_up_late_summer) - QA-R finding A2-8.
+  const seen = new Set<string>();
+  for (const o of out) {
+    if (seen.has(o.id)) {
+      throw new Error(
+        `Naming collision: two configured objects both resolve to "${o.id}". Rename the conflicting zone or season.`,
+      );
+    }
+    seen.add(o.id);
+  }
   return out;
 }
 

@@ -30,6 +30,8 @@ export type GlobalClass =
   | 'steer_max_setpoint'
   | 'steer_max_offset'
   | 'next_block_sensor'
+  | 'outdoor_temp_sensor'
+  | 'outdoor_daily_mean'
   | 'theme';
 
 export type ObjectClass = ZoneClass | GlobalClass | 'zone_schedule';
@@ -69,6 +71,8 @@ const GLOBAL_CLASS_DEFS: Record<GlobalClass, { domain: string; suffix: string }>
   steer_max_setpoint: { domain: 'input_number', suffix: 'steer_max_setpoint' },
   steer_max_offset: { domain: 'input_number', suffix: 'steer_max_offset' },
   next_block_sensor: { domain: 'sensor', suffix: 'next_block' },
+  outdoor_temp_sensor: { domain: 'sensor', suffix: 'outdoor_temp' },
+  outdoor_daily_mean: { domain: 'sensor', suffix: 'outdoor_daily_mean' },
   theme: { domain: 'input_text', suffix: 'theme' },
 };
 
@@ -105,17 +109,25 @@ export function automationUniqueId(prefix: string, key: string): string {
   return `${prefix}_mzcs_${key}`;
 }
 
-export function automationAlias(key: string, zoneName?: string): string {
+/**
+ * Aliases are PREFIX-SCOPED: a second card instance (different prefix) on the
+ * same HA must not collide friendly names, and the watchdog derives its target
+ * engine entity_id from the alias - an unscoped alias would make every
+ * instance's watchdog watch the first instance's engine. For the default
+ * prefix 'climate' the output matches the historical 'Climate: ...' aliases.
+ */
+export function automationAlias(prefix: string, key: string, zoneName?: string): string {
+  const label = prefix.charAt(0).toUpperCase() + prefix.slice(1);
   const names: Record<string, string> = {
-    engine: 'Climate: schedule engine',
-    fan_timer: `Climate: ${zoneName ?? '?'} fan timer finished`,
-    season_recommender: 'Climate: season recommender',
-    runtime_alert: 'Climate: runtime anomaly alert',
-    runtime_learning: 'Climate: runtime learning',
-    watchdog: 'Climate: engine watchdog',
-    steering: 'Climate: comfort steering',
+    engine: `${label}: schedule engine`,
+    fan_timer: `${label}: ${zoneName ?? '?'} fan timer finished`,
+    season_recommender: `${label}: season recommender`,
+    runtime_alert: `${label}: runtime anomaly alert`,
+    runtime_learning: `${label}: runtime learning`,
+    watchdog: `${label}: engine watchdog`,
+    steering: `${label}: comfort steering`,
   };
-  return names[key] ?? `Climate: ${key}`;
+  return names[key] ?? `${label}: ${key}`;
 }
 
 /**

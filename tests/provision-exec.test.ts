@@ -86,7 +86,10 @@ function fakeHass(failOn?: (c: Call) => boolean): {
   const autos = new Map<string, Record<string, unknown>>();
   const hass: HassLike = {
     states: {},
-    callService: async () => undefined,
+    callService: async (domain, service, data) => {
+      calls.push({ via: 'svc' as 'ws', key: `svc ${domain}.${service}`, data });
+      return undefined;
+    },
     callWS: async (msg) => {
       const c: Call = { via: 'ws', key: String(msg.type), data: msg };
       calls.push(c);
@@ -221,21 +224,84 @@ describe('executePlan', () => {
     expect(log.filter((l) => l.startsWith('KEEP'))).toHaveLength(2);
   });
 
-  it('adopt only labels; delete removes helpers and automations', async () => {
-    const { hass, calls } = fakeHass();
+  it('adopt only labels; delete removes helpers and PRISTINE automations only', async () => {
+    const { hass, calls, autos } = fakeHass();
+    // Seed a pristine, signed automation via the create path.
+    const seed = emptyPlan();
+    seed.create.push(create('automation:climate_mzcs_fan_timer_upstairs', 'automation', {}));
+    await executePlan(hass, seed, ctx());
     const p = emptyPlan();
     p.adopt.push({ op: 'adopt', id: 'binary_sensor.climate_upstairs_running', kind: 'template_sensor', spec: {} });
     p.delete.push(
       { op: 'delete', id: 'timer.climate_office_fan', kind: 'helper' },
-      { op: 'delete', id: 'automation:climate_mzcs_fan_timer_office', kind: 'automation' },
+      { op: 'delete', id: 'automation:climate_mzcs_fan_timer_upstairs', kind: 'automation' },
     );
     const res = await executePlan(hass, p, ctx());
     expect(res.adopted).toBe(1);
     expect(res.deleted).toBe(2);
     expect(calls.some((c) => c.key === 'timer/delete')).toBe(true);
-    expect(calls.some((c) => c.key === 'DELETE config/automation/config/climate_mzcs_fan_timer_office')).toBe(true);
-    // adopt performed no create call
-    expect(calls.some((c) => c.key.endsWith('/create') && c.key !== 'config/label_registry/create')).toBe(false);
+    expect(autos.has('climate_mzcs_fan_timer_upstairs')).toBe(false);
+    // A customized (unsigned) automation is KEPT even when planned for delete (QA-R B2-2).
+    autos.set('climate_mzcs_engine', { id: 'climate_mzcs_engine', alias: 'mine', description: 'hand-built' });
+    const p2 = emptyPlan();
+    p2.delete.push({ op: 'delete', id: 'automation:climate_mzcs_engine', kind: 'automation' });
+    const log: string[] = [];
+    const r2 = await executePlan(hass, p2, ctx(log));
+    expect(r2.deleted).toBe(0);
+    expect(r2.skipped).toBe(1);
+    expect(autos.has('climate_mzcs_engine')).toBe(true);
+    expect(log.some((l) => l.includes('customized'))).toBe(true);
+  });
+
+  it('create never blind-overwrites an existing automation config (upsert guard, QA-R B1-1/B2-1)', async () => {
+    const { hass, autos } = fakeHass();
+    autos.set('climate_mzcs_engine', { id: 'climate_mzcs_engine', alias: 'custom', description: 'no sig here' });
+    const p = emptyPlan();
+    p.create.push(create('automation:climate_mzcs_engine', 'automation', {}));
+    const log: string[] = [];
+    const res = await executePlan(hass, p, ctx(log));
+    expect(res.ok).toBe(true);
+    expect(autos.get('climate_mzcs_engine')!.alias).toBe('custom');
+    expect(log.some((l) => l.includes('not overwritten'))).toBe(true);
+    // A pristine pre-existing one IS regenerated, but never rollback-deleted:
+    const seed = emptyPlan();
+    seed.create.push(create('automation:climate_mzcs_watchdog', 'automation', {}));
+    await executePlan(hass, seed, ctx());
+    const p2 = emptyPlan();
+    p2.create.push(
+      create('automation:climate_mzcs_watchdog', 'automation', {}),
+      create('schedule.climate_upstairs_summer', 'schedule', { name: 'S', week: {} }),
+    );
+    const { hass: h2 } = { hass };
+    const failing = fakeHass((c) => c.key === 'schedule/create');
+    failing.autos.set('climate_mzcs_watchdog', autos.get('climate_mzcs_watchdog')!);
+    const r2 = await executePlan(failing.hass, p2, ctx());
+    expect(r2.ok).toBe(false);
+    // rollback must NOT have deleted the pre-existing watchdog
+    expect(failing.autos.has('climate_mzcs_watchdog')).toBe(true);
+    void h2;
+  });
+
+  it('description-only hand edits count as customized (QA-R B2-7)', async () => {
+    const cfg = engineAutomation('climate', ZONES, SEASONS);
+    const sig = parseSignature(cfg.description)!;
+    expect(contentHash(cfg)).toBe(sig);
+    const edited = { ...cfg, description: `${cfg.description} my private note` };
+    expect(contentHash(edited)).not.toBe(sig);
+  });
+
+  it('input_number creation seeds the default via set_value, never HA initial (QA-R B1-5)', async () => {
+    const { hass, calls } = fakeHass();
+    const p = emptyPlan();
+    p.create.push(
+      create('input_number.climate_cdd_base', 'helper', { name: 'Climate cdd base', min: 60, max: 80, step: 1, seed: 75, unit: '°F' }),
+    );
+    const res = await executePlan(hass, p, ctx());
+    expect(res.ok).toBe(true);
+    const c = calls.find((x) => x.key === 'input_number/create')!;
+    expect('initial' in c.data!).toBe(false);
+    const sv = calls.find((x) => x.key === 'svc input_number.set_value');
+    expect(sv?.data).toMatchObject({ entity_id: 'input_number.climate_cdd_base', value: 75 });
   });
 
   it('creates with slug-exact names so HA-generated ids match the contract (apostrophe zones)', async () => {

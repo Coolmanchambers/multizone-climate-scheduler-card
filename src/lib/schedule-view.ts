@@ -8,6 +8,7 @@ import type { BlockMode, DayGranularity } from '../types';
 
 export type Week = Partial<Record<DayKey, TimeRange[]>>;
 
+const dataOfRange = (r: TimeRange): ScheduleBlock => dataOf(r);
 function dataOf(r: TimeRange): ScheduleBlock {
   const d = r.data as {
     block?: string;
@@ -116,18 +117,50 @@ export function currentBlockAt(week: Week, now: Date): ResolvedBlock | null {
 }
 
 /** The next block INSTANT after now (skips the overnight-tail head ranges). */
+function sameBlockData(a: ScheduleBlock, b: ScheduleBlock): boolean {
+  return (
+    a.name === b.name && a.mode === b.mode && a.cool_temp === b.cool_temp && a.heat_temp === b.heat_temp
+  );
+}
+
+/**
+ * Next SETPOINT TRANSITION after `now`. Works on the raw ranges rather than
+ * rangesToDayBlocks so midnight is handled truthfully (QA-R A1-1/A1-2): a
+ * range start counts as a transition only when its data differs from the data
+ * in effect immediately before it (the previous range, or the previous day's
+ * last range at 00:00). A hold schedule that never changes returns null
+ * instead of a phantom midnight block; a real midnight change (different
+ * overnight temps between day-sets) is reported. Day iteration walks weekday
+ * indices, not epoch milliseconds, so DST days are never skipped (A1-4).
+ */
 export function nextBlockAfter(week: Week, now: Date): ResolvedBlock | null {
-  for (let offset = 0; offset < 8; offset++) {
-    const d = new Date(now.getTime() + offset * 86400000);
-    const day = JS_DAY_TO_KEY[d.getDay()]!;
-    const blocks = rangesToDayBlocks(week[day] ?? []);
-    for (const b of blocks) {
-      if (offset === 0 && b.time <= hm(now)) continue;
-      const [bh, bm] = b.time.split(':').map(Number);
-      const start = new Date(d);
-      start.setHours(bh ?? 0, bm ?? 0, 0, 0);
-      const minutesUntil = Math.round((start.getTime() - now.getTime()) / 60000);
+  const startIdx = now.getDay();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const nowT = `${hm(now)}:00`;
+  const dayRanges = (idx: number): TimeRange[] => {
+    const key = JS_DAY_TO_KEY[(((startIdx + idx) % 7) + 7) % 7]!;
+    return [...(week[key] ?? [])].sort((a, b) => a.from.localeCompare(b.from));
+  };
+  const prevLastData = (idx: number): ScheduleBlock | null => {
+    for (let back = 1; back <= 7; back++) {
+      const rs = dayRanges(idx - back);
+      if (rs.length) return dataOfRange(rs[rs.length - 1]!);
+    }
+    return null;
+  };
+  for (let offset = 0; offset <= 7; offset++) {
+    const rs = dayRanges(offset);
+    for (let i = 0; i < rs.length; i++) {
+      const r = rs[i]!;
+      if (offset === 0 && r.from <= nowT) continue;
+      if (offset === 7 && r.from > nowT) break;
+      const before = i > 0 ? dataOfRange(rs[i - 1]!) : prevLastData(offset);
+      const b = dataOfRange(r);
+      if (before && sameBlockData(before, b)) continue;
+      const [bh, bm] = r.from.slice(0, 5).split(':').map(Number);
+      const minutesUntil = offset * 1440 + (bh! * 60 + bm!) - nowMin;
       if (minutesUntil <= 0) continue;
+      const day = JS_DAY_TO_KEY[(startIdx + offset) % 7]!;
       return { ...b, day, minutesUntil };
     }
   }
@@ -137,6 +170,8 @@ export function nextBlockAfter(week: Week, now: Date): ResolvedBlock | null {
 /**
  * Apply an edit to one block across every day in its set, returning the new
  * full week payload for schedule/update. Edits keyed by original block time.
+ * A time patch that would collide with another block in the set is dropped
+ * (a duplicate time would emit a zero-length range - QA-R A1-5).
  */
 export function editBlockInSet(
   week: Week,
@@ -152,11 +187,51 @@ export function editBlockInSet(
       out[day] = ranges;
       continue;
     }
-    const blocks = rangesToDayBlocks(ranges).map((b) =>
-      b.time === originalTime ? { ...b, ...patch } : b,
-    );
+    const dayBlocks = rangesToDayBlocks(ranges);
+    const safePatch =
+      patch.time && dayBlocks.some((b) => b.time === patch.time && b.time !== originalTime)
+        ? { ...patch, time: undefined }
+        : patch;
+    const blocks = dayBlocks.map((b) => (b.time === originalTime ? { ...b, ...safePatch, time: safePatch.time ?? b.time } : b));
     out[day] = blocksBackToRanges(blocks);
   }
+  return out;
+}
+
+/**
+ * True when any day's ranges do not contiguously cover 00:00-24:00. Schedules
+ * authored in HA's native grid editor may contain OFF periods; the card's
+ * block model would silently convert them into active coverage on save
+ * (QA-R A1-3), so gap-weeks must be treated as read-only by the editor.
+ */
+export function weekHasGaps(week: Week): boolean {
+  for (const d of ALL_DAYS) {
+    const rs = [...(week[d] ?? [])].sort((a, b) => a.from.localeCompare(b.from));
+    if (rs.length === 0) return true;
+    if (rs[0]!.from !== '00:00:00') return true;
+    for (let i = 1; i < rs.length; i++) {
+      if (rs[i]!.from !== rs[i - 1]!.to) return true;
+    }
+    if (rs[rs.length - 1]!.to !== '24:00:00') return true;
+  }
+  return false;
+}
+
+/** Strip geometry straight from ranges, representing OFF gaps as block:null. */
+export function stripSegmentsFromRanges(
+  ranges: TimeRange[],
+): Array<{ block: ScheduleBlock | null; fromMin: number; toMin: number }> {
+  const rs = [...ranges].sort((a, b) => a.from.localeCompare(b.from));
+  const out: Array<{ block: ScheduleBlock | null; fromMin: number; toMin: number }> = [];
+  let cur = 0;
+  for (const r of rs) {
+    const f = timeToMin(r.from.slice(0, 5));
+    const t = r.to === '24:00:00' ? 1440 : timeToMin(r.to.slice(0, 5));
+    if (f > cur) out.push({ block: null, fromMin: cur, toMin: f });
+    out.push({ block: dataOfRange(r), fromMin: f, toMin: t });
+    cur = t;
+  }
+  if (cur < 1440) out.push({ block: null, fromMin: cur, toMin: 1440 });
   return out;
 }
 

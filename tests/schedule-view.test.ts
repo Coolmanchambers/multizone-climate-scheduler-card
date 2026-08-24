@@ -7,6 +7,8 @@ import {
   editBlockInSet,
   replaceSetBlocks,
   stripSegments,
+  stripSegmentsFromRanges,
+  weekHasGaps,
   timeToMin,
   minToTime,
   type Week,
@@ -180,5 +182,72 @@ describe('time helpers', () => {
     expect(minToTime(360)).toBe('06:00');
     expect(minToTime(1500)).toBe('23:45');
     expect(minToTime(-30)).toBe('00:00');
+  });
+});
+
+describe('nextBlockAfter transition truthfulness (QA-R A1-1/A1-2)', () => {
+  it('reports a real midnight setpoint change when overnight temps differ', () => {
+    // Friday ends Sleep 76; Saturday overnight carries Sleep 74 -> the engine
+    // really changes the setpoint at Sat 00:00.
+    const we2 = [cool('07:30', 'Wake', 78), cool('21:30', 'Sleep', 74)];
+    const week: Week = {
+      monday: blocksToDayRanges(WD), tuesday: blocksToDayRanges(WD), wednesday: blocksToDayRanges(WD),
+      thursday: blocksToDayRanges(WD), friday: blocksToDayRanges(WD),
+      saturday: blocksToDayRanges(we2), sunday: blocksToDayRanges(we2),
+    };
+    const now = new Date('2026-08-21T23:00:00'); // Friday
+    const next = nextBlockAfter(week, now);
+    expect(next).toMatchObject({ day: 'saturday', time: '00:00', cool_temp: 74 });
+    expect(next!.minutesUntil).toBe(60);
+  });
+
+  it('a hold schedule that never changes returns null, not a phantom midnight block', () => {
+    const hold = [cool('06:00', 'Day', 78)];
+    const week: Week = Object.fromEntries(
+      Object.keys(WEEK).map((k) => [k, blocksToDayRanges(hold)]),
+    );
+    expect(nextBlockAfter(week, new Date('2026-08-19T10:00:00'))).toBeNull();
+  });
+
+  it('still resolves ordinary intra-day and cross-day transitions', () => {
+    const now = new Date('2026-08-22T14:20:00'); // Saturday
+    expect(nextBlockAfter(WEEK, now)).toMatchObject({ name: 'Sleep', time: '21:30', minutesUntil: 430 });
+    const fri = new Date('2026-08-21T23:00:00');
+    // WD and WE overnight blocks are identical (Sleep 76) so midnight is NOT a
+    // transition; the next real change is Saturday Wake 07:30.
+    expect(nextBlockAfter(WEEK, fri)).toMatchObject({ name: 'Wake', day: 'saturday', time: '07:30' });
+  });
+});
+
+describe('gap handling (native-editor OFF periods, QA-R A1-3)', () => {
+  const gapDay = [
+    { from: '08:00:00', to: '12:00:00', data: { block: 'A', mode: 'cool' as const, cool_temp: 76 } },
+    { from: '14:00:00', to: '20:00:00', data: { block: 'B', mode: 'cool' as const, cool_temp: 79 } },
+  ];
+  it('weekHasGaps detects holes and full coverage', () => {
+    expect(weekHasGaps({ ...WEEK, saturday: gapDay })).toBe(true);
+    expect(weekHasGaps(WEEK)).toBe(false);
+  });
+  it('stripSegmentsFromRanges renders gaps as null blocks covering the day', () => {
+    const segs = stripSegmentsFromRanges(gapDay);
+    expect(segs.map((s) => [s.fromMin, s.toMin, s.block?.name ?? null])).toEqual([
+      [0, 480, null],
+      [480, 720, 'A'],
+      [720, 840, null],
+      [840, 1200, 'B'],
+      [1200, 1440, null],
+    ]);
+  });
+});
+
+describe('editBlockInSet time-collision guard (QA-R A1-5)', () => {
+  it('drops a time patch that collides with another block', () => {
+    const edited = editBlockInSet(WEEK, detectSets(WEEK).sets.wd!, '14:00', { time: '16:00', cool_temp: 75 });
+    const blocks = rangesToDayBlocks(edited.monday!);
+    // time kept at 14:00, temp patch still applied
+    const b = blocks.find((x) => x.name === 'Pre-cool')!;
+    expect(b.time).toBe('14:00');
+    expect(b.cool_temp).toBe(75);
+    for (const r of edited.monday!) expect(r.from).not.toBe(r.to);
   });
 });

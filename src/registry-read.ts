@@ -140,34 +140,43 @@ export async function fetchExisting(
   }
 
   // Automations: match by the unique-id-bearing attributes.id on automation
-  // entities. The embedded [mzcs-sig:...] is read from the stored config so the
-  // differ can detect stale generated content; unreadable configs report an
-  // 'unknown' sig (plans an Update; the executor's pristine check then decides).
-  const autoIds: Array<{ cfgId: string; alias: string }> = [];
+  // entities. managed = carries the mzcs LABEL, same rule as every other kind -
+  // an id that merely looks like ours must never make a foreign automation
+  // delete-eligible (QA-R finding A2-4). The embedded [mzcs-sig:...] is read
+  // from the stored config so the differ can detect stale generated content;
+  // unreadable configs report an 'unknown' sig (plans an Update; the executor's
+  // pristine check then decides).
+  const autoIds: Array<{ cfgId: string; entityId: string; alias: string }> = [];
   for (const [entityId, st] of Object.entries(hass.states)) {
     if (!entityId.startsWith('automation.') || !st) continue;
     const cfgId = st.attributes.id;
     if (typeof cfgId === 'string' && cfgId.startsWith(`${prefix}_mzcs_`)) {
-      autoIds.push({ cfgId, alias: String(st.attributes.friendly_name ?? cfgId) });
+      autoIds.push({ cfgId, entityId, alias: String(st.attributes.friendly_name ?? cfgId) });
     }
   }
-  const sigs = await Promise.all(
-    autoIds.map(async ({ cfgId }) => {
-      if (!hass.callApi) return 'unknown';
-      try {
-        const cfg = (await hass.callApi('GET', `config/automation/config/${cfgId}`)) as Record<string, unknown>;
-        return parseSignature(cfg?.description) ?? 'unknown';
-      } catch {
-        return 'unknown';
-      }
-    }),
-  );
-  autoIds.forEach(({ cfgId, alias }, i) => {
+  const [sigs, autoLabels] = await Promise.all([
+    Promise.all(
+      autoIds.map(async ({ cfgId }) => {
+        if (!hass.callApi) return 'unknown';
+        try {
+          const cfg = (await hass.callApi('GET', `config/automation/config/${cfgId}`)) as Record<string, unknown>;
+          return parseSignature(cfg?.description) ?? 'unknown';
+        } catch {
+          return 'unknown';
+        }
+      }),
+    ),
+    labelsFor(
+      hass,
+      autoIds.map((a) => a.entityId),
+    ),
+  ]);
+  autoIds.forEach(({ cfgId, entityId, alias }, i) => {
     out.push({
       id: `automation:${cfgId}`,
       kind: 'automation',
       spec: { alias, sig: sigs[i]! },
-      managed: true,
+      managed: (autoLabels.get(entityId) ?? []).includes(MZCS_LABEL),
     });
   });
   return out;

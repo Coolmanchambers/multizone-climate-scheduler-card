@@ -56,7 +56,10 @@ export class MzcsCardEditor extends LitElement {
       seasons: config.seasons ?? DEFAULT_SEASONS.map((s) => ({ ...s })),
       season_switch: config.season_switch ?? 'semi',
       weather_entity: config.weather_entity,
+      // Spread first: fields this editor has no UI for (e.g. fan_guard) must
+      // round-trip untouched, never be silently dropped (QA-R C2-8).
       features: {
+        ...config.features,
         fan_timer: config.features?.fan_timer ?? [15, 30, 60],
         anomaly_alerts: config.features?.anomaly_alerts ?? true,
       },
@@ -71,11 +74,14 @@ export class MzcsCardEditor extends LitElement {
     });
   }
 
-  /** True once any zone's schedule entity exists for this season key in HA. */
+  /** True once any zone's schedule entity exists for this season key in HA.
+   * FAIL-CLOSED: with hass briefly unavailable (startup, reconnect) we cannot
+   * know, so the key is treated as provisioned and stays frozen - re-deriving
+   * it would let the differ delete real schedules (QA-R C2-4). */
   private _seasonProvisioned(key: string): boolean {
     const hass = this.hass;
     const c = this._config;
-    if (!hass || !c) return false;
+    if (!hass || !c) return true;
     const prefix = c.prefix ?? 'climate';
     return (c.zones ?? []).some(
       (z) => z.name && !!hass.states[`schedule.${prefix}_${slugify(z.name)}_${key}`],
@@ -204,7 +210,11 @@ export class MzcsCardEditor extends LitElement {
                   // and re-seed placeholders. Before provisioning, the key may
                   // still follow the name (nicer entity ids).
                   const newKey = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-                  const key = this._seasonProvisioned(s.key) || !newKey ? s.key : newKey;
+                  // Keep the old key when frozen, empty, or when the new key
+                  // would collide with another season's key (QA-R C2-5).
+                  const collides = seasons.some((x, xi) => xi !== i && x.key === newKey);
+                  const key =
+                    this._seasonProvisioned(s.key) || !newKey || collides ? s.key : newKey;
                   const next = seasons.map((x, xi) => (xi === i ? { ...x, name, key } : x));
                   this._emit({ seasons: next });
                 }}

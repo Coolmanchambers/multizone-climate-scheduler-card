@@ -220,7 +220,13 @@ export async function setZoneEnabled(
   // enable edge, and clearing afterwards races it (stale marker = skipped
   // resume until the next tick).
   if (on) {
-    await hass.callService('input_text', 'set_value', { entity_id: markerEntityId, value: '' });
+    try {
+      await hass.callService('input_text', 'set_value', { entity_id: markerEntityId, value: '' });
+    } catch {
+      // A missing marker (partial provisioning) must not block the toggle
+      // (QA-R C1-8); with no marker the engine treats the block as unapplied
+      // and re-asserts anyway.
+    }
   }
   await hass.callService('input_boolean', on ? 'turn_on' : 'turn_off', {
     entity_id: enableEntityId,
