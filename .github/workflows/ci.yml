@@ -22,3 +22,14 @@ jobs:
         with:
           name: multizone-climate-scheduler-card
           path: dist/multizone-climate-scheduler-card.js
+
+  hacs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hacs/action@main
+        with:
+          category: plugin
+          # No brands entry yet - required only for HACS default-store listing,
+          # not for custom-repository installs (post-v1 roadmap item).
+          ignore: brands
