@@ -272,9 +272,14 @@ While a zone's thermostat reports its standby preset — **`eco` by default**, m
 the engine leaves that zone completely alone. This is handy for away modes, and confusing if
 you forgot the preset was on. If your thermostat uses a different name for the same idea
 (`away`, `sleep`, ...), set it in the editor under **Features → Standby preset name**; the
-card's Eco chip follows the same setting. You can also switch the behavior off entirely so
-Home Assistant owns standby. Check your thermostat's preset list in Home Assistant for the
-exact name it reports.
+card's Eco chip follows the same setting. Check your thermostat's preset list in Home
+Assistant for the exact name it reports.
+
+You can also switch the stand-down off entirely so Home Assistant owns standby — but
+deliberately: with it off, the engine keeps applying schedule setpoints even while a
+thermostat is in its Eco/away mode, **overriding and likely fighting the device's or its
+app's own standby behavior**. Only disable it if you've turned those features off on the
+device itself. The editor shows this warning when you untick it.
 
 <p align="center">
   <img src="docs/controls.png" alt="The controls expander showing Heat, Cool, Heat-Cool, Off and Eco buttons plus fan timer chips" width="420">

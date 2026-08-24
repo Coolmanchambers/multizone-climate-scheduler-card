@@ -1280,7 +1280,14 @@
                 'eco' matches Nest; other brands may use 'away', 'sleep', or similar - check
                 the thermostat's preset list in Home Assistant.
               </p>
-            `:m}
+            `:p`
+              <p class="bad">
+                With this off, the schedule keeps applying setpoints even while a thermostat
+                is in its Eco/away mode - overriding, and likely fighting, the device's or
+                its app's own standby behavior. Only turn this off if you have disabled
+                Eco/away features on the device and want Home Assistant to own standby.
+              </p>
+            `}
 
         <h4>Advanced</h4>
         <label class="fieldrow">
