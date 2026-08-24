@@ -32,7 +32,7 @@ const config: MzcsCardConfig = {
         'sensor.dead_sensor_temperature',
       ],
     },
-    { entity: 'climate.owner_s_office_mini_split', name: "the owner's Office" },
+    { entity: 'climate.owner_s_office_mini_split', name: 'Office' },
   ],
 };
 
@@ -47,6 +47,47 @@ hass.onChange(() => {
   card.hass = hass.snapshot();
 });
 document.getElementById('mount')!.appendChild(card);
+
+// Shot mode (docs screenshots): `#shot=<view>` hides the harness chrome and
+// pre-opens one panel so a headless capture gets a clean, real render.
+// Views: main | controls | schedule | runtime | setup
+const shot = new URLSearchParams(location.hash.slice(1)).get('shot');
+if (shot) {
+  document.querySelectorAll('h1, .controls, pre').forEach((el) => el.remove());
+  document.body.style.padding = '16px 8px';
+  // Match a real dashboard column; the harness default (400px) truncates the
+  // hero summary line that a live card shows in full.
+  const main = document.querySelector('main') as HTMLElement | null;
+  if (main) main.style.maxWidth = '500px';
+  // Neutral room labels: docs screenshots are published publicly and must
+  // carry no household/personal names.
+  const demoRooms: Record<string, string> = {
+    'sensor.guest_room_temperature': 'Guest Room Temperature',
+    'sensor.bedroom_1_temperature': 'Bedroom 1 Temperature',
+    'sensor.bedroom_2_temperature': 'Bedroom 2 Temperature',
+    'sensor.loft_temperature': 'Loft Temperature',
+    'sensor.dead_sensor_temperature': 'Spare Sensor Temperature',
+  };
+  for (const [id, friendly_name] of Object.entries(demoRooms)) {
+    hass.set(id, { attributes: { friendly_name } });
+  }
+  const c = card as unknown as Record<string, unknown>;
+  const openPanel = () => {
+    // Upstairs is the fully-fixtured zone (schedule + runtime + room sensors).
+    c._zoneIndex = 1;
+    if (shot === 'controls') c._ctrlOpen = true;
+    if (shot === 'runtime') c._rtOpen = true;
+    if (shot === 'setup') c._setupOpen = true;
+    if (shot === 'preview') {
+      c._setupOpen = true;
+      void (card as unknown as { _runDryRun(): Promise<void> })._runDryRun();
+    }
+    if (shot === 'schedule') c._schedOpen = true;
+    (card as unknown as { requestUpdate(): void }).requestUpdate();
+  };
+  setTimeout(openPanel, 60);
+  setTimeout(openPanel, 400);
+}
 
 // Harness controls
 document.getElementById('btn-fan')!.addEventListener('click', () => {

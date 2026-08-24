@@ -35,6 +35,4 @@ jobs:
           category: plugin
           # brands: required only for HACS default-store listing, not for
           # custom-repository installs (post-v1 roadmap item).
-          # images: README screenshot lands at the v1.0.0 acceptance pass;
-          # drop this ignore then.
-          ignore: brands images
+          ignore: brands
