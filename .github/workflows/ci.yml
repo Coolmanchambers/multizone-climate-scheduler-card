@@ -30,6 +30,8 @@ jobs:
       - uses: hacs/action@main
         with:
           category: plugin
-          # No brands entry yet - required only for HACS default-store listing,
-          # not for custom-repository installs (post-v1 roadmap item).
-          ignore: brands
+          # brands: required only for HACS default-store listing, not for
+          # custom-repository installs (post-v1 roadmap item).
+          # images: README screenshot lands at the v1.0.0 acceptance pass;
+          # drop this ignore then.
+          ignore: brands images
