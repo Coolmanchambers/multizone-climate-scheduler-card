@@ -48,6 +48,11 @@ This card replaces that. It gives you:
 The card is the *interface*. Home Assistant does the *work*. Nothing depends on a browser being
 open, and nothing depends on this card staying installed once the objects exist.
 
+**What this is, technically:** a custom Lovelace **dashboard card** (frontend JavaScript). It
+is *not* a Home Assistant integration — there is no `custom_components/` folder, nothing to
+configure in `configuration.yaml`, and no restart required. That distinction matters at
+install time; see [Installation](#installation).
+
 ### Is this for you?
 
 **A good fit if** you have one to four `climate` entities, you want a single schedule UI across
@@ -142,18 +147,30 @@ re-asserts the current block if a transition was ever missed.
 
 ## Installation
 
+> [!IMPORTANT]
+> **This is a dashboard card, not an integration.** When you add it to HACS you must choose
+> the category **Dashboard** (older HACS versions call the same thing **Lovelace** or
+> **Plugin**). Choosing *Integration* makes HACS look for a `custom_components/` folder,
+> which a card does not have — it will refuse the repository with
+> *"repository structure is not compliant"*. If you see that error, this is why.
+
 ### Via HACS (recommended)
 
 1. In Home Assistant, open **HACS**.
 2. Click the three-dot menu (top right) → **Custom repositories**.
-3. Add the repository URL below, with type **Dashboard**:
+3. Paste the repository URL:
    ```
    https://github.com/Coolmanchambers/multizone-climate-scheduler-card
    ```
-4. Search HACS for **Multi-Zone Climate Scheduler Card** and click **Download**.
-5. Reload your browser (hard refresh, or clear the frontend cache in the Companion app).
+4. Set **Type / Category** to **Dashboard** — *not* Integration. (On older HACS this dropdown
+   reads **Lovelace** or **Plugin**; pick that instead — it is the same category.)
+5. Click **Add**, then search HACS for **Multi-Zone Climate Scheduler Card** and click
+   **Download**.
+6. Reload your browser (hard refresh, or clear the frontend cache in the Companion app).
 
-HACS registers the dashboard resource for you.
+HACS registers the dashboard resource for you — there is nothing to add to
+`configuration.yaml`, and no Home Assistant restart is needed. A card only needs a browser
+refresh.
 
 ### Manual
 
@@ -459,6 +476,11 @@ If you skip step 1 and later want to clean up by hand, everything the card creat
 ---
 
 ## Troubleshooting
+
+**HACS says "repository structure is not compliant".** The repository was added under the
+wrong category. This is a **Dashboard** card (called **Lovelace** or **Plugin** in older HACS
+versions), not an Integration. Remove the custom repository and re-add it with the correct
+category.
 
 **The card doesn't appear after installing.** Hard-refresh the browser. In the Companion app,
 use **Settings → Companion App → Troubleshooting → Reset frontend cache**, then force-quit and

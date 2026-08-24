@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 
 ## [Unreleased]
 
+### Documentation
+- Install instructions now state plainly that this is a **dashboard card, not an
+  integration**, and that HACS must be given the category **Dashboard** (**Lovelace** or
+  **Plugin** on older HACS). Choosing Integration makes HACS look for a 
+  folder and reject the repository as "not compliant" - now called out up front, in the
+  numbered steps, and in troubleshooting.
+
 ## [0.9.1] - 2026-08-24
 
 ### Added
