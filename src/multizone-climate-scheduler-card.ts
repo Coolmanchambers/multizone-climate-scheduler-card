@@ -186,6 +186,10 @@ export class MzcsCard extends LitElement {
   @state() private _rtRange: 7 | 30 = 7;
   @state() private _rt30?: DailyRuntime[];
   @state() private _dryRun?: Plan;
+  /** Which flow produced _dryRun. A teardown plan must NEVER render on the
+   * Setup tab (it would show as an innocuous-looking all-delete preview), and
+   * the Danger tab must never execute a setup plan. */
+  private _dryRunKind?: 'setup' | 'teardown';
   @state() private _dryRunError?: string;
   @state() private _dryRunning = false;
   @state() private _execConfirm = false;
@@ -235,6 +239,7 @@ export class MzcsCard extends LitElement {
     // A config change invalidates any previewed plan (QA-R C1-1): Apply must
     // never execute a plan computed for a different config.
     this._dryRun = undefined;
+    this._dryRunKind = undefined;
     this._execConfirm = false;
     this._execResult = undefined;
     this._execLog = [];
@@ -326,6 +331,7 @@ export class MzcsCard extends LitElement {
       const input = this._provisionInput();
       const existing = await this._fetchExistingFor(input);
       this._dryRun = plan(buildDesired(input), existing);
+      this._dryRunKind = 'setup';
       this._execConfirm = false;
       this._execResult = undefined;
       this._execLog = [];
@@ -350,7 +356,12 @@ export class MzcsCard extends LitElement {
       // entities vanish), then sensors, schedules, helpers.
       const rank: Record<string, number> = { automation: 0, template_sensor: 1, stats_sensor: 1, schedule: 2, helper: 3 };
       p.delete.sort((a, b) => (rank[a.kind] ?? 9) - (rank[b.kind] ?? 9));
+      // The user may have switched tabs or closed the panel while the registry
+      // fetch was in flight; _resetDangerState() disarmed the flow, and this
+      // late result must not resurrect it (Fable review F1).
+      if (!this._tdAsk || this._setupTab !== 'danger' || !this._setupOpen) return;
       this._dryRun = p;
+      this._dryRunKind = 'teardown';
       this._tdArmed = true;
       this._execConfirm = false;
       this._execResult = undefined;
@@ -365,8 +376,14 @@ export class MzcsCard extends LitElement {
   private async _runTeardown(): Promise<void> {
     const hass = this.hass;
     const cfg = this._config;
-    const p = this._dryRun;
+    const p = this._dryRunKind === 'teardown' ? this._dryRun : undefined;
     if (!hass || !cfg || !p || this._tdRunning) return;
+    // HARD gate, independent of the button's disabled state: the typed
+    // confirmation must match the install's prefix, and it is single-use -
+    // consumed here so a completed run can never leave a pre-filled box that
+    // re-fires without retyping (Fable review F3/F5).
+    if (this._tdConfirm.trim() !== this._prefix) return;
+    this._tdConfirm = '';
     if (!hass.callWS || !hass.callApi) {
       this._execLog = ['This HA frontend session does not expose the required APIs (callWS/callApi).'];
       return;
@@ -376,6 +393,23 @@ export class MzcsCard extends LitElement {
     this._execLog = [];
     try {
       const input = this._provisionInput();
+      // Freshness gate, mirroring _runApply (QA-R B1-3/C1-1): the armed list
+      // may be minutes old. Recompute the teardown against the LIVE registry
+      // and refuse if it no longer matches what the user confirmed - they must
+      // review the refreshed list and type the prefix again (Fable review F4).
+      const liveExisting = await this._fetchExistingFor(input);
+      const fresh = plan([], liveExisting);
+      const rank: Record<string, number> = { automation: 0, template_sensor: 1, stats_sensor: 1, schedule: 2, helper: 3 };
+      fresh.delete.sort((a, b) => (rank[a.kind] ?? 9) - (rank[b.kind] ?? 9));
+      const ids = (pl: Plan) => pl.delete.map((a) => a.id).sort().join('|');
+      if (ids(fresh) !== ids(p)) {
+        this._dryRun = fresh;
+        this._dryRunKind = 'teardown';
+        this._tdArmed = true;
+        this._tdRunning = false;
+        this._execLog = ['The registry changed since this preview was made. Review the refreshed list and confirm again.'];
+        return;
+      }
       // Stand every zone down FIRST so the thermostats' own app schedules take
       // over before any object disappears.
       for (const z of input.zones) {
@@ -390,7 +424,7 @@ export class MzcsCard extends LitElement {
         }
       }
       const zoneRefs = cfg.zones.map((z) => ({ slug: slugify(z.name), name: z.name, climate: z.entity }));
-      const result = await executePlan(hass, p, {
+      const result = await executePlan(hass, fresh, {
         prefix: input.prefix,
         zones: zoneRefs,
         seasons: input.seasons,
@@ -404,6 +438,7 @@ export class MzcsCard extends LitElement {
       this._execResult = result;
       const existing = await this._fetchExistingFor(input);
       this._dryRun = plan(buildDesired(input), existing);
+      this._dryRunKind = 'setup';
     } catch (e) {
       this._execLog = [...this._execLog, `ERROR: ${e instanceof Error ? e.message : String(e)}`];
     } finally {
@@ -445,6 +480,7 @@ export class MzcsCard extends LitElement {
         ]);
       if (shape(fresh) !== shape(p)) {
         this._dryRun = fresh;
+        this._dryRunKind = 'setup';
         this._execRunning = false;
         this._execLog = ['The registry changed since this preview was made. Review the refreshed plan and apply again.'];
         return;
@@ -477,6 +513,10 @@ export class MzcsCard extends LitElement {
     this._tdAsk = false;
     this._tdArmed = false;
     this._tdConfirm = '';
+    if (this._dryRunKind === 'teardown') {
+      this._dryRun = undefined;
+      this._dryRunKind = undefined;
+    }
   }
 
   private _setSetupTab(tab: SetupTab): void {
@@ -582,7 +622,7 @@ export class MzcsCard extends LitElement {
   }
 
   private _renderSetupTab() {
-    const p = this._dryRun;
+    const p = this._dryRunKind === 'setup' ? this._dryRun : undefined;
     return html`
       <div>
         <p class="setup-sub">
@@ -627,7 +667,7 @@ export class MzcsCard extends LitElement {
   }
 
   private _renderTeardown() {
-    const p = this._dryRun;
+    const p = this._dryRunKind === 'teardown' ? this._dryRun : undefined;
     const need = this._prefix;
     const typed = this._tdConfirm.trim() === need;
     const busy = this._dryRunning || this._execRunning;
