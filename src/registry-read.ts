@@ -42,6 +42,8 @@ const KIND_BY_CLASS: Record<string, ObjectKind> = {
   running_sensor: 'template_sensor',
   expected_runtime: 'template_sensor',
   next_block_sensor: 'template_sensor',
+  outdoor_temp_sensor: 'template_sensor',
+  outdoor_daily_mean: 'stats_sensor',
   runtime_today: 'stats_sensor',
   zone_schedule: 'schedule',
   sensor_schedule: 'schedule',

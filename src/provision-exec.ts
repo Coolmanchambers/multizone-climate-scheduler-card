@@ -291,6 +291,7 @@ async function createOne(
       const stored = parseSignature(preexisting.description);
       if (stored && contentHash(preexisting) === stored) {
         await hass.callApi!('POST', `config/automation/config/${uid}`, payload);
+        await labelEntity(hass, `automation.${haSlug(String(payload.alias))}`);
         ctx.log(`Recreated ${a.id} (existed in storage, pristine)`);
         return { kind: 'automation', automationId: uid, preexisted: true };
       }
@@ -298,6 +299,10 @@ async function createOne(
       return null;
     }
     await hass.callApi!('POST', `config/automation/config/${uid}`, payload);
+    // Label the automation ENTITY (managed = mzcs label, same as every other
+    // kind). The entity id is derived from the alias - the executor's hass
+    // snapshot predates the create, so it cannot be looked up from states.
+    await labelEntity(hass, `automation.${haSlug(String(payload.alias))}`);
     return { kind: 'automation', automationId: uid };
   }
   const { domain, objectId } = splitId(a.id);
