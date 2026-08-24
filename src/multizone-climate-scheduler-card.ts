@@ -99,7 +99,9 @@ import {
   type Week,
   type DetectedSets,
 } from './lib/schedule-view';
+import { transitionSets, daysForSet, ALL_DAYS } from './lib/schedule-ranges';
 import type { DayKey, TimeRange, ScheduleBlock } from './lib/schedule-ranges';
+import type { DayGranularity } from './types';
 
 /** SE2 strip color: cool blue → warm amber in RGB (no green detour). */
 function tempColor(t: number, lo: number, hi: number): string {
@@ -156,6 +158,8 @@ export class MzcsCard extends LitElement {
   @state() private _schedSel?: { setKey: string; idx: number };
   @state() private _schedDrafts = new Map<string, ScheduleBlock[]>();
   @state() private _schedNotice?: string;
+  /** pending day-granularity change (draft; applied on Save) */
+  @state() private _schedGran?: DayGranularity;
   @state() private _rtOpen = false;
   @state() private _rtDaily?: DailyRuntime[];
   private _rtLoadedFor?: string;
@@ -172,6 +176,8 @@ export class MzcsCard extends LitElement {
   @state() private _execRunning = false;
   @state() private _execLog: string[] = [];
   @state() private _execResult?: ExecResult;
+  @state() private _tdArmed = false;
+  @state() private _tdRunning = false;
 
   public setConfig(config: MzcsCardConfig): void {
     // Tolerant validation (QA-R C2-2/C2-3): incomplete configs (empty zones,
@@ -287,10 +293,94 @@ export class MzcsCard extends LitElement {
       this._execConfirm = false;
       this._execResult = undefined;
       this._execLog = [];
+      this._tdArmed = false;
     } catch (e) {
       this._dryRunError = e instanceof Error ? e.message : String(e);
     } finally {
       this._dryRunning = false;
+    }
+  }
+
+  /** Teardown preview: everything managed under this prefix becomes a delete. */
+  private async _armTeardown(): Promise<void> {
+    if (!this.hass || this._dryRunning || this._tdRunning) return;
+    this._dryRunning = true;
+    this._dryRunError = undefined;
+    try {
+      const input = this._provisionInput();
+      const existing = await fetchExisting(
+        this.hass,
+        input.prefix,
+        input.zones.map((z) => z.slug),
+        input.seasons.map((s) => s.key),
+      );
+      const p = plan([], existing);
+      // Deletion order: automations first (the engine stops before its
+      // entities vanish), then sensors, schedules, helpers.
+      const rank: Record<string, number> = { automation: 0, template_sensor: 1, stats_sensor: 1, schedule: 2, helper: 3 };
+      p.delete.sort((a, b) => (rank[a.kind] ?? 9) - (rank[b.kind] ?? 9));
+      this._dryRun = p;
+      this._tdArmed = true;
+      this._execConfirm = false;
+      this._execResult = undefined;
+      this._execLog = [];
+    } catch (e) {
+      this._dryRunError = e instanceof Error ? e.message : String(e);
+    } finally {
+      this._dryRunning = false;
+    }
+  }
+
+  private async _runTeardown(): Promise<void> {
+    const hass = this.hass;
+    const cfg = this._config;
+    const p = this._dryRun;
+    if (!hass || !cfg || !p || this._tdRunning) return;
+    if (!hass.callWS || !hass.callApi) {
+      this._execLog = ['This HA frontend session does not expose the required APIs (callWS/callApi).'];
+      return;
+    }
+    this._tdRunning = true;
+    this._tdArmed = false;
+    this._execLog = [];
+    try {
+      const input = this._provisionInput();
+      // Stand every zone down FIRST so the thermostats' own app schedules take
+      // over before any object disappears.
+      for (const z of input.zones) {
+        const en = zoneEntityId('zone_enabled', input.prefix, z.slug);
+        if (entityExists(hass, en)) {
+          try {
+            await hass.callService('input_boolean', 'turn_off', { entity_id: en });
+            this._execLog = [...this._execLog, `Disabled scheduling for ${z.name}`];
+          } catch {
+            this._execLog = [...this._execLog, `NOTE: could not disable ${en}`];
+          }
+        }
+      }
+      const zoneRefs = cfg.zones.map((z) => ({ slug: slugify(z.name), name: z.name, climate: z.entity }));
+      const result = await executePlan(hass, p, {
+        prefix: input.prefix,
+        zones: zoneRefs,
+        seasons: input.seasons,
+        fanGuard: cfg.features?.fan_guard,
+        weatherEntity: cfg.weather_entity,
+        log: (line) => {
+          this._execLog = [...this._execLog, line];
+        },
+      });
+      this._execResult = result;
+      const existing = await fetchExisting(
+        hass,
+        input.prefix,
+        input.zones.map((z) => z.slug),
+        input.seasons.map((s) => s.key),
+      );
+      this._dryRun = plan(buildDesired(input), existing);
+    } catch (e) {
+      this._execLog = [...this._execLog, `ERROR: ${e instanceof Error ? e.message : String(e)}`];
+    } finally {
+      this._tdRunning = false;
     }
   }
 
@@ -407,8 +497,42 @@ export class MzcsCard extends LitElement {
             `
           : nothing}
         ${this._renderManage()}
+        ${this._renderTeardown()}
         <button class="chip" @click=${() => (this._setupOpen = false)}>Close</button>
       </div>
+    `;
+  }
+
+  private _renderTeardown() {
+    const p = this._dryRun;
+    return html`
+      <p class="setup-title" style="margin-top:14px;">Danger zone</p>
+      ${!this._tdArmed && !this._tdRunning
+        ? html`
+            <button class="chip" .disabled=${this._dryRunning || this._execRunning}
+              @click=${() => void this._armTeardown()}>
+              Remove everything this card manages…
+            </button>
+          `
+        : nothing}
+      ${this._tdArmed && p
+        ? html`
+            <p class="setup-sub">
+              This deletes the ${p.delete.length} managed objects listed above (red). Zone
+              scheduling is turned off first, so your thermostats' own app schedules take over
+              before anything is removed. Automations you have customized are kept and listed
+              for manual review. Afterwards you can safely delete the card or uninstall via
+              HACS.
+            </p>
+            <div class="applyrow">
+              <button class="chip danger" @click=${() => void this._runTeardown()}>
+                Confirm: remove ${p.delete.length} objects
+              </button>
+              <button class="chip" @click=${() => (this._tdArmed = false)}>Cancel</button>
+            </div>
+          `
+        : nothing}
+      ${this._tdRunning ? html`<p class="setup-sub">Removing…</p>` : nothing}
     `;
   }
 
@@ -416,7 +540,7 @@ export class MzcsCard extends LitElement {
     const n = actionable(p).length;
     const done = this._execResult;
     return html`
-      ${n > 0 && !this._execRunning && !done
+      ${n > 0 && !this._execRunning && !done && !this._tdArmed && !this._tdRunning
         ? this._execConfirm
           ? html`
               <div class="applyrow">
@@ -1012,6 +1136,38 @@ export class MzcsCard extends LitElement {
   private _clearSchedEdit(): void {
     this._schedDrafts = new Map();
     this._schedSel = undefined;
+    this._schedGran = undefined;
+  }
+
+  /** Set structure honoring a pending granularity change (CONTRACT §2 / G2). */
+  private _activeDet(week: Week): DetectedSets {
+    if (!this._schedGran) return detectSets(week);
+    const g = this._schedGran;
+    const keys = g === 'all' ? ['all'] : g === 'wdwe' ? ['wd', 'we'] : [...ALL_DAYS];
+    return { granularity: g, sets: Object.fromEntries(keys.map((k) => [k, daysForSet(g, k)])) };
+  }
+
+  /**
+   * Switch day granularity as a DRAFT: expand clones the source set (a no-op
+   * until a day diverges), collapse keeps the survivor set - per CONTRACT §2.
+   * Nothing writes until Save.
+   */
+  private _switchGranularity(to: DayGranularity): void {
+    const week = this._schedWeek;
+    if (!week) return;
+    const det = this._activeDet(week);
+    if (det.granularity === to) return;
+    const curSets: Record<string, ScheduleBlock[]> = {};
+    for (const [k, days] of Object.entries(det.sets)) {
+      curSets[k] = this._setBlocks(week, k, days).map((b) => ({ ...b }));
+    }
+    const newSets = transitionSets(det.granularity, to, curSets);
+    const m = new Map<string, ScheduleBlock[]>();
+    for (const [k, blocks] of Object.entries(newSets)) m.set(k, blocks.map((b) => ({ ...b })));
+    this._schedDrafts = m;
+    this._schedGran = to;
+    this._schedSel = undefined;
+    this._schedNotice = undefined;
   }
 
   private async _saveSchedDrafts(): Promise<void> {
@@ -1020,7 +1176,7 @@ export class MzcsCard extends LitElement {
     // season's week over the new season's entity.
     const schedId = this._schedLoadedFor;
     if (!this.hass || !this._schedWeek || this._schedDrafts.size === 0 || !schedId) return;
-    const det = detectSets(this._schedWeek);
+    const det = this._activeDet(this._schedWeek);
     this._schedBusy = true;
     try {
       // Fresh-base merge (QA-R C1-2): refetch the week so days edited
@@ -1097,7 +1253,7 @@ export class MzcsCard extends LitElement {
         ? html`<p class="schederr pad">${this._schedError}</p>`
         : html`<p class="muted pad">No schedule data.</p>`;
     }
-    const det = detectSets(week);
+    const det = this._activeDet(week);
     const entries = Object.entries(det.sets);
     const today = new Date().getDay();
     const todayKey = (['sunday','monday','tuesday','wednesday','thursday','friday','saturday'] as DayKey[])[today]!;
@@ -1155,6 +1311,25 @@ export class MzcsCard extends LitElement {
     }
     return html`
       <div class="schedbody">
+        <div class="chips granchips">
+          ${(
+            [
+              ['all', 'Every day'],
+              ['wdwe', 'Weekday · Weekend'],
+              ['days', 'Individual days'],
+            ] as Array<[DayGranularity, string]>
+          ).map(
+            ([g, glabel]) => html`
+              <button
+                class=${det.granularity === g ? 'chip mode-on' : 'chip'}
+                .disabled=${this._schedBusy}
+                @click=${() => this._switchGranularity(g)}
+              >
+                ${glabel}
+              </button>
+            `,
+          )}
+        </div>
         ${entries.map(([setKey, days], ei) => {
           const blocks = this._setBlocks(week, setKey, days);
           const segs = stripSegments(blocks);
@@ -1712,6 +1887,11 @@ export class MzcsCard extends LitElement {
       display: flex;
       gap: 8px;
       margin-top: 4px;
+    }
+    .granchips {
+      margin: 6px 0 2px;
+      flex-wrap: wrap;
+      gap: 6px;
     }
     .chip.danger {
       background: var(--mzcs-bad);

@@ -11,6 +11,7 @@ import {
   contentHash,
   type ZoneRef,
 } from '../src/lib/automation-payloads';
+import { buildDesired } from '../src/lib/provisioning';
 import type { Plan, PlanAction } from '../src/lib/provisioning';
 import type { HassLike } from '../src/ha-types';
 
@@ -180,6 +181,11 @@ function fakeHass(failOn?: (c: Call) => boolean): {
           return cfg;
         }
         if (method === 'DELETE') { autos.delete(uid); return { result: 'ok' }; }
+      }
+      const em = path.match(/^config\/config_entries\/entry\/(.+)$/);
+      if (method === 'DELETE' && em) {
+        for (const [ent, entry] of [...reg]) if (entry === em[1]) reg.delete(ent);
+        return { result: 'ok' };
       }
       return { result: 'ok' };
     },
@@ -491,8 +497,7 @@ describe('flow-entity resolution (S12c incident regression)', () => {
     expect(reg.get('binary_sensor.climate_owners_office_running')).toBe('e_f1');
   });
 
-  it('display names are prefix-derived so two instances cannot collide', async () => {
-    const { buildDesired } = await import('../src/lib/provisioning');
+  it('display names are prefix-derived so two instances cannot collide', () => {
     const mk = (prefix: string) => buildDesired({
       prefix,
       zones: [{ slug: 'office', name: 'Office', climate: 'climate.office' }],
@@ -510,5 +515,35 @@ describe('flow-entity resolution (S12c incident regression)', () => {
     for (const x of b) {
       if (typeof x.spec.name === 'string') expect(aNames.has(x.spec.name)).toBe(false);
     }
+  });
+});
+
+describe('config-entry sensor deletion (teardown / zone removal)', () => {
+  it('deletes flow-created sensors via their config entry, not a bogus WS collection call', async () => {
+    const { hass, calls, reg } = fakeHass();
+    // create a running sensor via the flow (registers reg entry e_f1)
+    const seed = emptyPlan();
+    seed.create.push(
+      create('binary_sensor.climate_upstairs_running', 'template_sensor', {
+        name: 'Climate Upstairs running',
+        source: 'hvac_action',
+      }),
+    );
+    await executePlan(hass, seed, ctx());
+    expect(reg.get('binary_sensor.climate_upstairs_running')).toBe('e_f1');
+    const p = emptyPlan();
+    p.delete.push({ op: 'delete', id: 'binary_sensor.climate_upstairs_running', kind: 'template_sensor' });
+    const res = await executePlan(hass, p, ctx());
+    expect(res.deleted).toBe(1);
+    expect(calls.some((c) => c.key === 'DELETE config/config_entries/entry/e_f1')).toBe(true);
+    expect(reg.has('binary_sensor.climate_upstairs_running')).toBe(false);
+    // an unresolvable sensor is skipped with a note, never a bogus delete
+    const p2 = emptyPlan();
+    p2.delete.push({ op: 'delete', id: 'sensor.climate_ghost', kind: 'stats_sensor' });
+    const log: string[] = [];
+    const r2 = await executePlan(hass, p2, ctx(log));
+    expect(r2.deleted).toBe(0);
+    expect(r2.skipped).toBe(1);
+    expect(log.some((l) => l.includes('no owning config entry'))).toBe(true);
   });
 });

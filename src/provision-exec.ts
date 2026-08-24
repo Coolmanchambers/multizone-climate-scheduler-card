@@ -565,6 +565,28 @@ export async function executePlan(hass: HassLike, plan: Plan, ctx: ExecContext):
         }
         ctx.log(`snapshot ${uid}: ${JSON.stringify(cfg)}`);
         await hass.callApi!('DELETE', `config/automation/config/${uid}`);
+      } else if (a.kind === 'template_sensor' || a.kind === 'stats_sensor') {
+        // Flow-created sensors are CONFIG ENTRIES, not WS collections - resolve
+        // the owning entry from the registry and delete that (a `sensor/delete`
+        // WS call does not exist; without this, zone removal and teardown could
+        // never remove these sensors).
+        let entryId: string | undefined;
+        try {
+          const entries = (await hass.callWS!({
+            type: 'config/entity_registry/get_entries',
+            entity_ids: [a.id],
+          })) as Record<string, { config_entry_id?: string } | null>;
+          entryId = entries?.[a.id]?.config_entry_id;
+        } catch {
+          entryId = undefined;
+        }
+        if (!entryId) {
+          result.skipped++;
+          ctx.log(`SKIP delete ${a.id} - no owning config entry found; remove it manually`);
+          continue;
+        }
+        ctx.log(`snapshot ${a.id}: config entry ${entryId}`);
+        await hass.callApi!('DELETE', `config/config_entries/entry/${entryId}`);
       } else {
         const { domain, objectId } = splitId(a.id);
         if (domain === 'schedule') {
