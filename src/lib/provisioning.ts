@@ -79,6 +79,13 @@ export interface ExistingObject {
   spec: Record<string, unknown>;
   /** true when the object carries the mzcs label (we manage it). */
   managed: boolean;
+  /**
+   * Automations only: the live config still matches its embedded signature,
+   * i.e. nobody hand-edited it since the generator wrote it. Reporting only -
+   * NEVER part of `spec`, so it cannot affect the differ (extraction parity).
+   * undefined = not an automation, or not determinable.
+   */
+  pristine?: boolean;
 }
 
 export type PlanAction =

@@ -13,12 +13,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
   the same setting. Existing installs are untouched: with the default, the generated engine
   is byte-identical to 0.9.0, so no automation update is planned on upgrade.
 
-### Planned for 0.9.1
-- Tabbed settings screen, so the gear panel is no longer one long scroll.
-- Safer removal: the danger zone moves onto its own tab (it currently sits next to Close),
-  and "Remove everything" gains an are-you-sure step plus a typed confirmation.
+- Tabbed settings screen: the gear panel is now Zones / Tuning / Objects / Setup / Look /
+  Danger instead of one long scroll, with Close pinned to the header.
+- Safer removal. The danger zone has its own tab, so the remove button is never rendered
+  beside Close, and deletion now takes three deliberate steps: an are-you-sure prompt, the
+  itemized red preview, and typing the install's entity prefix to enable the final button.
+  Arming is discarded whenever you switch tabs or close the panel.
 - New "Objects" tab listing every helper, schedule, sensor, and automation the card manages,
-  with per-object status (managed / missing / customized / unmanaged).
+  grouped by kind, each with a status: Managed, Missing, Customized (you hand-edited it, so
+  the card will never touch it), Unmanaged, or Not in config. Tap a row to open it in Home
+  Assistant.
 
 ## [0.9.0] - 2026-08-24
 

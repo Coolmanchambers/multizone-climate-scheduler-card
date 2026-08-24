@@ -615,6 +615,79 @@ describe('config-entry sensor deletion (teardown / zone removal)', () => {
   });
 });
 
+describe('pristine reporting for the Objects tab (0.9.1 item D)', () => {
+  it('reports pristine=false for a hand-edited automation and true for a generated one', async () => {
+    const generated = engineAutomation('climate', ZONES, SEASONS);
+    const edited = { ...generated, description: String(generated.description) + ' my own note' };
+    const hass: HassLike = {
+      states: {
+        'automation.climate_schedule_engine': {
+          state: 'on',
+          attributes: { id: 'climate_mzcs_engine', friendly_name: 'Climate: schedule engine' },
+        },
+        'automation.climate_engine_watchdog': {
+          state: 'on',
+          attributes: { id: 'climate_mzcs_watchdog', friendly_name: 'Climate: engine watchdog' },
+        },
+      },
+      callService: async () => undefined,
+      callWS: async (msg) => {
+        const t = String(msg.type);
+        if (t === 'config/entity_registry/get_entries') {
+          const ids = (msg.entity_ids as string[]) ?? [];
+          return Object.fromEntries(ids.map((id) => [id, { labels: ['mzcs'] }]));
+        }
+        if (t.endsWith('/list')) return [];
+        return {};
+      },
+      callApi: async (_m, path) =>
+        path.endsWith('climate_mzcs_engine') ? generated : watchdogAutomation('climate'),
+    };
+    const existing = await fetchExisting(hass, 'climate', ['upstairs', 'downstairs'], ['summer', 'winter']);
+    const eng = existing.find((e) => e.id === 'automation:climate_mzcs_engine');
+    const wd = existing.find((e) => e.id === 'automation:climate_mzcs_watchdog');
+    expect(eng?.pristine).toBe(true);
+    expect(wd?.pristine).toBe(true);
+
+    // Same registry, but the engine has been hand-edited in HA.
+    const hass2: HassLike = {
+      ...hass,
+      callApi: async (_m, path) =>
+        path.endsWith('climate_mzcs_engine') ? edited : watchdogAutomation('climate'),
+    };
+    const existing2 = await fetchExisting(hass2, 'climate', ['upstairs', 'downstairs'], ['summer', 'winter']);
+    expect(existing2.find((e) => e.id === 'automation:climate_mzcs_engine')?.pristine).toBe(false);
+  });
+
+  it('pristine is reporting-only: it never reaches spec, so the differ is unaffected', async () => {
+    const generated = engineAutomation('climate', ZONES, SEASONS);
+    const hass: HassLike = {
+      states: {
+        'automation.climate_schedule_engine': {
+          state: 'on',
+          attributes: { id: 'climate_mzcs_engine', friendly_name: 'Climate: schedule engine' },
+        },
+      },
+      callService: async () => undefined,
+      callWS: async (msg) => {
+        const t = String(msg.type);
+        if (t === 'config/entity_registry/get_entries') {
+          const ids = (msg.entity_ids as string[]) ?? [];
+          return Object.fromEntries(ids.map((id) => [id, { labels: ['mzcs'] }]));
+        }
+        if (t.endsWith('/list')) return [];
+        return {};
+      },
+      callApi: async () => ({ ...generated, description: String(generated.description) + ' edited' }),
+    };
+    const existing = await fetchExisting(hass, 'climate', ['upstairs', 'downstairs'], ['summer', 'winter']);
+    const eng = existing.find((e) => e.id === 'automation:climate_mzcs_engine')!;
+    expect(eng.pristine).toBe(false);
+    expect('pristine' in eng.spec).toBe(false);
+    expect(Object.keys(eng.spec).sort()).toEqual(['alias', 'sig']);
+  });
+});
+
 describe('orphan season schedule discovery (QA-2 live finding, B1-6 season variant)', () => {
   it('a schedule for a season no longer in the config is still seen and planned for delete', async () => {
     const hass: HassLike = {

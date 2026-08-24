@@ -3,7 +3,7 @@
 // core helpers UI uses. NEVER writes.
 import type { HassLike } from './ha-types';
 import { parseEntityId } from './lib/naming';
-import { parseSignature } from './lib/automation-payloads';
+import { parseSignature, contentHash } from './lib/automation-payloads';
 import type { ExistingObject, ObjectKind } from './lib/provisioning';
 import { MZCS_LABEL } from './lib/provisioning';
 
@@ -191,12 +191,15 @@ export async function fetchExisting(
   const [sigs, autoLabels] = await Promise.all([
     Promise.all(
       autoIds.map(async ({ cfgId }) => {
-        if (!hass.callApi) return 'unknown';
+        if (!hass.callApi) return { sig: 'unknown', pristine: undefined as boolean | undefined };
         try {
           const cfg = (await hass.callApi('GET', `config/automation/config/${cfgId}`)) as Record<string, unknown>;
-          return parseSignature(cfg?.description) ?? 'unknown';
+          const stored = parseSignature(cfg?.description);
+          // Same pristine test the executor gates regeneration/deletion on, so
+          // the card can SHOW which automations the user has taken ownership of.
+          return { sig: stored ?? 'unknown', pristine: stored ? contentHash(cfg) === stored : false };
         } catch {
-          return 'unknown';
+          return { sig: 'unknown', pristine: undefined };
         }
       }),
     ),
@@ -209,8 +212,9 @@ export async function fetchExisting(
     out.push({
       id: `automation:${cfgId}`,
       kind: 'automation',
-      spec: { alias, sig: sigs[i]! },
+      spec: { alias, sig: sigs[i]!.sig },
       managed: (autoLabels.get(entityId) ?? []).includes(MZCS_LABEL),
+      pristine: sigs[i]!.pristine,
     });
   });
   return out;

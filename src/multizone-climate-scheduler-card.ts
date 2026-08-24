@@ -81,6 +81,20 @@ import type { GlobalClass } from './lib/naming';
 // alert-days and season confirm/dwell helpers are reserved for the post-v1
 // consecutive-days alert and season recommender - dead controls would imply
 // behavior that does not exist yet (scan S13-conformance 1/2).
+type SetupTab = 'zones' | 'tuning' | 'objects' | 'setup' | 'appearance' | 'danger';
+type ObjectStatus = 'managed' | 'missing' | 'customized' | 'unmanaged' | 'extra';
+interface ObjectRow {
+  id: string;
+  kind: string;
+  name: string;
+  status: ObjectStatus;
+}
+
+/** True when no zone enable-helper exists yet (nothing provisioned to manage). */
+function zonesEmptyGuard(hass: HassLike, prefix: string, zones: Array<{ name: string }>): boolean {
+  return !zones.some((z) => z.name && entityExists(hass, zoneEntityId('zone_enabled', prefix, slugify(z.name))));
+}
+
 const MANAGE_TUNABLES: Array<{ cls: GlobalClass; label: string }> = [
   { cls: 'dev_green_max', label: 'Room deviation · green up to (°)' },
   { cls: 'dev_amber_max', label: 'Room deviation · amber up to (°)' },
@@ -180,6 +194,15 @@ export class MzcsCard extends LitElement {
   @state() private _execResult?: ExecResult;
   @state() private _tdArmed = false;
   @state() private _tdRunning = false;
+  /** settings panel tab; danger lives on its own so it is never beside Close */
+  @state() private _setupTab: SetupTab = 'zones';
+  /** danger flow: are-you-sure shown, and the typed confirmation text */
+  @state() private _tdAsk = false;
+  @state() private _tdConfirm = '';
+  @state() private _objects?: ObjectRow[];
+  @state() private _objectsLoading = false;
+  @state() private _objectsError?: string;
+  private _objectsLoadedFor?: string;
 
   public setConfig(config: MzcsCardConfig): void {
     // Tolerant validation (QA-R C2-2/C2-3): incomplete configs (empty zones,
@@ -449,11 +472,119 @@ export class MzcsCard extends LitElement {
     }
   }
 
+  /** Leave every armed/typed destructive state behind when the view changes. */
+  private _resetDangerState(): void {
+    this._tdAsk = false;
+    this._tdArmed = false;
+    this._tdConfirm = '';
+  }
+
+  private _setSetupTab(tab: SetupTab): void {
+    if (tab === this._setupTab) return;
+    this._resetDangerState();
+    this._execConfirm = false;
+    this._setupTab = tab;
+    if (tab === 'objects') void this._loadObjects();
+  }
+
+  private _closeSetup(): void {
+    this._resetDangerState();
+    this._execConfirm = false;
+    this._setupOpen = false;
+  }
+
+  /**
+   * Inventory for the Objects tab. Fetched ONLY on demand (tab open / refresh)
+   * and cached: the card re-renders on every hass update, so a render-path
+   * fetch would hammer the websocket on a busy instance.
+   */
+  private async _loadObjects(force = false): Promise<void> {
+    if (!this.hass || this._objectsLoading) return;
+    const key = `${this._prefix}|${(this._config?.zones ?? []).map((z) => z.name).join(',')}`;
+    if (!force && this._objectsLoadedFor === key && this._objects) return;
+    this._objectsLoading = true;
+    this._objectsError = undefined;
+    try {
+      const input = this._provisionInput();
+      const existing = await this._fetchExistingFor(input);
+      const desired = buildDesired(input);
+      const byId = new Map(existing.map((e) => [e.id, e]));
+      const desiredIds = new Set(desired.map((d) => d.id));
+      const rows: ObjectRow[] = desired.map((d) => {
+        const e = byId.get(d.id);
+        const status: ObjectStatus = !e
+          ? 'missing'
+          : !e.managed
+            ? 'unmanaged'
+            : e.pristine === false
+              ? 'customized'
+              : 'managed';
+        return { id: d.id, kind: d.kind, name: String(d.spec.name ?? d.spec.alias ?? d.id), status };
+      });
+      // Managed leftovers the config no longer wants - these are what a future
+      // Apply would delete, so surfacing them here is worth the extra rows.
+      for (const e of existing) {
+        if (e.managed && !desiredIds.has(e.id)) {
+          rows.push({ id: e.id, kind: e.kind, name: String(e.spec.name ?? e.spec.alias ?? e.id), status: 'extra' });
+        }
+      }
+      this._objects = rows;
+      this._objectsLoadedFor = key;
+    } catch (err) {
+      this._objectsError = err instanceof Error ? err.message : String(err);
+    } finally {
+      this._objectsLoading = false;
+    }
+  }
+
   private _renderSetup() {
-    const p = this._dryRun;
+    const tabs: Array<{ key: SetupTab; label: string }> = [
+      { key: 'zones', label: 'Zones' },
+      { key: 'tuning', label: 'Tuning' },
+      { key: 'objects', label: 'Objects' },
+      { key: 'setup', label: 'Setup' },
+      { key: 'appearance', label: 'Look' },
+      { key: 'danger', label: 'Danger' },
+    ];
+    const tab = this._setupTab;
     return html`
       <div class="setup">
-        <p class="setup-title">Setup</p>
+        <div class="setuphead">
+          <p class="setup-title" style="margin:0;">Settings</p>
+          <button class="chip" @click=${() => this._closeSetup()}>Close</button>
+        </div>
+        <div class="settabs">
+          ${tabs.map(
+            (t) => html`
+              <button
+                class=${t.key === tab
+                  ? t.key === 'danger'
+                    ? 'settab on danger'
+                    : 'settab on'
+                  : t.key === 'danger'
+                    ? 'settab dangertab'
+                    : 'settab'}
+                @click=${() => this._setSetupTab(t.key)}
+              >
+                ${t.label}
+              </button>
+            `,
+          )}
+        </div>
+        ${tab === 'zones' ? this._renderZonesTab() : nothing}
+        ${tab === 'tuning' ? this._renderTuningTab() : nothing}
+        ${tab === 'objects' ? this._renderObjectsTab() : nothing}
+        ${tab === 'setup' ? this._renderSetupTab() : nothing}
+        ${tab === 'appearance' ? this._renderThemePicker() : nothing}
+        ${tab === 'danger' ? this._renderTeardown() : nothing}
+      </div>
+    `;
+  }
+
+  private _renderSetupTab() {
+    const p = this._dryRun;
+    return html`
+      <div>
         <p class="setup-sub">
           Preview first, then apply. Nothing is written until you confirm; existing schedules and
           customized automations are never overwritten.
@@ -491,44 +622,158 @@ export class MzcsCard extends LitElement {
               ${this._renderApply(p)}
             `
           : nothing}
-        ${this._renderManage()}
-        ${this._renderTeardown()}
-        <button class="chip" @click=${() => (this._setupOpen = false)}>Close</button>
       </div>
     `;
   }
 
   private _renderTeardown() {
     const p = this._dryRun;
+    const need = this._prefix;
+    const typed = this._tdConfirm.trim() === need;
+    const busy = this._dryRunning || this._execRunning;
     return html`
-      <p class="setup-title" style="margin-top:14px;">Danger zone</p>
-      ${!this._tdArmed && !this._tdRunning
+      <p class="setup-sub danger-lead">
+        This removes every helper, schedule, sensor and automation this card created. Your
+        thermostats keep working - they fall back to their own app schedules. Do this
+        <em>before</em> deleting the card or uninstalling from HACS, because these objects
+        keep running without it.
+      </p>
+      ${!this._tdAsk && !this._tdArmed && !this._tdRunning
         ? html`
-            <button class="chip" .disabled=${this._dryRunning || this._execRunning}
-              @click=${() => void this._armTeardown()}>
+            <button class="chip danger" .disabled=${busy} @click=${() => (this._tdAsk = true)}>
               Remove everything this card manages…
             </button>
           `
         : nothing}
+      ${this._tdAsk && !this._tdArmed
+        ? html`
+            <p class="setup-sub"><strong>Are you sure?</strong> Nothing is deleted yet - the next
+            step shows you the exact list first.</p>
+            <div class="applyrow">
+              <button class="chip danger" .disabled=${busy} @click=${() => void this._armTeardown()}>
+                Yes, show me what will be deleted
+              </button>
+              <button class="chip" @click=${() => this._resetDangerState()}>Cancel</button>
+            </div>
+          `
+        : nothing}
       ${this._tdArmed && p
         ? html`
+            <div class="planwrap">
+              <p class="plan-h del">Will be deleted (${p.delete.length})</p>
+              <ul class="plan-list del">
+                ${p.delete.map((a) => html`<li>${a.id}</li>`)}
+              </ul>
+            </div>
             <p class="setup-sub">
-              This deletes the ${p.delete.length} managed objects listed above (red). Zone
-              scheduling is turned off first, so your thermostats' own app schedules take over
-              before anything is removed. Automations you have customized are kept and listed
-              for manual review. Afterwards you can safely delete the card or uninstall via
-              HACS.
+              Zone scheduling is turned off first, so your thermostats' own app schedules take
+              over before anything is removed. Automations you have customized are kept and
+              listed for manual review.
             </p>
+            <label class="confirmrow">
+              <span>Type <code>${need}</code> to confirm</span>
+              <input
+                .value=${this._tdConfirm}
+                placeholder=${need}
+                autocomplete="off"
+                @input=${(e: Event) => (this._tdConfirm = (e.target as HTMLInputElement).value)}
+              />
+            </label>
             <div class="applyrow">
-              <button class="chip danger" @click=${() => void this._runTeardown()}>
-                Confirm: remove ${p.delete.length} objects
+              <button
+                class=${typed ? 'chip danger' : 'chip'}
+                .disabled=${!typed || busy}
+                @click=${() => void this._runTeardown()}
+              >
+                Permanently delete ${p.delete.length} objects
               </button>
-              <button class="chip" @click=${() => (this._tdArmed = false)}>Cancel</button>
+              <button class="chip" @click=${() => this._resetDangerState()}>Cancel</button>
             </div>
           `
         : nothing}
       ${this._tdRunning ? html`<p class="setup-sub">Removing…</p>` : nothing}
+      ${this._execLog.length > 0 && (this._tdRunning || this._tdArmed === false)
+        ? html`<ul class="plan-list exec-log">
+            ${this._execLog.map((l) => html`<li>${l}</li>`)}
+          </ul>`
+        : nothing}
     `;
+  }
+
+  private _renderObjectsTab() {
+    const rows = this._objects;
+    const groups: Array<{ label: string; kinds: string[] }> = [
+      { label: 'Schedules', kinds: ['schedule'] },
+      { label: 'Helpers', kinds: ['helper'] },
+      { label: 'Sensors', kinds: ['template_sensor', 'stats_sensor'] },
+      { label: 'Automations', kinds: ['automation'] },
+    ];
+    const STATUS: Record<ObjectStatus, { label: string; cls: string; hint: string }> = {
+      managed: { label: 'Managed', cls: 'ok', hint: 'Created and managed by this card.' },
+      missing: { label: 'Missing', cls: 'warn', hint: 'Expected but not present - run Apply on the Setup tab.' },
+      customized: { label: 'Customized', cls: 'warn', hint: 'You edited this - the card will never overwrite or delete it.' },
+      unmanaged: { label: 'Unmanaged', cls: 'warn', hint: 'Matches this naming scheme but is not labeled - Apply would adopt it.' },
+      extra: { label: 'Not in config', cls: 'del', hint: 'Managed but no longer in your config - Apply would delete it.' },
+    };
+    return html`
+      <p class="setup-sub">
+        Everything this card creates and manages, all labeled <code>mzcs</code> in Home
+        Assistant. Read-only - tap a row to open it.
+      </p>
+      <button class="chip" .disabled=${this._objectsLoading} @click=${() => void this._loadObjects(true)}>
+        ${this._objectsLoading ? 'Reading registry…' : 'Refresh'}
+      </button>
+      ${this._objectsError ? html`<p class="setup-err">${this._objectsError}</p>` : nothing}
+      ${rows
+        ? html`
+            ${groups.map((g) => {
+              const items = rows.filter((r) => g.kinds.includes(r.kind));
+              if (items.length === 0) return nothing;
+              return html`
+                <p class="plan-h">${g.label} (${items.length})</p>
+                ${items.map((r) => {
+                  const st = STATUS[r.status];
+                  return html`
+                    <div class="objrow" title=${st.hint} @click=${() => this._moreInfo(r.id)}>
+                      <span class="objname">${r.name}</span>
+                      <span class="objid">${r.id.replace(/^automation:/, 'automation.')}</span>
+                      <span class="objstat ${st.cls}">${st.label}</span>
+                    </div>
+                  `;
+                })}
+              `;
+            })}
+          `
+        : this._objectsLoading
+          ? nothing
+          : html`<p class="setup-sub">Nothing loaded yet.</p>`}
+    `;
+  }
+
+  /** Open HA's own more-info dialog for a managed object. */
+  private _moreInfo(id: string): void {
+    if (id.startsWith('automation:')) {
+      const uid = id.slice('automation:'.length);
+      const hass = this.hass;
+      let found: string | undefined;
+      if (hass) {
+        for (const entityId in hass.states) {
+          if (entityId.startsWith('automation.') && hass.states[entityId]?.attributes.id === uid) {
+            found = entityId;
+            break;
+          }
+        }
+      }
+      if (!found) return;
+      id = found;
+    }
+    this.dispatchEvent(
+      new CustomEvent('hass-more-info', {
+        detail: { entityId: id },
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 
   private _renderApply(p: Plan) {
@@ -567,7 +812,7 @@ export class MzcsCard extends LitElement {
     `;
   }
 
-  private _renderManage() {
+  private _renderZonesTab() {
     const hass = this.hass;
     if (!hass) return nothing;
     const seasonSel = globalEntityId('season_select', this._prefix);
@@ -579,7 +824,9 @@ export class MzcsCard extends LitElement {
       ...t,
       id: globalEntityId(t.cls, this._prefix),
     })).filter((t) => entityExists(hass, t.id));
-    if (!season && rows.length === 0) return nothing;
+    if (!season && zonesEmptyGuard(hass, this._prefix, this._config?.zones ?? [])) {
+      return html`<p class="setup-sub">Zone switches appear here once the card is provisioned.</p>`;
+    }
     const zones = (this._config?.zones ?? []).map((z) => {
       const slug = slugify(z.name);
       return {
@@ -591,7 +838,6 @@ export class MzcsCard extends LitElement {
     const allOn = zones.length > 0 && zones.every((z) => hass.states[z.enableId]?.state === 'on');
     const anyOn = zones.some((z) => hass.states[z.enableId]?.state === 'on');
     return html`
-      <p class="setup-title" style="margin-top:12px;">Manage</p>
       ${zones.length > 0
         ? html`
             <div class="managerow master">
@@ -644,6 +890,20 @@ export class MzcsCard extends LitElement {
             </div>
           `
         : nothing}
+    `;
+  }
+
+  private _renderTuningTab() {
+    const hass = this.hass;
+    if (!hass) return nothing;
+    const rows = MANAGE_TUNABLES.map((t) => ({
+      ...t,
+      id: globalEntityId(t.cls, this._prefix),
+    })).filter((t) => entityExists(hass, t.id));
+    if (rows.length === 0) {
+      return html`<p class="setup-sub">Tuning helpers appear here once the card is provisioned.</p>`;
+    }
+    return html`
       ${rows.map(
         (t) => html`
           <div class="managerow">
@@ -668,7 +928,6 @@ export class MzcsCard extends LitElement {
           </div>
         `,
       )}
-      ${this._renderThemePicker()}
     `;
   }
 
@@ -681,7 +940,6 @@ export class MzcsCard extends LitElement {
     const setTheme = (value: string) =>
       void hass.callService('input_text', 'set_value', { entity_id: themeId, value });
     return html`
-      <p class="setup-title" style="margin-top:12px;">Theme</p>
       <div class="chips">
         ${Object.entries(THEME_PRESETS).map(
           ([key, p]) => html`
@@ -2265,6 +2523,113 @@ export class MzcsCard extends LitElement {
     .chip.togg.on {
       background: var(--mzcs-good);
       border-color: var(--mzcs-good);
+      color: #fff;
+    }
+    .setuphead {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .settabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      background: var(--mzcs-track);
+      border-radius: 10px;
+      padding: 3px;
+      margin-bottom: 10px;
+    }
+    .settab {
+      flex: 1 1 auto;
+      background: transparent;
+      border: 0;
+      border-radius: 8px;
+      color: var(--mzcs-muted);
+      font-size: 12px;
+      padding: 6px 8px;
+      cursor: pointer;
+    }
+    .settab.on {
+      background: var(--mzcs-surface);
+      color: var(--mzcs-text);
+    }
+    /* The danger tab is visually set apart at rest, not just when selected. */
+    .settab.dangertab {
+      color: var(--mzcs-bad);
+    }
+    .settab.on.danger {
+      background: var(--mzcs-bad);
+      color: #fff;
+    }
+    .danger-lead {
+      border-left: 2px solid var(--mzcs-bad);
+      padding-left: 8px;
+    }
+    .confirmrow {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin: 8px 0;
+      font-size: 12px;
+      color: var(--mzcs-muted);
+    }
+    .confirmrow code {
+      color: var(--mzcs-text);
+      background: var(--mzcs-track);
+      border-radius: 4px;
+      padding: 1px 4px;
+    }
+    .confirmrow input {
+      background: var(--mzcs-track);
+      border: 1px solid var(--mzcs-bad);
+      border-radius: 6px;
+      color: var(--mzcs-text);
+      padding: 6px 8px;
+      font-size: 13px;
+    }
+    .objrow {
+      display: grid;
+      width: 100%;
+      box-sizing: border-box;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 0 8px;
+      align-items: center;
+      padding: 6px 0;
+      border-bottom: 0.5px solid var(--mzcs-border);
+      cursor: pointer;
+    }
+    .objname {
+      font-size: 13px;
+      color: var(--mzcs-text);
+    }
+    .objid {
+      grid-column: 1;
+      font-size: 10px;
+      color: var(--mzcs-muted);
+      word-break: break-all;
+    }
+    .objstat {
+      grid-row: 1 / span 2;
+      grid-column: 2;
+      justify-self: end;
+      align-self: center;
+      font-size: 10px;
+      border-radius: 999px;
+      padding: 2px 7px;
+      white-space: nowrap;
+    }
+    .objstat.ok {
+      background: var(--mzcs-good);
+      color: #16202a;
+    }
+    .objstat.warn {
+      background: var(--mzcs-warn);
+      color: #16202a;
+    }
+    .objstat.del {
+      background: var(--mzcs-bad);
       color: #fff;
     }
     .managerow input,

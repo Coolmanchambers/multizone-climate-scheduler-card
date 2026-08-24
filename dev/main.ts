@@ -88,6 +88,11 @@ if (shot) {
     if (shot === 'controls') c._ctrlOpen = true;
     if (shot === 'runtime') c._rtOpen = true;
     if (shot === 'setup') c._setupOpen = true;
+    if (shot.startsWith('tab-')) {
+      c._setupOpen = true;
+      c._setupTab = shot.slice(4);
+      if (shot === 'tab-objects') void (card as unknown as { _loadObjects(): Promise<void> })._loadObjects();
+    }
     if (shot === 'preview') {
       c._setupOpen = true;
       void (card as unknown as { _runDryRun(): Promise<void> })._runDryRun();
