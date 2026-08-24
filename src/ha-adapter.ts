@@ -73,16 +73,28 @@ export interface RoomReading {
   entityId: string;
   name: string;
   temp: number | null;
+  /** sensor has not reported recently - show the reading as untrustworthy */
+  stale?: boolean;
 }
 
-export function roomReading(hass: HassLike, entityId: string): RoomReading {
+/**
+ * A room sensor that has not reported for this long is treated as stale. Room
+ * sensors normally report every few minutes; a frozen one keeps publishing its
+ * last value, so the card would otherwise show a confident, wrong number (seen
+ * live: a Zigbee sensor pinned at one value for 17 hours).
+ */
+export const ROOM_STALE_MS = 3 * 60 * 60 * 1000;
+
+export function roomReading(hass: HassLike, entityId: string, now = Date.now()): RoomReading {
   const e = hass.states[entityId];
   const name =
     typeof e?.attributes.friendly_name === 'string'
       ? e.attributes.friendly_name.replace(/ (Temperature|temperature)$/, '')
       : entityId.split('.')[1] ?? entityId;
   const v = e ? Number(e.state) : NaN;
-  return { entityId, name, temp: Number.isFinite(v) ? v : null };
+  const ts = e?.last_updated ? Date.parse(e.last_updated) : NaN;
+  const stale = Number.isFinite(ts) && now - ts > ROOM_STALE_MS;
+  return { entityId, name, temp: Number.isFinite(v) ? v : null, stale };
 }
 
 export function setHvacMode(hass: HassLike, entityId: string, mode: string): Promise<unknown> {

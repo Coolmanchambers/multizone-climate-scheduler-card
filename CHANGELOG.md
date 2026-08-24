@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 
 ## [Unreleased]
 
+### Added
+- Stale room sensors are marked instead of shown as fact. A sensor that has not reported for
+  three hours keeps publishing its last value; the card now labels the row "stale", greys the
+  reading, and suppresses its deviation badge rather than presenting a frozen number as truth.
+- The settings Zones tab now says where zone and room-sensor configuration lives (the
+  dashboard card editor), which is not obvious from inside the card.
+
 ## [0.9.3] - 2026-08-24
 
 ### Added

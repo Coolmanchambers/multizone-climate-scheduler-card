@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { deviationColor, formatDelta, sanitizeThresholds, formatRoomTemp } from '../src/lib/deviation';
 import { normalizeRoomSensors } from '../src/types';
+import { roomReading } from '../src/ha-adapter';
 
 describe('deviationColor', () => {
   it('maps contract defaults: green ≤2, amber ≤4, red beyond', () => {
@@ -79,5 +80,30 @@ describe('room sensor labels (normalizeRoomSensors)', () => {
     expect(
       normalizeRoomSensors(['', { entity: '' }, null as never, { entity: 'sensor.ok' }]),
     ).toEqual([{ entity: 'sensor.ok' }]);
+  });
+});
+
+describe('room sensor staleness', () => {
+  const hass = (iso: string | undefined) => ({
+    states: {
+      'sensor.room': { state: '82.832', attributes: { friendly_name: 'Room Temperature' }, last_updated: iso },
+    },
+    callService: async () => undefined,
+  }) as unknown as Parameters<typeof roomReading>[0];
+  const NOW = Date.parse('2026-08-24T23:00:00Z');
+
+  it('flags a sensor that has not reported for hours', () => {
+    // The live case: pinned at one value since the previous evening.
+    const r = roomReading(hass('2026-08-24T05:03:00Z'), 'sensor.room', NOW);
+    expect(r.stale).toBe(true);
+    expect(r.temp).toBe(82.832);
+  });
+
+  it('does not flag a recently reporting sensor', () => {
+    expect(roomReading(hass('2026-08-24T22:45:00Z'), 'sensor.room', NOW).stale).toBe(false);
+  });
+
+  it('never flags when the timestamp is missing (fixtures, older HA)', () => {
+    expect(roomReading(hass(undefined), 'sensor.room', NOW).stale).toBe(false);
   });
 });

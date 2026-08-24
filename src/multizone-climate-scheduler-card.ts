@@ -913,6 +913,11 @@ export class MzcsCard extends LitElement {
               Turn a zone On only once its schedule is complete and you have disabled the
               schedule in the thermostat's own app - otherwise the two will fight.
             </p>
+            <p class="muted" style="font-size:11px;margin:6px 0 2px;">
+              Adding or removing zones, room sensors and their labels is done in the dashboard
+              card editor - edit the dashboard, then the pencil on this card. It is not on this
+              screen.
+            </p>
           `
         : nothing}
       ${season
@@ -1919,11 +1924,17 @@ export class MzcsCard extends LitElement {
         ${normalizeRoomSensors(zone.room_sensors).map((rs) => {
           const reading = roomReading(hass, rs.entity);
           const r = { ...reading, name: rs.name?.trim() || reading.name };
-          if (r.temp == null || setpoint == null) {
+          if (r.temp == null || setpoint == null || r.stale) {
             return html`
-              <div class="room">
+              <div class="room" title=${r.stale ? 'This sensor has not reported for hours - the reading below is stale.' : ''}>
                 <span class="rname">${r.name}</span>
-                <span class="rtemp muted">${r.temp == null ? '—' : `${formatRoomTemp(r.temp)}°`}</span>
+                <span class="rtemp muted">
+                  ${r.temp == null
+                    ? '—'
+                    : r.stale
+                      ? html`<span class="stalechip">stale</span>${formatRoomTemp(r.temp)}°`
+                      : `${formatRoomTemp(r.temp)}°`}
+                </span>
               </div>
             `;
           }
@@ -2672,6 +2683,16 @@ export class MzcsCard extends LitElement {
     .objstat.del {
       background: var(--mzcs-bad);
       color: #fff;
+    }
+    .stalechip {
+      font-size: 10px;
+      border-radius: 999px;
+      padding: 1px 6px;
+      margin-right: 6px;
+      background: var(--mzcs-track);
+      border: 0.5px solid var(--mzcs-border);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
     }
     .managerow input,
     .managerow select {

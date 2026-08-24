@@ -4,6 +4,8 @@
 export interface HassEntity {
   state: string;
   attributes: Record<string, unknown>;
+  /** ISO timestamp HA stamps on every state write; absent in some fixtures. */
+  last_updated?: string;
 }
 
 export interface HassLike {
