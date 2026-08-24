@@ -1,15 +1,22 @@
 import { defineConfig } from 'vitest/config';
 
-export default defineConfig({
+// `vite build --mode dev` produces dist/multizone-climate-scheduler-card-dev.js
+// registering a parallel `-dev` element (see src/const.ts) so a development
+// copy can coexist with the HACS-installed release on the same HA instance.
+export default defineConfig(({ mode }) => ({
+  define: {
+    __MZCS_DEV__: JSON.stringify(mode === 'dev'),
+  },
   build: {
     target: 'es2022',
     lib: {
       entry: 'src/multizone-climate-scheduler-card.ts',
       formats: ['es'],
-      fileName: () => 'multizone-climate-scheduler-card.js',
+      fileName: () => (mode === 'dev' ? 'multizone-climate-scheduler-card-dev.js' : 'multizone-climate-scheduler-card.js'),
     },
     outDir: 'dist',
-    emptyOutDir: true,
+    // The dev bundle sits NEXT TO the tracked release bundle - never wipe it.
+    emptyOutDir: mode !== 'dev',
     rollupOptions: {
       // Bundle everything (including Lit) - never rely on HA's internal Lit.
       external: [],
@@ -22,4 +29,4 @@ export default defineConfig({
     environment: 'node',
     include: ['tests/**/*.test.ts'],
   },
-});
+}));

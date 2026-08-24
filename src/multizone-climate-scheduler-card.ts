@@ -1,6 +1,6 @@
 import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { CARD_TYPE, CARD_NAME, CARD_VERSION } from './const';
+import { CARD_TYPE, CARD_NAME, CARD_VERSION, EDITOR_TYPE } from './const';
 import type { MzcsCardConfig, ZoneConfig } from './types';
 import type { HassLike } from './ha-types';
 import {
@@ -217,7 +217,7 @@ export class MzcsCard extends LitElement {
 
   public static async getConfigElement(): Promise<HTMLElement> {
     await import('./editor');
-    return document.createElement('multizone-climate-scheduler-card-editor');
+    return document.createElement(EDITOR_TYPE);
   }
 
   public static getStubConfig(): Partial<MzcsCardConfig> {

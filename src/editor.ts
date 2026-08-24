@@ -7,6 +7,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import type { HassLike } from './ha-types';
 import type { MzcsCardConfig, ZoneConfig, SeasonConfig, BlockMode } from './types';
 import { slugify } from './lib/naming';
+import { EDITOR_TYPE } from './const';
 
 declare global {
   interface Window {
@@ -41,7 +42,7 @@ const DEFAULT_SEASONS: SeasonConfig[] = [
   { key: 'winter', name: 'Winter', default_mode: 'heat_cool' },
 ];
 
-@customElement('multizone-climate-scheduler-card-editor')
+@customElement(EDITOR_TYPE)
 export class MzcsCardEditor extends LitElement {
   @property({ attribute: false }) public hass?: HassLike;
   @state() private _config?: MzcsCardConfig;
