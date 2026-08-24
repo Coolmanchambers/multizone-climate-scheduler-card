@@ -1,7 +1,14 @@
-# MZCS CONTRACT.md - v1.0 FROZEN (S1)
+# MZCS CONTRACT.md - v1.1 (S13 release-gate sync)
 
 The naming/schema contract. Everything in the card, wizard, differ, and engine builds against
 this file. Changes after freeze require a version bump + migration note.
+
+**v1.1 (2026-08-24, no migration needed):** synced §5's inventory to what the code actually
+provisions (added the applied-block marker, per-zone k, theme, and the outdoor-temperature
+chain; recorded the runtime-learning automation), marked the season recommender and comfort
+steering (§7b) as deferred post-v1, simplified the shipped watchdog/alert descriptions to
+match the code, added Adopt to §8's taxonomy, and corrected day-key names in §2. All changes
+are contract-side: they document shipped v1.0.0 behavior; no object shapes changed.
 
 ## 1. Identity
 
@@ -17,7 +24,7 @@ this file. Changes after freeze require a version bump + migration note.
 - Per zone x season, day granularity is one of:
   - `all` - one block set (keys: `all`)
   - `wdwe` - two sets (keys: `wd`, `we`)
-  - `days` - seven sets (keys: `mon`..`sun`)
+  - `days` - seven sets (keys: `monday`..`sunday`)
 - Granularity transitions (wizard, via differ): expand = clone current values into new sets
   (all→wdwe: both get copy; wdwe→days: mon-fri get wd, sat-sun get we). Collapse = survivor set
   (days→wdwe: mon survives as wd, sat as we; →all: wd/mon survives). Preview always shows the
@@ -47,8 +54,9 @@ block is active") and the entity exposes `next_event`.
   (pure, unit-tested).
 - Because ranges are contiguous the entity is always `on`; the ENGINE TRIGGERS are:
   (1) attribute change on the active season's schedule entities (block data + next_event change
-  at every boundary), (2) `input_select.{prefix}_season` change, (3) HA start / automation
-  reload, (4) a time-pattern safety tick (15 min) that reasserts the current block idempotently.
+  at every boundary), (2) `input_select.{prefix}_season` change, (3) HA start, (4) a
+  time-pattern safety tick (15 min) that reasserts the current block idempotently (also covers
+  automation reloads), (5) a zone's enable edge (§7c instant resume).
 - Granularity (`all`/`wdwe`/`days`) is a UI/wizard concept only: the editor writes identical
   blocks to every day in a set. Collapse/expand transitions rewrite day ranges per §2.
 - Card tuning UI + wizard write via the `schedule/update` websocket (same command the core
@@ -61,36 +69,53 @@ global tunables remain individual helpers (§6).
 
 ## 5. Provisioned inventory (per current config: 3 zones, 2 active seasons)
 
+Display names are prefix-derived (`Climate ...` for the default prefix) so two card instances
+never collide in HA's name→object_id slugification (S12c incident rule).
+
 **Per zone:**
 - `timer.climate_<zone>_fan` + automation "Climate: <Zone> fan timer finished"
 - `binary_sensor.climate_<zone>_running` (template, from hvac_action) [adopted if pre-existing]
-- `sensor.climate_<zone>_runtime_today` (history_stats, state_class total_increasing)
-- `sensor.climate_<zone>_expected_runtime` (template: k x CDD, trailing-window k)
+- `sensor.climate_<zone>_runtime_today` (history_stats; the runtime drawer reads LTS max)
+- `sensor.climate_<zone>_expected_runtime` (template: k x CDD)
+- `input_text.climate_<zone>_applied_block` (engine hold marker)
+- `input_number.climate_<zone>_k` (learned runtime per cooling-degree-day; written nightly)
+- `input_boolean.climate_<zone>_enabled` (kill switch, §7c)
 
 **Per zone x season:** schedule storage per §4.
 
 **Global:**
 - `input_select.climate_season` (active season; options = season names)
-- `input_select.climate_season_mode` (manual | semi | full)
+- `input_select.climate_season_mode` (manual | semi | full) [reserved: recommender is post-v1]
 - `input_number.climate_season_confirm_days` (3), `input_number.climate_season_dwell_days` (14)
+  [reserved: recommender]
 - `input_number.climate_dev_green_max` (2), `input_number.climate_dev_amber_max` (4)
 - `input_number.climate_runtime_alert_margin` (35), `input_number.climate_runtime_alert_days`
-  (3), `input_number.climate_runtime_learn_days` (30), `input_number.climate_cdd_base` (75)
-- `sensor.climate_next_block` (template; attributes: per-zone next block time/name/targets)
+  (3) [reserved: consecutive-days alert is post-v1], `input_number.climate_runtime_learn_days`
+  (30), `input_number.climate_cdd_base` (75)
+- `input_text.climate_theme` (card theme token)
+- `sensor.climate_next_block` (template; state = earliest next_event across the active season's
+  schedules; the card computes its next-block line locally)
+- `sensor.climate_outdoor_temp` (template from the configured weather entity) +
+  `sensor.climate_outdoor_daily_mean` (statistics mean, 24h window) - the CDD learning chain;
+  creation is skipped with a note when no weather entity is configured, but both are always
+  DESIRED so an existing pair is never planned for delete
 
-**Automations (category "Climate Scheduler", label `mzcs`):**
-- "Climate: schedule engine" (block transitions → climate.set_temperature / set_hvac_mode;
-  respects season + granularity; APS precedence rule: external raises allowed, engine never
-  fights a higher hold during on-peak - exact encoding settled in S7 with the audit)
-- "Climate: <zone> fan timer finished" (per zone)
-- "Climate: season recommender" (forecast avg-high vs thresholds + date window; semi = notify
-  with actions, full = switch + notify; hysteresis via confirm_days, dwell via dwell_days)
-- "Climate: runtime anomaly alert" (actual vs expected x margin, N consecutive days; iOS
-  actionable + snooze, house pattern)
-- "Climate: engine watchdog" (heartbeat: alert if no engine fire across a scheduled transition)
+**Automations (label `mzcs`):**
+- "Climate: schedule engine" (block transitions → climate.set_temperature / set_hvac_mode incl.
+  heat_cool dual range and off; per-zone enable + applied-block-marker + Eco gates; 15-min
+  safety tick; season name→key map)
+- "Climate: <Zone> fan timer finished" (per zone; stands down while the configured fan-guard
+  helper is on)
+- "Climate: runtime learning" (nightly 23:58 EMA of k per zone; skips mild days; first valid
+  day seeds directly)
+- "Climate: runtime anomaly alert" (evening check, actual vs expected x margin, persistent
+  notification; consecutive-days logic + iOS actionable/snooze are post-v1)
+- "Climate: engine watchdog" (alert when the engine automation is off/unavailable 5 minutes)
+- "Climate: season recommender" - **deferred post-v1** (needs per-season forecast-threshold
+  helpers not yet in this contract; its helpers above are provisioned as reserved)
 
-**Registry assignment:** zone objects → that zone's HA area; all objects → label `mzcs`;
-automations → category "Climate Scheduler".
+**Registry assignment:** all objects → label `mzcs` (the sole managed-marker). Area and
+category assignment: deferred post-v1.
 
 ## 6. Card config schema (YAML shape the editor produces)
 
@@ -100,20 +125,22 @@ prefix: climate
 zones:
   - entity: climate.nest_upstairs
     name: Upstairs
-    room_sensors: [sensor.guest_room_temperature, ...]   # or
-    auto_discover_area: true
+    room_sensors: [sensor.guest_room_temperature, ...]
   - entity: climate.nest_downstairs
     name: Downstairs
 seasons:
   - { key: summer, name: Summer, default_mode: cool }
   - { key: winter, name: Winter, default_mode: heat_cool }
-season_switch: semi          # manual | semi | full
-weather_entity: weather.openweathermap   # required for semi/full
-features: { fan_timer: [15, 30, 60], anomaly_alerts: true }
-notify_target: mobile_app_owners_iphone
+season_switch: manual        # manual (semi | full reserved for the post-v1 recommender)
+weather_entity: weather.openweathermap   # optional; enables the CDD learning chain
+features: { fan_timer: [15, 30, 60], anomaly_alerts: true, fan_guard: input_boolean.help_hvac_fan }
 ```
+`fan_guard` is optional. `room_sensors` per zone drives the read-only deviation chips.
 
-## 7. Seed data (the owner's live Nest schedules, decoded 2026-07-26; ~times confirmed in tuning)
+## 7. Reference data (the owner's live Nest schedules, decoded 2026-07-26)
+
+Reference for the original onboarding, NOT what the public card seeds - a fresh install seeds
+a generic single "Day" block per season (`src/lib/default-schedules.ts`).
 
 **Upstairs · Summer (cool) · wdwe:**
 - wd: 06:00 Wake 78 · 08:00 Away 80 · 14:00 Pre-cool 76 · 16:00 On-peak 79 · 18:45 Evening 77 · 21:30 Sleep 76
@@ -129,7 +156,11 @@ notify_target: mobile_app_owners_iphone
 
 Office mini-split: zone supported, on hold - not provisioned at onboarding.
 
-## 7b. Comfort steering (added pre-S1, spec §14)
+## 7b. Comfort steering (added pre-S1, spec §14) - **DEFERRED post-v1**
+
+Not shipped in v1.0.0: `features.steering` is hard-off in the card and no steering automation
+generator exists (desiring one would be a perpetual phantom Create - QA-R A2-5). The helper
+inventory below stays feature-gated and ready.
 
 HA cannot select the Nest's internal sensor (SDM limit); the engine reproduces it via
 **setpoint compensation**: commanded setpoint = `thermostat_reading - (room_reading - target)`,
@@ -177,8 +208,10 @@ Invariants the wizard and engine MUST uphold:
 ## 8. Universal change-set rule
 
 Every wizard apply (first run or any later structural edit) = diff → categorized preview
-(Create n / Edit n / Delete n highlighted individually / Unchanged n, exact names) → explicit
-confirm → ordered apply with rollback list → verify by label query. No silent writes, ever.
+(Create n / Adopt n / Edit n / Delete n highlighted individually / Unchanged n, exact names) →
+explicit confirm → freshness gate (replan against the live registry; refuse on drift) →
+ordered apply with rollback list → verify replan. No silent writes, ever. Adopt labels only;
+a divergent display name then converges via an explicit Edit on the following apply.
 
 ## 9. Non-goals (v1)
 

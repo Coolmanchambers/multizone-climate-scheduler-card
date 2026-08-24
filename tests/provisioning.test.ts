@@ -163,7 +163,11 @@ describe('plan + idempotence', () => {
     const p = plan(desired, existing);
     expect(p.adopt.map((a) => a.id)).toEqual(['binary_sensor.climate_upstairs_running']);
     expect(p.create).toHaveLength(47);
-    expect(actionable(plan(desired, applyPlan(p, existing)))).toHaveLength(0);
+    // Adopt labels only (executor parity): the divergent display name shows
+    // as exactly one rename Update on the next plan, and converges after it.
+    const p2 = plan(desired, applyPlan(p, existing));
+    expect(p2.update.map((a) => a.id)).toEqual(['binary_sensor.climate_upstairs_running']);
+    expect(actionable(plan(desired, applyPlan(p2, applyPlan(p, existing))))).toHaveLength(0);
   });
 
   it('removing a season deletes exactly its orphans and updates the season select', () => {

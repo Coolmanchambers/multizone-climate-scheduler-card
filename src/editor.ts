@@ -47,7 +47,6 @@ export class MzcsCardEditor extends LitElement {
   @property({ attribute: false }) public hass?: HassLike;
   @state() private _config?: MzcsCardConfig;
   @state() private _ready = false;
-  @state() private _probe?: { ok: boolean; text: string };
 
   public setConfig(config: MzcsCardConfig): void {
     this._config = {
@@ -55,7 +54,7 @@ export class MzcsCardEditor extends LitElement {
       prefix: config.prefix ?? 'climate',
       zones: config.zones ?? [],
       seasons: config.seasons ?? DEFAULT_SEASONS.map((s) => ({ ...s })),
-      season_switch: config.season_switch ?? 'semi',
+      season_switch: config.season_switch ?? 'manual',
       weather_entity: config.weather_entity,
       // Spread first: fields this editor has no UI for (e.g. fan_guard) must
       // round-trip untouched, never be silently dropped (QA-R C2-8).
@@ -64,7 +63,6 @@ export class MzcsCardEditor extends LitElement {
         fan_timer: config.features?.fan_timer ?? [15, 30, 60],
         anomaly_alerts: config.features?.anomaly_alerts ?? true,
       },
-      notify_target: config.notify_target,
     };
   }
 
@@ -106,28 +104,6 @@ export class MzcsCardEditor extends LitElement {
     this._emit({ zones });
   }
 
-  private async _probeWeather(): Promise<void> {
-    const entity = this._config?.weather_entity;
-    if (!entity || !this.hass?.callWS) return;
-    this._probe = undefined;
-    try {
-      const res = (await this.hass.callWS({
-        type: 'call_service',
-        domain: 'weather',
-        service: 'get_forecasts',
-        service_data: { type: 'daily' },
-        target: { entity_id: entity },
-        return_response: true,
-      })) as { response?: Record<string, { forecast?: unknown[] }> };
-      const days = res?.response?.[entity]?.forecast?.length ?? 0;
-      this._probe =
-        days > 0
-          ? { ok: true, text: `Daily forecast supported (${days} days).` }
-          : { ok: false, text: 'No daily forecast - pick a different weather entity.' };
-    } catch {
-      this._probe = { ok: false, text: 'Probe unavailable - validation skipped.' };
-    }
-  }
 
   private _selector(selector: Record<string, unknown>, value: unknown, onChange: (v: unknown) => void, label?: string) {
     if (!this._ready || !customElements.get('ha-selector')) {
@@ -262,33 +238,20 @@ export class MzcsCardEditor extends LitElement {
 
         <h4>Season switching</h4>
         <select
-          .value=${c.season_switch ?? 'semi'}
+          .value=${c.season_switch ?? 'manual'}
           @change=${(e: Event) =>
             this._emit({ season_switch: (e.target as HTMLSelectElement).value as MzcsCardConfig['season_switch'] })}
         >
           <option value="manual">Manual</option>
-          <option value="semi">Semi-auto (recommend + confirm)</option>
-          <option value="full">Full-auto</option>
+          <option value="semi" disabled>Semi-auto (coming in a future release)</option>
+          <option value="full" disabled>Full-auto (coming in a future release)</option>
         </select>
-        ${(c.season_switch ?? 'semi') !== 'manual'
-          ? html`
-              ${this._selector(
-                { entity: { domain: 'weather' } },
-                c.weather_entity,
-                (v) => {
-                  this._probe = undefined;
-                  this._emit({ weather_entity: String(v ?? '') || undefined });
-                },
-                'Weather entity (daily forecast)',
-              )}
-              <button class="link" .disabled=${!c.weather_entity} @click=${() => void this._probeWeather()}>
-                Check daily forecast support
-              </button>
-              ${this._probe
-                ? html`<p class=${this._probe.ok ? 'ok' : 'bad'}>${this._probe.text}</p>`
-                : nothing}
-            `
-          : nothing}
+        ${this._selector(
+          { entity: { domain: 'weather' } },
+          c.weather_entity,
+          (v) => this._emit({ weather_entity: String(v ?? '') || undefined }),
+          'Weather entity (outdoor temperature for runtime learning)',
+        )}
 
         <h4>Features</h4>
         <label class="checkrow">
@@ -322,7 +285,12 @@ export class MzcsCardEditor extends LitElement {
           Entity prefix
           <input
             .value=${c.prefix ?? 'climate'}
-            @change=${(e: Event) => this._emit({ prefix: (e.target as HTMLInputElement).value || 'climate' })}
+            @change=${(e: Event) => {
+              const el = e.target as HTMLInputElement;
+              const p = slugify(el.value) || 'climate';
+              el.value = p;
+              this._emit({ prefix: p });
+            }}
           />
         </label>
       </div>

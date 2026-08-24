@@ -91,8 +91,11 @@ features:
   schedule blocks and helper values you've tuned are never overwritten by reprovisioning.
 - Generated automations carry a content signature. If you hand-edit one, the card stops
   managing its content: it will never overwrite or delete your edited version.
-- Removing a zone or season previews exactly what gets deleted; only pristine, card-managed
-  objects are ever removed, and deletions are snapshot-logged.
+- Adopting an existing object (one whose entity id matches the contract) only labels it; the
+  next Apply lists any display-name alignment as an explicit Edit before it happens.
+- Removing a zone or season previews exactly what gets deleted; only card-managed objects are
+  ever removed (automations additionally only when still signature-pristine), and deletions
+  are snapshot-logged.
 
 ## Requirements
 

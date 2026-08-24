@@ -6,7 +6,6 @@ export interface ZoneConfig {
   entity: string;
   name: string;
   room_sensors?: string[];
-  auto_discover_area?: boolean;
 }
 
 export interface SeasonConfig {
@@ -28,5 +27,4 @@ export interface MzcsCardConfig {
     /** helper entity the fan-off automations must respect (skip while 'on') */
     fan_guard?: string;
   };
-  notify_target?: string;
 }

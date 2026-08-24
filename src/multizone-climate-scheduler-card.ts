@@ -76,15 +76,16 @@ const CUSTOM_COLOR_LABELS: Array<{ key: keyof ThemeTokens; label: string }> = [
 ];
 import type { GlobalClass } from './lib/naming';
 
+// Only tunables something actually CONSUMES are shown. The provisioned
+// alert-days and season confirm/dwell helpers are reserved for the post-v1
+// consecutive-days alert and season recommender - dead controls would imply
+// behavior that does not exist yet (scan S13-conformance 1/2).
 const MANAGE_TUNABLES: Array<{ cls: GlobalClass; label: string }> = [
   { cls: 'dev_green_max', label: 'Room deviation · green up to (°)' },
   { cls: 'dev_amber_max', label: 'Room deviation · amber up to (°)' },
   { cls: 'runtime_alert_margin', label: 'Runtime alert margin (%)' },
-  { cls: 'runtime_alert_days', label: 'Runtime alert · consecutive days' },
   { cls: 'runtime_learn_days', label: 'Runtime learn window (days)' },
   { cls: 'cdd_base', label: 'Cooling degree-day base (°)' },
-  { cls: 'season_confirm_days', label: 'Season switch · confirm after (days)' },
-  { cls: 'season_dwell_days', label: 'Season switch · min dwell (days)' },
 ];
 import {
   detectSets,

@@ -345,10 +345,11 @@ export function applyPlan(p: Plan, existing: ExistingObject[]): ExistingObject[]
   for (const a of p.create) byId.set(a.id, { id: a.id, kind: a.kind, spec: a.spec, managed: true });
   for (const a of p.adopt) {
     const e = byId.get(a.id);
-    if (e) {
-      e.managed = true;
-      e.spec = a.spec;
-    }
+    // Adopt only LABELS (matches the executor): the adopted object's own spec
+    // is untouched, so a name that differs from the contract legitimately
+    // shows as an Update on the next plan and converges on the second apply
+    // (scan S13-conformance 5).
+    if (e) e.managed = true;
   }
   for (const a of p.update) {
     const e = byId.get(a.id);

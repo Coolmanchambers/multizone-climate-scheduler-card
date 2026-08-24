@@ -296,7 +296,7 @@ export function watchdogAutomation(prefix: string): Record<string, unknown> {
   return signed({
     id: automationUniqueId(prefix, 'watchdog'),
     alias: automationAlias(prefix, 'watchdog'),
-    description: `${MANAGED} Alerts when the schedule engine automation is off or unavailable for 5 minutes while any zone is enabled.`,
+    description: `${MANAGED} Alerts when the schedule engine automation is off or unavailable for 5 minutes.`,
     mode: 'single',
     triggers: [
       { trigger: 'state', entity_id: engineEntity, to: ['off', 'unavailable'], for: { minutes: 5 }, alias: 'Engine down' },
