@@ -8,7 +8,7 @@ provisions (added the applied-block marker, per-zone k, theme, and the outdoor-t
 chain; recorded the runtime-learning automation), marked the season recommender and comfort
 steering (§7b) as deferred post-v1, simplified the shipped watchdog/alert descriptions to
 match the code, added Adopt to §8's taxonomy, and corrected day-key names in §2. All changes
-are contract-side: they document shipped v1.0.0 behavior; no object shapes changed.
+are contract-side: they document shipped v0.9.0 behavior; no object shapes changed.
 
 ## 1. Identity
 
@@ -158,7 +158,7 @@ Office mini-split: zone supported, on hold - not provisioned at onboarding.
 
 ## 7b. Comfort steering (added pre-S1, spec §14) - **DEFERRED post-v1**
 
-Not shipped in v1.0.0: `features.steering` is hard-off in the card and no steering automation
+Not shipped in v0.9.0: `features.steering` is hard-off in the card and no steering automation
 generator exists (desiring one would be a perpetual phantom Create - QA-R A2-5). The helper
 inventory below stays feature-gated and ready.
 
@@ -177,7 +177,7 @@ audit).
 dayparts UX: Morning/Midday/Evening/Night defaults, editable times, any count). Storage follows
 the §4 decision (blocks with data payload - identical shape).
 **Seed (the owner's live Nest config):** Upstairs - Morning/Midday/Evening = thermostat, Night =
-Bedroom 1 sensor.
+a bedroom sensor.
 **Card UX:** tap room chip → 1h override with countdown + highlighted chip; sensor-schedule
 editing in Manage. Steering inputs are Aqara-class sensors only (never Blink temps).
 **Build placement:** S9.5a engine+override, S9.5b sensor schedule + UX (after Aqara install).

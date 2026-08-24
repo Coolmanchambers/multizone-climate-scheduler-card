@@ -59,18 +59,11 @@ if (shot) {
   // hero summary line that a live card shows in full.
   const main = document.querySelector('main') as HTMLElement | null;
   if (main) main.style.maxWidth = '500px';
-  // Neutral room labels: docs screenshots are published publicly and must
-  // carry no household/personal names.
-  const demoRooms: Record<string, string> = {
-    'sensor.guest_room_temperature': 'Guest Room Temperature',
-    'sensor.bedroom_1_temperature': 'Bedroom 1 Temperature',
-    'sensor.bedroom_2_temperature': 'Bedroom 2 Temperature',
-    'sensor.loft_temperature': 'Loft Temperature',
-    'sensor.dead_sensor_temperature': 'Spare Sensor Temperature',
-  };
-  for (const [id, friendly_name] of Object.entries(demoRooms)) {
-    hass.set(id, { attributes: { friendly_name } });
-  }
+  // The fixtures already carry neutral room names; only the deliberately-dead
+  // fixture sensor is relabelled, so docs screenshots read as a normal home.
+  hass.set('sensor.dead_sensor_temperature', {
+    attributes: { friendly_name: 'Spare Sensor Temperature' },
+  });
   // A realistic post-Apply install, so the Setup/Manage screenshot shows the
   // per-zone kill switches (all OFF, exactly as a fresh Apply leaves them)
   // and the full tuning set rather than the sparse fixture subset.

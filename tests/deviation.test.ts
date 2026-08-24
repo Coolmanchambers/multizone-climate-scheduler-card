@@ -20,8 +20,8 @@ describe('deviationColor', () => {
 
   it('matches the mockup examples (setpoint 76)', () => {
     expect(deviationColor(71 - 76)).toBe('red'); // Guest -5
-    expect(deviationColor(77 - 76)).toBe('green'); // Bedroom 1 +1
-    expect(deviationColor(72 - 76)).toBe('amber'); // Bedroom 2 -4
+    expect(deviationColor(77 - 76)).toBe('green'); // bedroom 1, +1
+    expect(deviationColor(72 - 76)).toBe('amber'); // bedroom 2, -4
     expect(deviationColor(81 - 76)).toBe('red'); // Loft +5
   });
 });

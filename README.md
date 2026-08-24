@@ -272,7 +272,7 @@ While a zone's thermostat reports its **Eco** preset, the engine leaves that zon
 alone. This is handy for away modes, and confusing if you forgot Eco was on. Note that today
 this is fixed to the preset literally named `eco` — thermostats that use a different preset
 name for the same idea aren't recognized yet, and it can't be switched off. Making this
-configurable is [on the list](#not-in-this-release).
+configurable is [landing in 0.9.1](#not-in-this-release).
 
 <p align="center">
   <img src="docs/controls.png" alt="The controls expander showing Heat, Cool, Heat-Cool, Off and Eco buttons plus fan timer chips" width="420">
@@ -439,9 +439,9 @@ healthy install settles to "Unchanged" for everything after one apply.
 
 Being upfront so nothing surprises you. These are planned, not shipped:
 
-- **A configurable Eco/standby preset.** Today the engine stands down only for a preset named
-  `eco`, which suits Nest-style thermostats. A future release will let you choose which preset
-  counts, and let you switch the behavior off entirely so Home Assistant owns it instead.
+- **A configurable Eco/standby preset — landing in 0.9.1.** Today the engine stands down only
+  for a preset named `eco`, which suits Nest-style thermostats. 0.9.1 will let you choose which
+  preset counts, and switch the behavior off entirely so Home Assistant owns it instead.
 - **Automatic season switching.** The Manual selector works; the Semi-auto and Full-auto options
   are disabled placeholders for a forecast-driven recommender.
 - **Comfort steering** (compensating a thermostat's setpoint from a room sensor's reading).

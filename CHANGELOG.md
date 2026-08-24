@@ -6,9 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 
 ## [Unreleased]
 
-## [1.0.0] - TBD
+### Planned for 0.9.1
+- Configurable Eco/standby preset: choose which thermostat preset makes the engine stand
+  down, or switch the behaviour off entirely (today it is hard-coded to a preset named
+  `eco`, which only suits Nest-style thermostats).
 
-First stable release.
+## [0.9.0] - 2026-08-24
+
+First public release. Feature-complete for day-to-day use and running against a real
+multi-zone installation, but not yet proven across many homes - hence 0.9 rather than 1.0.
+1.0.0 follows once real-world use confirms it.
 
 ### Card
 - Nest-style climate view for 1-4 zones: hero row with setpoint stepper, mode/fan/eco
