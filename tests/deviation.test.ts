@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deviationColor, formatDelta, sanitizeThresholds } from '../src/lib/deviation';
+import { deviationColor, formatDelta, sanitizeThresholds , formatRoomTemp } from '../src/lib/deviation';
 
 describe('deviationColor', () => {
   it('maps contract defaults: green ≤2, amber ≤4, red beyond', () => {
@@ -45,5 +45,17 @@ describe('sanitizeThresholds', () => {
   });
   it('passes valid pairs through', () => {
     expect(sanitizeThresholds(1, 3)).toEqual({ greenMax: 1, amberMax: 3 });
+  });
+});
+
+describe('formatRoomTemp', () => {
+  it('rounds sensor noise to one decimal and keeps whole numbers whole', () => {
+    expect(formatRoomTemp(82.832)).toBe('82.8');
+    expect(formatRoomTemp(76.208)).toBe('76.2');
+    expect(formatRoomTemp(74.786)).toBe('74.8');
+    expect(formatRoomTemp(77)).toBe('77');
+    expect(formatRoomTemp(77.04)).toBe('77');
+    // JS rounds .5 toward +Infinity; immaterial for a comfort readout.
+    expect(formatRoomTemp(-3.25)).toBe('-3.2');
   });
 });

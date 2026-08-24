@@ -140,7 +140,7 @@ const SET_LABELS: Record<string, string> = {
   we: 'Weekend',
 };
 import { slugify, zoneEntityId, globalEntityId } from './lib/naming';
-import { deviationColor, formatDelta, sanitizeThresholds } from './lib/deviation';
+import { deviationColor, formatDelta, formatRoomTemp, sanitizeThresholds } from './lib/deviation';
 import { buildDesired, plan, actionable, type Plan, type ProvisionInput } from './lib/provisioning';
 import { defaultSchedules } from './lib/default-schedules';
 import { fetchExisting } from './registry-read';
@@ -1922,7 +1922,7 @@ export class MzcsCard extends LitElement {
             return html`
               <div class="room">
                 <span class="rname">${r.name}</span>
-                <span class="rtemp muted">${r.temp == null ? '—' : `${r.temp}°`}</span>
+                <span class="rtemp muted">${r.temp == null ? '—' : `${formatRoomTemp(r.temp)}°`}</span>
               </div>
             `;
           }
@@ -1936,7 +1936,7 @@ export class MzcsCard extends LitElement {
                 <span class="badge ${deviationColor(delta, greenMax, amberMax)}"
                   >${formatDelta(delta)}</span
                 >
-                <span class="rtemp">${r.temp}°</span>
+                <span class="rtemp">${formatRoomTemp(r.temp)}°</span>
               </span>
             </div>
           `;

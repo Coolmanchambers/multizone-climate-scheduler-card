@@ -17,6 +17,16 @@ export function deviationColor(
   return 'red';
 }
 
+/**
+ * Room temperature for display. Sensors report at their own precision - Zigbee
+ * ones commonly send 3 decimals (82.832) - which is noise in a comfort readout.
+ * One decimal, and a whole number stays whole.
+ */
+export function formatRoomTemp(temp: number): string {
+  const r = Math.round(temp * 10) / 10;
+  return Number.isInteger(r) ? String(r) : r.toFixed(1);
+}
+
 export function formatDelta(delta: number): string {
   const rounded = Math.round(delta);
   return `${rounded > 0 ? '+' : ''}${rounded}°`;
