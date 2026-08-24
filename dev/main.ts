@@ -95,6 +95,7 @@ if (shot) {
     }
     if (shot === 'preview') {
       c._setupOpen = true;
+      c._setupTab = 'setup';
       void (card as unknown as { _runDryRun(): Promise<void> })._runDryRun();
     }
     if (shot === 'schedule') c._schedOpen = true;

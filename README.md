@@ -71,10 +71,15 @@ or you want the card to control equipment directly (it never does — automation
 | <img src="docs/schedule.png" alt="Schedule editor with Every day, Weekday-Weekend and Individual days chips above colored temperature strips for weekdays and weekend" width="380"> | <img src="docs/runtime.png" alt="Runtime drawer showing a 7-day bar chart of daily HVAC runtime hours" width="380"> |
 | Colored temperature strips per season. Tap a block to edit it. Switch between one schedule for every day, weekday/weekend, or all seven days. | Daily runtime per zone, 7 or 30 days. Tap a day to see its individual run segments and setpoint changes. |
 
-| Change-set preview | Setup and Manage |
+| Change-set preview | Managed objects |
 |---|---|
-| <img src="docs/preview.png" alt="Setup screen listing every object that will be created, with an Apply 48 changes button" width="380"> | <img src="docs/setup.png" alt="Setup and Manage screen with per-zone scheduling toggles, tunables, theme picker and a danger zone remove-everything button" width="380"> |
-| **Nothing is ever written silently.** Every apply shows exactly what will be created, adopted, edited, or deleted — by name — and waits for you to confirm. | Per-zone scheduling switches, active season, tuning values, themes, and the one-click removal of everything the card created. |
+| <img src="docs/preview.png" alt="Settings panel on the Setup tab listing every object that will be created, with an Apply 48 changes button" width="380"> | <img src="docs/objects.png" alt="Objects tab listing schedules and helpers with status chips" width="380"> |
+| **Nothing is ever written silently.** Every apply shows exactly what will be created, adopted, edited, or deleted — by name — and waits for you to confirm. | The Objects tab inventories everything the card manages, each with a status — including automations you've hand-edited, which it will never touch. |
+
+| Scheduling switches | Settings, tabbed |
+|---|---|
+| <img src="docs/killswitch.png" alt="Zones tab with a Scheduling all zones master switch and per-zone switches, all reading Off" width="380"> | <img src="docs/danger.png" alt="Danger tab, kept separate from the rest of the settings, with the remove everything button" width="380"> |
+| Every zone ships **Off**. The Zones tab is where you hand control over, one zone at a time. | Settings are grouped into tabs, with the destructive actions isolated on their own **Danger** tab, far from anything routine. |
 
 ---
 
@@ -184,8 +189,8 @@ are cooling setpoints, heating setpoints, or a heat·cool range with both.
 
 ### 4. Preview, then apply
 
-Open the card's gear icon → **Setup** → **Run dry-run preview**. You get an itemized list of
-every object that will be created. Read it, then press **Apply**.
+Open the card's gear icon → **Setup** tab → **Run dry-run preview**. You get an itemized list
+of every object that will be created. Read it, then press **Apply**.
 
 <p align="center">
   <img src="docs/preview.png" alt="The dry-run preview listing every object to be created, with an Apply 48 changes button underneath" width="420">
@@ -216,18 +221,18 @@ This is the checkpoint that matters. Before enabling any zone, confirm all four:
 - [ ] **The schedule in your thermostat's own app is turned OFF** — Nest, ecobee, Honeywell,
       SmartThings, whatever you use. Also turn off any "learning" or "auto-schedule" feature.
       See the [warning below](#turn-off-your-thermostats-own-schedule-first) for why.
-- [ ] **The right season is selected** on the Manage screen.
+- [ ] **The right season is selected** on the **Zones** tab.
 - [ ] **You're around to watch it.** Enable during a day you'll be home, not the night before a
       trip.
 
 ### 7. Enable scheduling, one zone at a time
 
-Gear icon → **Manage**. Every zone ships **Off**, meaning the engine stands down and your
+Gear icon → **Zones** tab. Every zone ships **Off**, meaning the engine stands down and your
 thermostat's own app is still in charge. Turn a zone **On** and the engine starts applying your
 schedule to it at the next block.
 
 <p align="center">
-  <img src="docs/killswitch.png" alt="The Manage screen showing a Scheduling all zones master switch and per-zone switches, all reading Off" width="460">
+  <img src="docs/killswitch.png" alt="The Zones tab showing a Scheduling all zones master switch and per-zone switches, all reading Off" width="460">
 </p>
 
 **Start with a single zone.** Watch it through at least one scheduled block change and confirm
@@ -257,7 +262,7 @@ That is your escape hatch during setup, testing, or any problem, and there's an 
 switch above the per-zone ones.
 
 <p align="center">
-  <img src="docs/killswitch.png" alt="Manage screen scheduling switches, all reading Off, with the caption Off equals the engine stands down" width="460">
+  <img src="docs/killswitch.png" alt="Zones tab scheduling switches, all reading Off, with the caption Off equals the engine stands down" width="460">
 </p>
 
 ### Manual changes hold until the next block
@@ -293,11 +298,12 @@ device itself. The editor shows this warning when you untick it.
 > dashboard — or uninstalling it from HACS — does not stop them, and afterwards you no longer
 > have the UI that cleans them up.
 >
-> **Always run "Remove everything this card manages" _before_ deleting the card.** See
+> **Always run "Remove everything this card manages" (gear icon → **Danger** tab) _before_
+> deleting the card.** See
 > [Uninstalling](#uninstalling) for the correct order.
 
 <p align="center">
-  <img src="docs/danger.png" alt="The Danger zone section of the Setup screen with the Remove everything this card manages button" width="460">
+  <img src="docs/danger.png" alt="The Danger tab with the Remove everything this card manages button" width="460">
 </p>
 
 ### Hand-edit a generated automation and you own it from then on
@@ -356,15 +362,21 @@ contents are written to the log first, but the deletion is real.
 
 ## Day-to-day use
 
+The gear icon opens the settings panel, grouped into tabs: **Zones** (scheduling switches and
+the active season), **Tuning** (thresholds and learning values), **Objects** (everything the
+card manages), **Setup** (preview and apply), **Look** (themes), and **Danger** (removal, kept
+deliberately apart from everything else).
+
 | I want to… | Do this |
 |---|---|
 | Change the temperature now | Use the **+ / −** stepper. It holds until the next block. |
 | Change today's schedule permanently | Tap the **Next ·** row → tap the block → edit → **Save**. |
 | Run the fan for a bit | Expand **Mode** → tap **15m / 30m / 60m**. It shuts off automatically. |
-| Switch seasons | Gear icon → **Manage** → **Active season**. |
-| Stop all automation immediately | Gear icon → **Manage** → switch the zone (or the master) **Off**. |
+| Switch seasons | Gear icon → **Zones** tab → **Active season**. |
+| Stop all automation immediately | Gear icon → **Zones** tab → switch the zone (or the master) **Off**. |
 | See how much the system ran | Tap the **Runtime ·** row; tap a day for its individual runs. |
-| Change the look | Gear icon → **Manage** → **Theme**. |
+| Change the look | Gear icon → **Look** tab. |
+| See everything the card manages | Gear icon → **Objects** tab. |
 | Move the card to another dashboard | Just move it — see [Moving or copying the card](#moving-or-copying-the-card-to-another-dashboard). Nothing is re-provisioned. |
 
 You can also edit any schedule from **Settings → Devices & Services → Helpers** using Home
@@ -423,19 +435,23 @@ features:
 > **Do these steps in order.** The backend objects outlive the card. If you delete the card
 > first, its automations keep driving your thermostats and the cleanup UI is gone.
 
-1. On the card: gear icon → **Setup** → scroll to **Danger zone** → **Remove everything this
-   card manages…**
+1. On the card: gear icon → **Danger** tab → **Remove everything this card manages…**
 
    <p align="center">
-     <img src="docs/danger.png" alt="Danger zone with the Remove everything this card manages button" width="460">
+     <img src="docs/danger.png" alt="Danger tab with the Remove everything this card manages button" width="460">
    </p>
 
-2. Read the red preview. It lists every object that will be deleted.
-3. Confirm. The card switches all zones **off first** (so your thermostats hand back to their own
+2. Answer the **Are you sure?** prompt. Nothing has been read or deleted yet.
+3. Read the red preview listing every object that will be deleted.
+4. **Type your entity prefix** (`climate` unless you changed it) into the confirmation box. The
+   delete button stays disabled until it matches exactly — and the list is re-checked against
+   Home Assistant at that moment, so if anything changed since the preview you're asked to
+   review it and confirm again.
+5. Confirm. The card switches all zones **off first** (so your thermostats hand back to their own
    apps immediately), then removes the automations, sensors, schedules, and helpers in dependency
    order, writing contents to the log as it goes.
-4. Delete the card from your dashboard.
-5. Uninstall from HACS if you're done with it.
+6. Delete the card from your dashboard.
+7. Uninstall from HACS if you're done with it.
 
 If you skip step 1 and later want to clean up by hand, everything the card created carries the
 `mzcs` label: **Settings → Areas, labels & zones → Labels → mzcs** lists all of it.
@@ -449,7 +465,8 @@ use **Settings → Companion App → Troubleshooting → Reset frontend cache**,
 reopen.
 
 **My schedule isn't being applied.** Check, in this order: (1) the zone's scheduling switch is
-**On**; (2) the thermostat isn't in Eco; (3) the correct season is selected on the Manage screen;
+**On**; (2) the thermostat isn't in its standby preset; (3) the correct season is selected on
+the **Zones** tab;
 (4) `automation.<prefix>_schedule_engine` is enabled. The engine watchdog will notify you if that
 automation goes missing or off for five minutes.
 
@@ -460,7 +477,8 @@ still active — see [the warning above](#turn-off-your-thermostats-own-schedule
 for the nightly learning to run. It skips mild days by design.
 
 **Apply says an automation was "kept".** That automation was hand-edited, so the card left it
-alone on purpose. Delete it manually if you want a fresh generated copy.
+alone on purpose — the **Objects** tab marks it *Customized*. Delete it manually if you want a
+fresh generated copy.
 
 **Re-running Apply keeps showing the same edit.** Open an issue with the preview contents — a
 healthy install settles to "Unchanged" for everything after one apply.
