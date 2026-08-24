@@ -14,7 +14,7 @@ import {
   type GlobalClass,
 } from './naming';
 import { buildWeeklySchedule, type ScheduleBlock, type TimeRange, type DayKey } from './schedule-ranges';
-import { automationSignatures } from './automation-payloads';
+import { automationSignatures, canonicalString } from './automation-payloads';
 
 export const MZCS_LABEL = 'mzcs';
 /** Bump when generated automation content changes; differ plans updates on mismatch. */
@@ -307,18 +307,7 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
 
 /** Deep-equal on JSON-serializable specs (key order independent). */
 export function specEqual(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
-  return canon(a) === canon(b);
-}
-function canon(v: unknown): string {
-  if (Array.isArray(v)) return `[${v.map(canon).join(',')}]`;
-  if (v !== null && typeof v === 'object') {
-    const o = v as Record<string, unknown>;
-    return `{${Object.keys(o)
-      .sort()
-      .map((k) => `${JSON.stringify(k)}:${canon(o[k])}`)
-      .join(',')}}`;
-  }
-  return JSON.stringify(v);
+  return canonicalString(a) === canonicalString(b);
 }
 
 export function plan(desired: DesiredObject[], existing: ExistingObject[]): Plan {

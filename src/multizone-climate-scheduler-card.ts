@@ -277,18 +277,28 @@ export class MzcsCard extends LitElement {
     };
   }
 
+  /**
+   * The ONE way the card snapshots the registry: every consumer (dry-run,
+   * teardown, freshness gate, post-apply verify) must pass the identical
+   * zone/season shape or the freshness gate compares different snapshots
+   * (QA-R B1-3/C1-1; scan S13-health).
+   */
+  private _fetchExistingFor(input: ProvisionInput): ReturnType<typeof fetchExisting> {
+    return fetchExisting(
+      this.hass!,
+      input.prefix,
+      input.zones.map((z) => z.slug),
+      input.seasons.map((s) => s.key),
+    );
+  }
+
   private async _runDryRun(): Promise<void> {
     if (!this.hass || this._dryRunning) return;
     this._dryRunning = true;
     this._dryRunError = undefined;
     try {
       const input = this._provisionInput();
-      const existing = await fetchExisting(
-        this.hass,
-        input.prefix,
-        input.zones.map((z) => z.slug),
-        input.seasons.map((s) => s.key),
-      );
+      const existing = await this._fetchExistingFor(input);
       this._dryRun = plan(buildDesired(input), existing);
       this._execConfirm = false;
       this._execResult = undefined;
@@ -308,12 +318,7 @@ export class MzcsCard extends LitElement {
     this._dryRunError = undefined;
     try {
       const input = this._provisionInput();
-      const existing = await fetchExisting(
-        this.hass,
-        input.prefix,
-        input.zones.map((z) => z.slug),
-        input.seasons.map((s) => s.key),
-      );
+      const existing = await this._fetchExistingFor(input);
       const p = plan([], existing);
       // Deletion order: automations first (the engine stops before its
       // entities vanish), then sensors, schedules, helpers.
@@ -370,12 +375,7 @@ export class MzcsCard extends LitElement {
         },
       });
       this._execResult = result;
-      const existing = await fetchExisting(
-        hass,
-        input.prefix,
-        input.zones.map((z) => z.slug),
-        input.seasons.map((s) => s.key),
-      );
+      const existing = await this._fetchExistingFor(input);
       this._dryRun = plan(buildDesired(input), existing);
     } catch (e) {
       this._execLog = [...this._execLog, `ERROR: ${e instanceof Error ? e.message : String(e)}`];
@@ -407,12 +407,7 @@ export class MzcsCard extends LitElement {
       // registry and refuse to execute if it no longer matches the preview -
       // protects against stale previews, config edits, and a second device
       // applying concurrently.
-      const preExisting = await fetchExisting(
-        hass,
-        input.prefix,
-        input.zones.map((z) => z.slug),
-        input.seasons.map((s) => s.key),
-      );
+      const preExisting = await this._fetchExistingFor(input);
       const fresh = plan(buildDesired(input), preExisting);
       const shape = (pl: Plan) =>
         JSON.stringify([
@@ -440,12 +435,7 @@ export class MzcsCard extends LitElement {
       this._execResult = result;
       // Verify step of the universal change-set rule: replan against the live
       // registry so the user sees what actually landed.
-      const existing = await fetchExisting(
-        hass,
-        input.prefix,
-        input.zones.map((z) => z.slug),
-        input.seasons.map((s) => s.key),
-      );
+      const existing = await this._fetchExistingFor(input);
       this._dryRun = plan(buildDesired(input), existing);
     } catch (e) {
       this._execLog = [...this._execLog, `ERROR: ${e instanceof Error ? e.message : String(e)}`];
@@ -728,11 +718,19 @@ export class MzcsCard extends LitElement {
     `;
   }
 
+  private _appliedTheme?: string;
+
   private _applyTheme(): void {
     const stored = this.hass?.states[globalEntityId('theme', this._prefix)]?.state;
+    // Runs every render (every hass update on a busy instance) - identical
+    // theme strings resolve to identical tokens, so skip the 12 CSSOM writes
+    // unless the stored value actually changed (scan S13-A2).
+    const key = `${this._prefix}|${stored ?? ''}`;
+    if (key === this._appliedTheme) return;
+    this._appliedTheme = key;
     const { tokens } = resolveTheme(stored);
-    for (const [key, cssVar] of THEME_VAR_MAP) {
-      this.style.setProperty(cssVar, tokens[key]);
+    for (const [k, cssVar] of THEME_VAR_MAP) {
+      this.style.setProperty(cssVar, tokens[k]);
     }
   }
 

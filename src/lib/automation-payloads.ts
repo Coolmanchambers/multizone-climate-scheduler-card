@@ -11,17 +11,24 @@ export interface ZoneRef extends ProvisionZone {
   climate: string;
 }
 
+/**
+ * Canonical (key-order independent) string form of a JSON-serializable value.
+ * SHARED by the differ's specEqual and the signature system - if these two
+ * canonicalizations ever diverged, phantom Updates or wrongly-"customized"
+ * automations would follow (scan S13-C2), so there is exactly one.
+ */
+export function canonicalString(x: unknown): string {
+  if (Array.isArray(x)) return `[${x.map(canonicalString).join(',')}]`;
+  if (x !== null && typeof x === 'object') {
+    const o = x as Record<string, unknown>;
+    return `{${Object.keys(o).sort().map((k) => `${JSON.stringify(k)}:${canonicalString(o[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(x);
+}
+
 /** Deterministic hash of a JSON-serializable config (key-order independent). */
 export function canonicalHash(v: unknown): string {
-  const canon = (x: unknown): string => {
-    if (Array.isArray(x)) return `[${x.map(canon).join(',')}]`;
-    if (x !== null && typeof x === 'object') {
-      const o = x as Record<string, unknown>;
-      return `{${Object.keys(o).sort().map((k) => `${JSON.stringify(k)}:${canon(o[k])}`).join(',')}}`;
-    }
-    return JSON.stringify(x);
-  };
-  const s = canon(v);
+  const s = canonicalString(v);
   let h = 5381;
   for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
   return h.toString(16).padStart(8, '0');
@@ -63,14 +70,18 @@ export function automationSignatures(
   seasons: ProvisionSeason[],
   fanGuard?: string,
 ): Record<string, string> {
+  // Each generator returns signed(...), so the payload's own embedded token IS
+  // its content hash (contentHash(signed(c)) === contentHash(c) by the SIG_RE
+  // strip) - reading it back avoids a second full canonicalization per payload.
+  const sigOf = (p: Record<string, unknown>): string => parseSignature(p.description)!;
   const out: Record<string, string> = {
-    [automationUniqueId(prefix, 'engine')]: contentHash(engineAutomation(prefix, zones, seasons)),
-    [automationUniqueId(prefix, 'watchdog')]: contentHash(watchdogAutomation(prefix)),
-    [automationUniqueId(prefix, 'runtime_learning')]: contentHash(learningAutomation(prefix, zones)),
-    [automationUniqueId(prefix, 'runtime_alert')]: contentHash(runtimeAlertAutomation(prefix, zones)),
+    [automationUniqueId(prefix, 'engine')]: sigOf(engineAutomation(prefix, zones, seasons)),
+    [automationUniqueId(prefix, 'watchdog')]: sigOf(watchdogAutomation(prefix)),
+    [automationUniqueId(prefix, 'runtime_learning')]: sigOf(learningAutomation(prefix, zones)),
+    [automationUniqueId(prefix, 'runtime_alert')]: sigOf(runtimeAlertAutomation(prefix, zones)),
   };
   for (const z of zones) {
-    out[automationUniqueId(prefix, `fan_timer_${z.slug}`)] = contentHash(fanAutomation(prefix, z, fanGuard));
+    out[automationUniqueId(prefix, `fan_timer_${z.slug}`)] = sigOf(fanAutomation(prefix, z, fanGuard));
   }
   return out;
 }

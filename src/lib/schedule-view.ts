@@ -72,11 +72,14 @@ export interface DetectedSets {
 }
 
 export function detectSets(week: Week): DetectedSets {
+  // dayKeyOf sorts + JSON.stringifies a day - compute it once per day and
+  // reuse for the wd/we comparisons (scan S13-A4).
   const keys = ALL_DAYS.map((d) => dayKeyOf(week[d] ?? []));
+  const keyOf = (d: DayKey): string => keys[ALL_DAYS.indexOf(d)]!;
   const allSame = keys.every((k) => k === keys[0]);
   if (allSame) return { granularity: 'all', sets: { all: [...ALL_DAYS] } };
-  const wdSame = WEEKDAYS.every((d) => dayKeyOf(week[d] ?? []) === dayKeyOf(week.monday ?? []));
-  const weSame = WEEKEND.every((d) => dayKeyOf(week[d] ?? []) === dayKeyOf(week.saturday ?? []));
+  const wdSame = WEEKDAYS.every((d) => keyOf(d) === keyOf('monday'));
+  const weSame = WEEKEND.every((d) => keyOf(d) === keyOf('saturday'));
   if (wdSame && weSame) {
     return { granularity: 'wdwe', sets: { wd: [...WEEKDAYS], we: [...WEEKEND] } };
   }
@@ -137,9 +140,17 @@ export function nextBlockAfter(week: Week, now: Date): ResolvedBlock | null {
   const startIdx = now.getDay();
   const nowMin = now.getHours() * 60 + now.getMinutes();
   const nowT = `${hm(now)}:00`;
+  // Memoized per weekday: prevLastData re-walks days, so without this the
+  // same day arrays get copied+sorted dozens of times per call (scan S13-A3).
+  const rangeCache = new Map<number, TimeRange[]>();
   const dayRanges = (idx: number): TimeRange[] => {
-    const key = JS_DAY_TO_KEY[(((startIdx + idx) % 7) + 7) % 7]!;
-    return [...(week[key] ?? [])].sort((a, b) => a.from.localeCompare(b.from));
+    const norm = (((startIdx + idx) % 7) + 7) % 7;
+    let rs = rangeCache.get(norm);
+    if (!rs) {
+      rs = [...(week[JS_DAY_TO_KEY[norm]!] ?? [])].sort((a, b) => a.from.localeCompare(b.from));
+      rangeCache.set(norm, rs);
+    }
+    return rs;
   };
   const prevLastData = (idx: number): ScheduleBlock | null => {
     for (let back = 1; back <= 7; back++) {

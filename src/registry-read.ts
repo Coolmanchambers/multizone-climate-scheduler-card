@@ -92,11 +92,15 @@ export async function fetchExisting(
   seasons: string[],
 ): Promise<ExistingObject[]> {
   const candidates: Array<{ id: string; kind: ObjectKind }> = [];
-  for (const entityId of Object.keys(hass.states)) {
+  const candidateIds = new Set<string>();
+  for (const entityId in hass.states) {
     const parsed = parseEntityId(entityId, prefix, zones, seasons);
     if (!parsed) continue;
     const kind = KIND_BY_CLASS[parsed.cls];
-    if (kind) candidates.push({ id: entityId, kind });
+    if (kind) {
+      candidates.push({ id: entityId, kind });
+      candidateIds.add(entityId);
+    }
   }
   // ORPHAN season schedules: a season removed from the config no longer parses
   // (the parser is given only current season keys), which would make its
@@ -105,9 +109,9 @@ export async function fetchExisting(
   // is not a class suffix is claimed as a schedule candidate; the mzcs label
   // still decides whether it is managed (foreign schedules stay untouchable).
   const sortedZones = [...zones].sort((a, b) => b.length - a.length);
-  for (const entityId of Object.keys(hass.states)) {
+  for (const entityId in hass.states) {
     if (!entityId.startsWith(`schedule.${prefix}_`)) continue;
-    if (candidates.some((c) => c.id === entityId)) continue;
+    if (candidateIds.has(entityId)) continue;
     const rest = entityId.slice(`schedule.${prefix}_`.length);
     for (const z of sortedZones) {
       if (!rest.startsWith(`${z}_`)) continue;
@@ -175,8 +179,10 @@ export async function fetchExisting(
   // unreadable configs report an 'unknown' sig (plans an Update; the executor's
   // pristine check then decides).
   const autoIds: Array<{ cfgId: string; entityId: string; alias: string }> = [];
-  for (const [entityId, st] of Object.entries(hass.states)) {
-    if (!entityId.startsWith('automation.') || !st) continue;
+  for (const entityId in hass.states) {
+    if (!entityId.startsWith('automation.')) continue;
+    const st = hass.states[entityId];
+    if (!st) continue;
     const cfgId = st.attributes.id;
     if (typeof cfgId === 'string' && cfgId.startsWith(`${prefix}_mzcs_`)) {
       autoIds.push({ cfgId, entityId, alias: String(st.attributes.friendly_name ?? cfgId) });

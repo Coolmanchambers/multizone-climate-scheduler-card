@@ -130,6 +130,15 @@ export function automationAlias(prefix: string, key: string, zoneName?: string):
   return names[key] ?? `${label}: ${key}`;
 }
 
+// Hoisted once: parseEntityId runs per entity across full hass.states scans
+// (~3,400 entities live), and per-call Object.entries allocation adds up.
+const GLOBAL_CLASS_ENTRIES = Object.entries(GLOBAL_CLASS_DEFS) as Array<
+  [GlobalClass, { domain: string; suffix: string }]
+>;
+const ZONE_CLASS_ENTRIES = Object.entries(ZONE_CLASS_DEFS) as Array<
+  [ZoneClass, { domain: string; suffix: string }]
+>;
+
 /**
  * Parse an entity_id back to its object class. Requires the configured zone slugs
  * and season keys, since zone slugs may contain underscores. Returns null for
@@ -148,9 +157,7 @@ export function parseEntityId(
   if (object !== prefix && !object.startsWith(`${prefix}_`)) return null;
   const rest = object.slice(prefix.length + 1);
 
-  for (const [cls, def] of Object.entries(GLOBAL_CLASS_DEFS) as Array<
-    [GlobalClass, { domain: string; suffix: string }]
-  >) {
+  for (const [cls, def] of GLOBAL_CLASS_ENTRIES) {
     if (domain === def.domain && rest === def.suffix) return { cls };
   }
 
@@ -159,9 +166,7 @@ export function parseEntityId(
   for (const zone of sortedZones) {
     if (rest !== zone && !rest.startsWith(`${zone}_`)) continue;
     const tail = rest.slice(zone.length + 1);
-    for (const [cls, def] of Object.entries(ZONE_CLASS_DEFS) as Array<
-      [ZoneClass, { domain: string; suffix: string }]
-    >) {
+    for (const [cls, def] of ZONE_CLASS_ENTRIES) {
       if (domain === def.domain && tail === def.suffix) return { cls, zone };
     }
     if (domain === 'schedule' && seasons.includes(tail)) {

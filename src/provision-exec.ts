@@ -171,8 +171,8 @@ async function labelEntity(hass: HassLike, entityId: string): Promise<void> {
 
 /** Entity id of an automation config uid, resolved from live states. */
 function automationEntityId(hass: HassLike, uid: string): string | null {
-  for (const [entityId, st] of Object.entries(hass.states)) {
-    if (entityId.startsWith('automation.') && st?.attributes.id === uid) return entityId;
+  for (const entityId in hass.states) {
+    if (entityId.startsWith('automation.') && hass.states[entityId]?.attributes.id === uid) return entityId;
   }
   return null;
 }

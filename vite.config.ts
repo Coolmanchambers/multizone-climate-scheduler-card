@@ -9,6 +9,9 @@ export default defineConfig(({ mode }) => ({
   },
   build: {
     target: 'es2022',
+    // Lib-mode ES output skips minification by default; forcing it cuts the
+    // bundle ~21% with identifiers/behavior untouched (scan S13-perf).
+    minify: 'esbuild',
     lib: {
       entry: 'src/multizone-climate-scheduler-card.ts',
       formats: ['es'],
