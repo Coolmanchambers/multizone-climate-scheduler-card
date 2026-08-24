@@ -6,6 +6,9 @@ import {
   learningAutomation,
   watchdogAutomation,
   runtimeAlertAutomation,
+  automationSignatures,
+  parseSignature,
+  contentHash,
   type ZoneRef,
 } from '../src/lib/automation-payloads';
 import type { Plan, PlanAction } from '../src/lib/provisioning';
@@ -72,10 +75,15 @@ interface Call {
   data?: Record<string, unknown>;
 }
 
-function fakeHass(failOn?: (c: Call) => boolean): { hass: HassLike; calls: Call[] } {
+function fakeHass(failOn?: (c: Call) => boolean): {
+  hass: HassLike;
+  calls: Call[];
+  autos: Map<string, Record<string, unknown>>;
+} {
   const calls: Call[] = [];
   let flowN = 0;
   const flowSteps = new Map<string, number>();
+  const autos = new Map<string, Record<string, unknown>>();
   const hass: HassLike = {
     states: {},
     callService: async () => undefined,
@@ -130,10 +138,21 @@ function fakeHass(failOn?: (c: Call) => boolean): { hass: HassLike; calls: Call[
           data_schema: [{ name: 'state' }, { name: 'start' }, { name: 'end' }],
         };
       }
+      const am = path.match(/^config\/automation\/config\/(.+)$/);
+      if (am) {
+        const uid = am[1]!;
+        if (method === 'POST') { autos.set(uid, { ...(data ?? {}) }); return { result: 'ok' }; }
+        if (method === 'GET') {
+          const cfg = autos.get(uid);
+          if (!cfg) throw new Error('not found');
+          return cfg;
+        }
+        if (method === 'DELETE') { autos.delete(uid); return { result: 'ok' }; }
+      }
       return { result: 'ok' };
     },
   };
-  return { hass, calls };
+  return { hass, calls, autos };
 }
 
 function ctx(log: string[] = []): ExecContext {
@@ -275,5 +294,73 @@ describe('executePlan', () => {
     const deletes = calls.filter((c) => c.key.endsWith('/delete')).map((c) => c.key);
     expect(deletes).toEqual(['timer/delete', 'input_boolean/delete']);
     expect(log.some((l) => l.startsWith('ERROR'))).toBe(true);
+  });
+});
+
+describe('automation signatures + safe regeneration', () => {
+  it('signatures change only for automations whose inputs changed', () => {
+    const base = automationSignatures('climate', ZONES, SEASONS);
+    const moreZones = automationSignatures(
+      'climate',
+      [...ZONES, { slug: 'office', name: 'Office', climate: 'climate.office' }],
+      SEASONS,
+    );
+    expect(moreZones['climate_mzcs_engine']).not.toBe(base['climate_mzcs_engine']);
+    expect(moreZones['climate_mzcs_runtime_learning']).not.toBe(base['climate_mzcs_runtime_learning']);
+    expect(moreZones['climate_mzcs_watchdog']).toBe(base['climate_mzcs_watchdog']);
+    // season rename (stable key) does NOT change the schedule ids but DOES
+    // change the engine's name->key map, so the engine regenerates - correct.
+    const renamed = automationSignatures('climate', ZONES, [
+      { key: 'summer', name: 'Hot Season', default_mode: 'cool' },
+      SEASONS[1]!,
+    ]);
+    expect(renamed['climate_mzcs_engine']).not.toBe(base['climate_mzcs_engine']);
+    expect(renamed['climate_mzcs_runtime_alert']).toBe(base['climate_mzcs_runtime_alert']);
+  });
+
+  it('fan guard is part of the fan automation signature and payload', () => {
+    const un = automationSignatures('climate', ZONES, SEASONS);
+    const gu = automationSignatures('climate', ZONES, SEASONS, 'input_boolean.help_hvac_fan');
+    expect(gu['climate_mzcs_fan_timer_upstairs']).not.toBe(un['climate_mzcs_fan_timer_upstairs']);
+    const payload = fanAutomation('climate', ZONES[0]!, 'input_boolean.help_hvac_fan');
+    expect(JSON.stringify(payload)).toContain('input_boolean.help_hvac_fan');
+  });
+
+  it('generated payloads verify against their own embedded signature', () => {
+    const cfg = engineAutomation('climate', ZONES, SEASONS);
+    expect(parseSignature(cfg.description)).toBe(contentHash(cfg));
+  });
+
+  it('regenerates a stale automation only while it is pristine', async () => {
+    const { hass, autos } = fakeHass();
+    // Create with the base ctx...
+    const p1 = emptyPlan();
+    p1.create.push(create('automation:climate_mzcs_engine', 'automation', {}));
+    await executePlan(hass, p1, ctx());
+    const created = autos.get('climate_mzcs_engine')!;
+    // ...then apply an update with an extra zone: pristine -> regenerated.
+    const grown: ExecContext = {
+      prefix: 'climate',
+      zones: [...ZONES, { slug: 'office', name: 'Office', climate: 'climate.office' }],
+      seasons: SEASONS,
+      log: () => undefined,
+    };
+    const p2 = emptyPlan();
+    p2.update.push({ op: 'update', id: 'automation:climate_mzcs_engine', kind: 'automation', spec: {}, from: {} });
+    const r2 = await executePlan(hass, p2, grown);
+    expect(r2.updated).toBe(1);
+    const regen = autos.get('climate_mzcs_engine')!;
+    expect(regen).not.toEqual(created);
+    expect(JSON.stringify(regen)).toContain('schedule.climate_office_summer');
+    // Hand-edit the stored config: next update must KEEP it.
+    autos.set('climate_mzcs_engine', { ...regen, mode: 'single' });
+    const log: string[] = [];
+    const p3 = emptyPlan();
+    p3.update.push({ op: 'update', id: 'automation:climate_mzcs_engine', kind: 'automation', spec: {}, from: {} });
+    const r3 = await executePlan(hass, p3, { ...grown, log: (l) => log.push(l) });
+    expect(r3.updated).toBe(0);
+    expect(r3.skipped).toBe(1);
+    expect(log.some((l) => l.includes('customized'))).toBe(true);
+    expect(autos.get('climate_mzcs_engine')!.mode).toBe('single');
   });
 });

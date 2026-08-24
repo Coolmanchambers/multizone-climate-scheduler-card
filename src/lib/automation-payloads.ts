@@ -11,6 +11,69 @@ export interface ZoneRef extends ProvisionZone {
   climate: string;
 }
 
+/** Deterministic hash of a JSON-serializable config (key-order independent). */
+export function canonicalHash(v: unknown): string {
+  const canon = (x: unknown): string => {
+    if (Array.isArray(x)) return `[${x.map(canon).join(',')}]`;
+    if (x !== null && typeof x === 'object') {
+      const o = x as Record<string, unknown>;
+      return `{${Object.keys(o).sort().map((k) => `${JSON.stringify(k)}:${canon(o[k])}`).join(',')}}`;
+    }
+    return JSON.stringify(x);
+  };
+  const s = canon(v);
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+  return h.toString(16).padStart(8, '0');
+}
+
+const SIG_RE = /\[mzcs-sig:([0-9a-f]{8})\]/;
+
+/** Extract the embedded signature from an automation description, if present. */
+export function parseSignature(description: unknown): string | null {
+  const m = typeof description === 'string' ? description.match(SIG_RE) : null;
+  return m ? m[1]! : null;
+}
+
+/**
+ * Hash of an automation config EXCLUDING its description (where the signature
+ * itself lives). An automation whose content hash equals its embedded signature
+ * has never been hand-edited since the generator wrote it - safe to regenerate.
+ */
+export function contentHash(config: Record<string, unknown>): string {
+  const { description: _d, ...rest } = config;
+  return canonicalHash(rest);
+}
+
+/** Stamp a generated config with its own content signature. */
+function signed(config: Record<string, unknown>): Record<string, unknown> {
+  const sig = contentHash(config);
+  return { ...config, description: `${String(config.description ?? '')} [mzcs-sig:${sig}]` };
+}
+
+/**
+ * Current-generation signatures for every managed automation, keyed by unique
+ * id. The differ compares these against the signatures embedded in the live
+ * automations to detect staleness (zones/seasons/generator changes).
+ */
+export function automationSignatures(
+  prefix: string,
+  zones: ZoneRef[],
+  seasons: ProvisionSeason[],
+  fanGuard?: string,
+): Record<string, string> {
+  const out: Record<string, string> = {
+    [automationUniqueId(prefix, 'engine')]: contentHash(engineAutomation(prefix, zones, seasons)),
+    [automationUniqueId(prefix, 'watchdog')]: contentHash(watchdogAutomation(prefix)),
+    [automationUniqueId(prefix, 'runtime_learning')]: contentHash(learningAutomation(prefix, zones)),
+    [automationUniqueId(prefix, 'runtime_alert')]: contentHash(runtimeAlertAutomation(prefix, zones)),
+  };
+  for (const z of zones) {
+    out[automationUniqueId(prefix, `fan_timer_${z.slug}`)] = contentHash(fanAutomation(prefix, z, fanGuard));
+  }
+  return out;
+}
+
 export function engineAutomation(
   prefix: string,
   zones: ZoneRef[],
@@ -18,7 +81,11 @@ export function engineAutomation(
 ): Record<string, unknown> {
   const schedules = zones.flatMap((z) => seasons.map((s) => zoneScheduleId(prefix, z.slug, s.key)));
   const enables = zones.map((z) => zoneEntityId('zone_enabled', prefix, z.slug));
-  return {
+  // Season keys are STABLE while display names can be renamed - resolve the
+  // schedule key through an explicit name->key map, falling back to lowercase
+  // for pre-rename installs where key == lower(name).
+  const seasonMap = `{${seasons.map((s) => `'${s.name.replace(/'/g, '')}': '${s.key}'`).join(', ')}}`;
+  return signed({
     id: automationUniqueId(prefix, 'engine'),
     alias: automationAlias('engine'),
     description: `${MANAGED} Applies the active season's schedule block to each ENABLED zone at block transitions. Per-zone applied-block markers mean manual changes and external raises HOLD until the next block; the 15-minute tick only recovers missed transitions. Zones stand down while their Eco preset is active. heat_cool blocks apply dual setpoints.`,
@@ -35,7 +102,9 @@ export function engineAutomation(
     actions: [
       {
         alias: 'Resolve the active season key',
-        variables: { season: `{{ states('${globalEntityId('season_select', prefix)}') | lower }}` },
+        variables: {
+          season: `{{ ${seasonMap}.get(states('${globalEntityId('season_select', prefix)}'), states('${globalEntityId('season_select', prefix)}') | lower) }}`,
+        },
       },
       {
         alias: 'Apply per zone',
@@ -99,11 +168,11 @@ export function engineAutomation(
         },
       },
     ],
-  };
+  });
 }
 
-export function fanAutomation(prefix: string, zone: ZoneRef): Record<string, unknown> {
-  return {
+export function fanAutomation(prefix: string, zone: ZoneRef, guard?: string): Record<string, unknown> {
+  return signed({
     id: automationUniqueId(prefix, `fan_timer_${zone.slug}`),
     alias: automationAlias('fan_timer', zone.name),
     description: `${MANAGED} Turns the ${zone.name} fan off when its fan timer ends.`,
@@ -116,7 +185,16 @@ export function fanAutomation(prefix: string, zone: ZoneRef): Record<string, unk
         alias: `${zone.name} fan timer finished`,
       },
     ],
-    conditions: [],
+    conditions: guard
+      ? [
+          {
+            alias: 'Stand down while the fan-guard helper wants the fan running',
+            condition: 'state',
+            entity_id: guard,
+            state: 'off',
+          },
+        ]
+      : [],
     actions: [
       {
         alias: `Turn the ${zone.name} fan off`,
@@ -125,11 +203,11 @@ export function fanAutomation(prefix: string, zone: ZoneRef): Record<string, unk
         data: { fan_mode: 'off' },
       },
     ],
-  };
+  });
 }
 
 export function learningAutomation(prefix: string, zones: ZoneRef[]): Record<string, unknown> {
-  return {
+  return signed({
     id: automationUniqueId(prefix, 'runtime_learning'),
     alias: automationAlias('runtime_learning'),
     description: `${MANAGED} Nightly EMA update of each zone's runtime-per-cooling-degree-day factor. Skips mild days; first valid day seeds directly.`,
@@ -174,12 +252,12 @@ export function learningAutomation(prefix: string, zones: ZoneRef[]): Record<str
         },
       },
     ],
-  };
+  });
 }
 
 export function watchdogAutomation(prefix: string): Record<string, unknown> {
   const engineEntity = 'automation.' + automationAlias('engine').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-  return {
+  return signed({
     id: automationUniqueId(prefix, 'watchdog'),
     alias: automationAlias('watchdog'),
     description: `${MANAGED} Alerts when the schedule engine automation is off or unavailable for 5 minutes while any zone is enabled.`,
@@ -199,11 +277,11 @@ export function watchdogAutomation(prefix: string): Record<string, unknown> {
         },
       },
     ],
-  };
+  });
 }
 
 export function runtimeAlertAutomation(prefix: string, zones: ZoneRef[]): Record<string, unknown> {
-  return {
+  return signed({
     id: automationUniqueId(prefix, 'runtime_alert'),
     alias: automationAlias('runtime_alert'),
     description: `${MANAGED} Evening check: notifies when a zone's runtime is over the weather-normalized expectation by the alert margin. Uses learned k; silent while learning.`,
@@ -246,5 +324,5 @@ export function runtimeAlertAutomation(prefix: string, zones: ZoneRef[]): Record
         },
       },
     ],
-  };
+  });
 }

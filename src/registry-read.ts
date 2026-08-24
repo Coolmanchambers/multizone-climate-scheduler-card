@@ -3,6 +3,7 @@
 // core helpers UI uses. NEVER writes.
 import type { HassLike } from './ha-types';
 import { parseEntityId } from './lib/naming';
+import { parseSignature } from './lib/automation-payloads';
 import type { ExistingObject, ObjectKind } from './lib/provisioning';
 import { MZCS_LABEL } from './lib/provisioning';
 
@@ -138,18 +139,36 @@ export async function fetchExisting(
     });
   }
 
-  // Automations: match by the unique-id-bearing attributes.id on automation entities.
+  // Automations: match by the unique-id-bearing attributes.id on automation
+  // entities. The embedded [mzcs-sig:...] is read from the stored config so the
+  // differ can detect stale generated content; unreadable configs report an
+  // 'unknown' sig (plans an Update; the executor's pristine check then decides).
+  const autoIds: Array<{ cfgId: string; alias: string }> = [];
   for (const [entityId, st] of Object.entries(hass.states)) {
     if (!entityId.startsWith('automation.') || !st) continue;
     const cfgId = st.attributes.id;
     if (typeof cfgId === 'string' && cfgId.startsWith(`${prefix}_mzcs_`)) {
-      out.push({
-        id: `automation:${cfgId}`,
-        kind: 'automation',
-        spec: { alias: st.attributes.friendly_name ?? cfgId, revision: 'unknown' },
-        managed: true,
-      });
+      autoIds.push({ cfgId, alias: String(st.attributes.friendly_name ?? cfgId) });
     }
   }
+  const sigs = await Promise.all(
+    autoIds.map(async ({ cfgId }) => {
+      if (!hass.callApi) return 'unknown';
+      try {
+        const cfg = (await hass.callApi('GET', `config/automation/config/${cfgId}`)) as Record<string, unknown>;
+        return parseSignature(cfg?.description) ?? 'unknown';
+      } catch {
+        return 'unknown';
+      }
+    }),
+  );
+  autoIds.forEach(({ cfgId, alias }, i) => {
+    out.push({
+      id: `automation:${cfgId}`,
+      kind: 'automation',
+      spec: { alias, sig: sigs[i]! },
+      managed: true,
+    });
+  });
   return out;
 }

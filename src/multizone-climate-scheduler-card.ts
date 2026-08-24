@@ -225,7 +225,7 @@ export class MzcsCard extends LitElement {
 
   private _provisionInput(): ProvisionInput {
     const cfg = this._config!;
-    const zones = cfg.zones.map((z) => ({ slug: slugify(z.name), name: z.name }));
+    const zones = cfg.zones.map((z) => ({ slug: slugify(z.name), name: z.name, climate: z.entity }));
     const seasons = cfg.seasons ?? [
       { key: 'summer', name: 'Summer', default_mode: 'cool' as const },
       { key: 'winter', name: 'Winter', default_mode: 'heat_cool' as const },
@@ -242,6 +242,7 @@ export class MzcsCard extends LitElement {
         fan_timer: (this._config?.features?.fan_timer?.length ?? 3) > 0,
         anomaly_alerts: this._config?.features?.anomaly_alerts ?? true,
         steering: false,
+        fan_guard: this._config?.features?.fan_guard,
       },
     };
   }
@@ -292,6 +293,7 @@ export class MzcsCard extends LitElement {
         prefix: input.prefix,
         zones: zoneRefs,
         seasons: input.seasons,
+        fanGuard: cfg.features?.fan_guard,
         log: (line) => {
           this._execLog = [...this._execLog, line];
         },
@@ -863,7 +865,11 @@ export class MzcsCard extends LitElement {
 
   private _activeSeasonKey(): string | null {
     const sel = this.hass?.states[globalEntityId('season_select', this._prefix)];
-    return sel && sel.state !== 'unknown' ? slugify(sel.state) : null;
+    if (!sel || sel.state === 'unknown') return null;
+    // Season keys are stable across display renames - resolve name -> key
+    // through the config; lowercase fallback covers key == lower(name) installs.
+    const match = this._config?.seasons?.find((s) => s.name === sel.state);
+    return match?.key ?? slugify(sel.state);
   }
 
   private _scheduleEntityId(zone: ZoneConfig): string | null {

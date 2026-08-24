@@ -14,6 +14,7 @@ import {
   type GlobalClass,
 } from './naming';
 import { buildWeeklySchedule, type ScheduleBlock, type TimeRange, type DayKey } from './schedule-ranges';
+import { automationSignatures } from './automation-payloads';
 
 export const MZCS_LABEL = 'mzcs';
 /** Bump when generated automation content changes; differ plans updates on mismatch. */
@@ -22,6 +23,8 @@ export const AUTOMATION_REVISION = 'r1';
 export interface ProvisionZone {
   slug: string;
   name: string;
+  /** climate entity id; feeds the automation generators' signatures */
+  climate?: string;
 }
 
 export interface ProvisionSeason {
@@ -41,7 +44,7 @@ export interface ProvisionInput {
   seasons: ProvisionSeason[];
   /** zone slug → season key → blocks */
   schedules: Record<string, Record<string, ScheduleSet>>;
-  features: { fan_timer: boolean; anomaly_alerts: boolean; steering: boolean };
+  features: { fan_timer: boolean; anomaly_alerts: boolean; steering: boolean; fan_guard?: string };
 }
 
 export type ObjectKind = 'helper' | 'schedule' | 'template_sensor' | 'stats_sensor' | 'automation';
@@ -215,11 +218,20 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
     spec: { name: 'Climate theme' },
   });
 
-  const auto = (key: string, zoneName?: string): DesiredObject => ({
-    id: `automation:${automationUniqueId(p, zoneName ? `${key}_${zoneName.toLowerCase()}` : key)}`,
-    kind: 'automation',
-    spec: { alias: automationAlias(key, zoneName), revision: AUTOMATION_REVISION },
-  });
+  // Signatures of the current-generation automation payloads. A live automation
+  // whose embedded signature differs is stale (zones/seasons/generator changed)
+  // and gets an Update; the executor then regenerates it only when its content
+  // still matches its own signature (i.e. never hand-edited).
+  const zoneRefs = input.zones.map((z) => ({ ...z, climate: z.climate ?? `climate.${z.slug}` }));
+  const sigs = automationSignatures(p, zoneRefs, input.seasons, input.features.fan_guard);
+  const auto = (key: string, zoneName?: string): DesiredObject => {
+    const uid = automationUniqueId(p, zoneName ? `${key}_${zoneName.toLowerCase()}` : key);
+    return {
+      id: `automation:${uid}`,
+      kind: 'automation',
+      spec: { alias: automationAlias(key, zoneName), sig: sigs[uid] ?? AUTOMATION_REVISION },
+    };
+  };
   out.push(auto('engine'));
   out.push(auto('watchdog'));
   out.push(auto('runtime_learning'));
@@ -228,10 +240,11 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
   if (input.features.anomaly_alerts) out.push(auto('runtime_alert'));
   if (input.features.fan_timer) {
     for (const z of input.zones) {
+      const uid = automationUniqueId(p, `fan_timer_${z.slug}`);
       out.push({
-        id: `automation:${automationUniqueId(p, `fan_timer_${z.slug}`)}`,
+        id: `automation:${uid}`,
         kind: 'automation',
-        spec: { alias: automationAlias('fan_timer', z.name), revision: AUTOMATION_REVISION },
+        spec: { alias: automationAlias('fan_timer', z.name), sig: sigs[uid] ?? AUTOMATION_REVISION },
       });
     }
   }

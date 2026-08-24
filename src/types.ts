@@ -25,6 +25,8 @@ export interface MzcsCardConfig {
   features?: {
     fan_timer?: number[];
     anomaly_alerts?: boolean;
+    /** helper entity the fan-off automations must respect (skip while 'on') */
+    fan_guard?: string;
   };
   notify_target?: string;
 }

@@ -6,6 +6,7 @@ import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { HassLike } from './ha-types';
 import type { MzcsCardConfig, ZoneConfig, SeasonConfig, BlockMode } from './types';
+import { slugify } from './lib/naming';
 
 declare global {
   interface Window {
@@ -68,6 +69,17 @@ export class MzcsCardEditor extends LitElement {
     void ensureSelectors().then(() => {
       this._ready = true;
     });
+  }
+
+  /** True once any zone's schedule entity exists for this season key in HA. */
+  private _seasonProvisioned(key: string): boolean {
+    const hass = this.hass;
+    const c = this._config;
+    if (!hass || !c) return false;
+    const prefix = c.prefix ?? 'climate';
+    return (c.zones ?? []).some(
+      (z) => z.name && !!hass.states[`schedule.${prefix}_${slugify(z.name)}_${key}`],
+    );
   }
 
   private _emit(patch: Partial<MzcsCardConfig>): void {
@@ -186,9 +198,14 @@ export class MzcsCardEditor extends LitElement {
                 .value=${s.name}
                 @change=${(e: Event) => {
                   const name = (e.target as HTMLInputElement).value;
-                  const next = seasons.map((x, xi) =>
-                    xi === i ? { ...x, name, key: name.toLowerCase().replace(/[^a-z0-9]+/g, '_') } : x,
-                  );
+                  // Season keys FREEZE once the season's schedules exist in HA:
+                  // schedule entity ids embed the key, so re-deriving it from a
+                  // renamed season would make the differ delete real schedules
+                  // and re-seed placeholders. Before provisioning, the key may
+                  // still follow the name (nicer entity ids).
+                  const newKey = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+                  const key = this._seasonProvisioned(s.key) || !newKey ? s.key : newKey;
+                  const next = seasons.map((x, xi) => (xi === i ? { ...x, name, key } : x));
                   this._emit({ seasons: next });
                 }}
               />
@@ -217,13 +234,16 @@ export class MzcsCardEditor extends LitElement {
         ${seasons.length < 4
           ? html`<button
               class="link"
-              @click=${() =>
+              @click=${() => {
+                let n = seasons.length + 1;
+                while (seasons.some((s) => s.key === `season_${n}`)) n++;
                 this._emit({
                   seasons: [
                     ...seasons,
-                    { key: `season_${seasons.length + 1}`, name: `Season ${seasons.length + 1}`, default_mode: 'cool' },
+                    { key: `season_${n}`, name: `Season ${n}`, default_mode: 'cool' },
                   ],
-                })}
+                });
+              }}
             >
               + Add season
             </button>`

@@ -15,6 +15,8 @@ import {
   learningAutomation,
   watchdogAutomation,
   runtimeAlertAutomation,
+  parseSignature,
+  contentHash,
   type ZoneRef,
 } from './lib/automation-payloads';
 import type { TimeRange, DayKey } from './lib/schedule-ranges';
@@ -23,6 +25,8 @@ export interface ExecContext {
   prefix: string;
   zones: ZoneRef[];
   seasons: ProvisionSeason[];
+  /** optional helper the fan-off automations must respect (features.fan_guard) */
+  fanGuard?: string;
   log: (line: string) => void;
 }
 
@@ -188,7 +192,7 @@ function automationPayload(uid: string, ctx: ExecContext): Record<string, unknow
   const fanMatch = uid.match(new RegExp(`^${p}_mzcs_fan_timer_(.+)$`));
   if (fanMatch) {
     const zone = ctx.zones.find((z) => z.slug === fanMatch[1]);
-    return zone ? fanAutomation(p, zone) : null;
+    return zone ? fanAutomation(p, zone, ctx.fanGuard) : null;
   }
   return null;
 }
@@ -335,6 +339,32 @@ export async function executePlan(hass: HassLike, plan: Plan, ctx: ExecContext):
         } catch {
           result.skipped++;
           ctx.log(`SKIP update ${a.id} - not updatable`);
+        }
+      } else if (a.kind === 'automation' && hass.callApi) {
+        // Stale generated automation. Regenerate ONLY when its live content
+        // still matches its own embedded signature - i.e. nobody hand-edited
+        // it since the generator wrote it. Customized automations are kept.
+        const uid = a.id.slice('automation:'.length);
+        const payload = automationPayload(uid, ctx);
+        if (!payload) {
+          result.skipped++;
+          ctx.log(`KEEP ${a.id} - no generator for this automation`);
+        } else {
+          try {
+            const existing = (await hass.callApi('GET', `config/automation/config/${uid}`)) as Record<string, unknown>;
+            const stored = parseSignature(existing?.description);
+            if (stored && contentHash(existing) === stored) {
+              await hass.callApi('POST', `config/automation/config/${uid}`, payload);
+              result.updated++;
+              ctx.log(`Regenerated ${a.id} (config changed; automation was untouched)`);
+            } else {
+              result.skipped++;
+              ctx.log(`KEEP ${a.id} - customized since generation; review it manually`);
+            }
+          } catch {
+            result.skipped++;
+            ctx.log(`KEEP ${a.id} - could not read its config to verify`);
+          }
         }
       } else {
         result.skipped++;

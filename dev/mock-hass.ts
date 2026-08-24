@@ -191,6 +191,7 @@ export class MockHass implements HassLike {
   private flowStep = new Map<string, number>();
   private flowData = new Map<string, Record<string, unknown>>();
   private flowCount = 0;
+  public autoConfigs = new Map<string, Record<string, unknown>>();
   public async callApi(method: string, path: string, data?: Record<string, unknown>): Promise<unknown> {
     this.log.push({ domain: 'api', service: `${method} ${path}`, data });
     if (method === 'POST' && path === 'config/config_entries/flow') {
@@ -249,6 +250,7 @@ export class MockHass implements HassLike {
       const uid = autoMatch[1]!;
       const entityId = `automation.${uid}`;
       if (method === 'POST') {
+        this.autoConfigs.set(uid, { ...(data ?? {}) });
         this.mutate(() => {
           this.states[entityId] = {
             state: 'on',
@@ -257,7 +259,13 @@ export class MockHass implements HassLike {
         });
         return { result: 'ok' };
       }
+      if (method === 'GET') {
+        const cfg = this.autoConfigs.get(uid);
+        if (!cfg) throw new Error(`automation ${uid} not found`);
+        return cfg;
+      }
       if (method === 'DELETE') {
+        this.autoConfigs.delete(uid);
         this.mutate(() => {
           delete this.states[entityId];
         });
