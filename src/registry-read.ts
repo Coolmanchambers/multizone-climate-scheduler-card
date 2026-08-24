@@ -94,6 +94,24 @@ export async function fetchExisting(
     const kind = KIND_BY_CLASS[parsed.cls];
     if (kind) candidates.push({ id: entityId, kind });
   }
+  // ORPHAN season schedules: a season removed from the config no longer parses
+  // (the parser is given only current season keys), which would make its
+  // schedule invisible and silently orphan it instead of planning the delete
+  // (QA-R B1-6, hit live in QA-2). Any schedule under a known zone whose tail
+  // is not a class suffix is claimed as a schedule candidate; the mzcs label
+  // still decides whether it is managed (foreign schedules stay untouchable).
+  const sortedZones = [...zones].sort((a, b) => b.length - a.length);
+  for (const entityId of Object.keys(hass.states)) {
+    if (!entityId.startsWith(`schedule.${prefix}_`)) continue;
+    if (candidates.some((c) => c.id === entityId)) continue;
+    const rest = entityId.slice(`schedule.${prefix}_`.length);
+    for (const z of sortedZones) {
+      if (!rest.startsWith(`${z}_`)) continue;
+      const tail = rest.slice(z.length + 1);
+      if (tail && tail !== 'sensor_schedule') candidates.push({ id: entityId, kind: 'schedule' });
+      break;
+    }
+  }
 
   const [timers, selects, numbers, schedules, labels] = await Promise.all([
     listDomain(hass, 'timer'),

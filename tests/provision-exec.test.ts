@@ -11,7 +11,8 @@ import {
   contentHash,
   type ZoneRef,
 } from '../src/lib/automation-payloads';
-import { buildDesired } from '../src/lib/provisioning';
+import { buildDesired, plan } from '../src/lib/provisioning';
+import { fetchExisting } from '../src/registry-read';
 import type { Plan, PlanAction } from '../src/lib/provisioning';
 import type { HassLike } from '../src/ha-types';
 
@@ -545,5 +546,52 @@ describe('config-entry sensor deletion (teardown / zone removal)', () => {
     expect(r2.deleted).toBe(0);
     expect(r2.skipped).toBe(1);
     expect(log.some((l) => l.includes('no owning config entry'))).toBe(true);
+  });
+});
+
+describe('orphan season schedule discovery (QA-2 live finding, B1-6 season variant)', () => {
+  it('a schedule for a season no longer in the config is still seen and planned for delete', async () => {
+    const hass: HassLike = {
+      states: {
+        'schedule.climate_upstairs_spring': { state: 'on', attributes: {} },
+        'schedule.climate_upstairs_summer': { state: 'on', attributes: {} },
+      },
+      callService: async () => undefined,
+      callWS: async (msg) => {
+        const t = String(msg.type);
+        if (t === 'config/entity_registry/get_entries') {
+          const ids = (msg.entity_ids as string[]) ?? [];
+          return Object.fromEntries(ids.map((id) => [id, { labels: ['mzcs'] }]));
+        }
+        if (t.endsWith('/list')) return [];
+        return {};
+      },
+    };
+    // config only knows summer/winter - spring was removed
+    const existing = await fetchExisting(hass, 'climate', ['upstairs'], ['summer', 'winter']);
+    expect(existing.some((e) => e.id === 'schedule.climate_upstairs_spring' && e.managed)).toBe(true);
+    const p = plan(buildDesired({
+      prefix: 'climate',
+      zones: [{ slug: 'upstairs', name: 'Upstairs', climate: 'climate.up' }],
+      seasons: SEASONS,
+      schedules: { upstairs: { summer: { granularity: 'all', sets: { all: [{ time: '06:00', name: 'Day', mode: 'cool', cool_temp: 78, heat_temp: null }] } }, winter: { granularity: 'all', sets: { all: [{ time: '06:00', name: 'Day', mode: 'heat_cool', cool_temp: 84, heat_temp: 66 }] } } } },
+      features: { fan_timer: true, anomaly_alerts: true, steering: false },
+    }), existing);
+    expect(p.delete.map((a) => a.id)).toContain('schedule.climate_upstairs_spring');
+    // a foreign (unlabeled) lookalike schedule is NOT deleted
+    const hass2: HassLike = {
+      ...hass,
+      callWS: async (msg) => {
+        const t = String(msg.type);
+        if (t === 'config/entity_registry/get_entries') {
+          const ids = (msg.entity_ids as string[]) ?? [];
+          return Object.fromEntries(ids.map((id) => [id, { labels: [] }]));
+        }
+        if (t.endsWith('/list')) return [];
+        return {};
+      },
+    };
+    const existing2 = await fetchExisting(hass2, 'climate', ['upstairs'], ['summer', 'winter']);
+    expect(existing2.some((e) => e.id === 'schedule.climate_upstairs_spring' && !e.managed)).toBe(true);
   });
 });
