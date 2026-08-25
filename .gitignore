@@ -22,3 +22,6 @@ HANDOFF.md
 # Literal personal terms for the local privacy scan. Never tracked - a public
 # list of the things you are hiding is not a control.
 .privacy-terms
+
+# Local working files, including the pre-rewrite history backup bundle.
+temp/

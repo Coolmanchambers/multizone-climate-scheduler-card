@@ -50,6 +50,14 @@ const files = execFileSync('git', ['ls-files'], { encoding: 'utf8' })
   .split('\n')
   .filter((f) => f && !SKIP_EXT.test(f) && !SKIP_FILE.has(f));
 
+// Files that must never be tracked again, whatever they happen to contain
+// today. HANDOFF.md is session state: it accumulated family names against room
+// names, a LAN address and an email, and its history had to be rewritten to get
+// them out. A content scan would not catch it being re-added on a quiet day.
+const NEVER_TRACK = ['HANDOFF.md', '.privacy-terms'];
+const tracked = new Set(files);
+const structural = NEVER_TRACK.filter((f) => tracked.has(f));
+
 const checks = [...CHECKS, ...extraChecks()];
 const local = checks.length - CHECKS.length;
 const findings = [];
@@ -76,8 +84,18 @@ for (const file of files) {
 const scope = `${files.length} tracked files, ${CHECKS.length} generic checks` +
   (local ? ` + ${local} local terms` : ', no .privacy-terms present (expected in CI)');
 
+if (structural.length) {
+  console.error('privacy scan: files that must never be tracked are tracked:');
+  for (const f of structural) console.error(`  ${f}`);
+  console.error(
+    '\nRun `git rm --cached <file>` and leave it gitignored. It stays on disk;' +
+      '\nit just never enters a public repository again.',
+  );
+  process.exit(1);
+}
+
 if (findings.length === 0) {
-  console.log(`privacy scan: clean (${scope})`);
+  console.log(`privacy scan: clean (${scope}, ${NEVER_TRACK.length} never-track rules)`);
   process.exit(0);
 }
 

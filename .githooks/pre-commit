@@ -1,0 +1,20 @@
+#!/bin/sh
+# Blocks a commit that would put private detail into this PUBLIC repository.
+#
+# Installed automatically by `npm install` (see the "prepare" script), which
+# points core.hooksPath at this directory. To check by hand: npm run privacy
+#
+# Bypassing this with --no-verify is almost never right. The one legitimate
+# case is a false positive, and the fix for that is to narrow the pattern in
+# scripts/privacy-scan.mjs, not to skip the check.
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "pre-commit: node not found, privacy scan SKIPPED - run 'npm run privacy' before pushing" >&2
+  exit 0
+fi
+
+node scripts/privacy-scan.mjs || {
+  echo "" >&2
+  echo "pre-commit: BLOCKED. This repository is public." >&2
+  exit 1
+}
