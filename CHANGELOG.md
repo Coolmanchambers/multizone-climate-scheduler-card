@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-08-25
+
 ### Changed
 - The settings tab formerly labelled "Look" is now "Theme", which is what it actually is.
 - The card now re-renders only when something it actually displays changed, instead of on
