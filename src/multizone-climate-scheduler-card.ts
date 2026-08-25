@@ -595,7 +595,7 @@ export class MzcsCard extends LitElement {
       { key: 'tuning', label: 'Tuning' },
       { key: 'objects', label: 'Objects' },
       { key: 'setup', label: 'Setup' },
-      { key: 'appearance', label: 'Look' },
+      { key: 'appearance', label: 'Theme' },
       { key: 'danger', label: 'Danger' },
     ];
     const tab = this._setupTab;

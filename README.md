@@ -382,7 +382,7 @@ contents are written to the log first, but the deletion is real.
 
 The gear icon opens the settings panel, grouped into tabs: **Zones** (scheduling switches and
 the active season), **Tuning** (thresholds and learning values), **Objects** (everything the
-card manages), **Setup** (preview and apply), **Look** (themes), and **Danger** (removal, kept
+card manages), **Setup** (preview and apply), **Theme**, and **Danger** (removal, kept
 deliberately apart from everything else).
 
 | I want to… | Do this |
@@ -393,7 +393,7 @@ deliberately apart from everything else).
 | Switch seasons | Gear icon → **Zones** tab → **Active season**. |
 | Stop all automation immediately | Gear icon → **Zones** tab → switch the zone (or the master) **Off**. |
 | See how much the system ran | Tap the **Runtime ·** row; tap a day for its individual runs. |
-| Change the look | Gear icon → **Look** tab. |
+| Change the look | Gear icon → **Theme** tab. |
 | See everything the card manages | Gear icon → **Objects** tab. |
 | Move the card to another dashboard | Just move it — see [Moving or copying the card](#moving-or-copying-the-card-to-another-dashboard). Nothing is re-provisioned. |
 
