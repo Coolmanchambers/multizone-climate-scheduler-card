@@ -1,0 +1,4 @@
+# Renders a "Sponsor" button on the repository page on GitHub.
+# Deliberately separate from the README: this file is never rendered inside
+# anyone's Home Assistant, unlike the README (hacs.json sets render_readme).
+buy_me_a_coffee: Coolmanchambers

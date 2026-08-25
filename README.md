@@ -4,6 +4,7 @@
 [![Release](https://img.shields.io/github/v/release/Coolmanchambers/multizone-climate-scheduler-card?display_name=tag)](https://github.com/Coolmanchambers/multizone-climate-scheduler-card/releases)
 [![Status: Work in progress](https://img.shields.io/badge/status-work%20in%20progress-orange.svg)](#-project-status-work-in-progress)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-FF813F.svg?logo=buymeacoffee&logoColor=white)](https://buymeacoffee.com/Coolmanchambers)
 
 **Run your whole house's heating and cooling from one Home Assistant card — with real
 schedules that live in Home Assistant, not in your thermostat's cloud app.**
@@ -605,6 +606,14 @@ by default.
 
 If you'd like to test changes before they reach everyone, see the
 [Beta testing guide](docs/beta-testing.md).
+
+## Support
+
+This is a side project, and everything in it runs in my own house before it ships anywhere else.
+If it saved you an evening, a coffee is welcome — entirely optional, and honestly a good bug
+report is worth more.
+
+[Buy me a coffee](https://buymeacoffee.com/Coolmanchambers)
 
 ## License
 
