@@ -11,13 +11,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 - The card now re-renders only when something it actually displays changed, instead of on
   every Home Assistant state change. On a large instance that is a constant stream of
   updates the card was re-rendering for; wall-mounted tablets should idle noticeably cooler.
-  Time-derived text (the next-block line, runtime figures) still refreshes on a wall-clock
-  minute tick, so nothing goes stale.
+  Time-derived text (the next-block line, runtime figures) refreshes on its own heartbeat,
+  so nothing goes stale even when the instance is quiet.
 
 ### Added
 - Stale room sensors are marked instead of shown as fact. A sensor that has not reported for
-  three hours keeps publishing its last value; the card now labels the row "stale", greys the
-  reading, and suppresses its deviation badge rather than presenting a frozen number as truth.
+  three hours is labelled "stale", its reading greyed and its deviation badge suppressed,
+  rather than presenting a frozen number as truth. Staleness is measured from when the sensor
+  last *reported*, not when its value last *changed*, so a healthy sensor sitting at a steady
+  temperature is not mistaken for a dead one - and it is measured against Home Assistant's own
+  clock, so a tablet with a drifted clock cannot fake it.
 - The settings Zones tab now says where zone and room-sensor configuration lives (the
   dashboard card editor), which is not obvious from inside the card.
 

@@ -35,7 +35,10 @@ describe('render gate watch list', () => {
   });
 
   it('watches every global entity class the card reads', () => {
-    const tunables = [...SRC.matchAll(/cls: '([a-z_]+)'/g)].map((m) => m[1]!);
+    // Scoped to MANAGE_TUNABLES: a loose `cls: '...'` scan also matches
+    // unrelated maps (the Objects-tab status chips), which would launder a
+    // future unwatched class into "covered".
+    const tunables = declaredClasses('MANAGE_TUNABLES');
     const watched = new Set([...declaredClasses('GLOBAL_WATCH'), ...tunables]);
     expect(watched.size).toBeGreaterThan(0);
     const missing = readClasses('globalEntityId').filter((c) => !watched.has(c));
@@ -48,6 +51,36 @@ describe('render gate watch list', () => {
     );
     expect(globalEntityId('season_select', 'climate')).toBe('input_select.climate_season');
     expect(zoneScheduleId('climate', 'upstairs', 'summer')).toBe('schedule.climate_upstairs_summer');
+  });
+
+  it('never hand-assembles an entity id outside the naming generators', () => {
+    // A template-literal id cannot be seen by the class scan above, so it can
+    // diverge from the watch list silently. This is exactly how the schedule
+    // entity slipped through review: the reader built its own id while the
+    // watch list used zoneScheduleId.
+    const handmade = [
+      ...SRC.matchAll(/`(schedule|automation|sensor|binary_sensor|input_[a-z]+|timer)\.\$\{/g),
+    ].map((m) => m[0]);
+    expect(handmade, `hand-assembled ids must use src/lib/naming.ts: ${handmade.join(', ')}`).toEqual([]);
+  });
+
+  it('reads no hard-coded literal entity id', () => {
+    const literals = [...SRC.matchAll(/states\['([a-z_]+\.[a-z0-9_]+)'\]/g)].map((m) => m[1]!);
+    expect(literals, `literal entity reads bypass the watch list: ${literals.join(', ')}`).toEqual([]);
+  });
+
+  it('watches the schedule entity the renderer actually resolves', () => {
+    // The renderer resolves the ACTIVE season, which can differ from the
+    // configured seasons list; the watch list must cover both.
+    expect(SRC).toContain('const active = this._activeSeasonKey();');
+    expect(SRC).toContain('if (active) ids.push(zoneScheduleId(p, slug, active));');
+  });
+
+  it('backs the wall-clock fallback with a real timer', () => {
+    // Both QA reviewers flagged that the minute branch only ran when hass
+    // traffic happened to arrive. A frozen sensor generates no traffic.
+    expect(SRC).toContain('setInterval(');
+    expect(SRC).toContain('clearInterval(');
   });
 
   it('keeps the gate reference-based with a wall-clock fallback', () => {

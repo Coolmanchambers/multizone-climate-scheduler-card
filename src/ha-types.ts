@@ -4,7 +4,13 @@
 export interface HassEntity {
   state: string;
   attributes: Record<string, unknown>;
-  /** ISO timestamp HA stamps on every state write; absent in some fixtures. */
+  /**
+   * HA 2024.8+: advances on EVERY report, including a re-report of an
+   * identical value. This - not last_updated - is what "still talking to us"
+   * means. Absent on older cores and in fixtures.
+   */
+  last_reported?: string;
+  /** Advances only when state or attributes actually change. */
   last_updated?: string;
 }
 

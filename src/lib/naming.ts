@@ -110,6 +110,19 @@ export function automationUniqueId(prefix: string, key: string): string {
 }
 
 /**
+ * entity_id HA derives for a generated automation, from its alias. Callers must
+ * use this rather than assembling the id: a hand-built id silently diverges
+ * from the aliases the executor labels and the card watches (QA 0.9.4).
+ */
+export function automationEntityId(prefix: string, key: string, zoneName?: string): string {
+  const slug = automationAlias(prefix, key, zoneName)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return `automation.${slug}`;
+}
+
+/**
  * Aliases are PREFIX-SCOPED: a second card instance (different prefix) on the
  * same HA must not collide friendly names, and the watchdog derives its target
  * engine entity_id from the alias - an unscoped alias would make every

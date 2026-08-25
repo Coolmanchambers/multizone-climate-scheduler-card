@@ -82,8 +82,33 @@ export interface RoomReading {
  * sensors normally report every few minutes; a frozen one keeps publishing its
  * last value, so the card would otherwise show a confident, wrong number (seen
  * live: a Zigbee sensor pinned at one value for 17 hours).
+ *
+ * Staleness is measured from `last_reported`, which advances on every report
+ * even when the value is unchanged. `last_updated` only moves when the value
+ * changes, so using it would flag a healthy but steady sensor as stale. Cores
+ * without `last_reported` fall back to `last_updated` - a heuristic that can
+ * over-report staleness on coarse sensors, so it is only used when the better
+ * field is missing.
  */
 export const ROOM_STALE_MS = 3 * 60 * 60 * 1000;
+
+/**
+ * A server-side "now" for staleness: the newest report timestamp across the
+ * given entities. Comparing HA timestamps against the BROWSER clock would let a
+ * drifted wall tablet mark every sensor stale (or hide a dead one); comparing
+ * them against HA's own freshest report is drift-immune. Falls back to the
+ * browser clock when nothing carries a timestamp.
+ */
+export function reportReference(hass: HassLike, entityIds: string[]): number {
+  let newest = 0;
+  for (const id of entityIds) {
+    const e = hass.states[id];
+    const raw = e?.last_reported ?? e?.last_updated;
+    const t = raw ? Date.parse(raw) : NaN;
+    if (Number.isFinite(t) && t > newest) newest = t;
+  }
+  return newest > 0 ? newest : Date.now();
+}
 
 export function roomReading(hass: HassLike, entityId: string, now = Date.now()): RoomReading {
   const e = hass.states[entityId];
@@ -92,7 +117,9 @@ export function roomReading(hass: HassLike, entityId: string, now = Date.now()):
       ? e.attributes.friendly_name.replace(/ (Temperature|temperature)$/, '')
       : entityId.split('.')[1] ?? entityId;
   const v = e ? Number(e.state) : NaN;
-  const ts = e?.last_updated ? Date.parse(e.last_updated) : NaN;
+  const reported = e?.last_reported ?? e?.last_updated;
+  const ts = reported ? Date.parse(reported) : NaN;
+  // A future timestamp means clock disagreement, never staleness.
   const stale = Number.isFinite(ts) && now - ts > ROOM_STALE_MS;
   return { entityId, name, temp: Number.isFinite(v) ? v : null, stale };
 }

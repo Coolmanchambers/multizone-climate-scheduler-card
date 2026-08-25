@@ -14,6 +14,7 @@ import {
   ecoActive,
   numberHelperValue,
   roomReading,
+  reportReference,
   setHvacMode,
   setEco,
   startFanTimer,
@@ -151,7 +152,7 @@ const SET_LABELS: Record<string, string> = {
   wd: 'Weekdays',
   we: 'Weekend',
 };
-import { slugify, zoneEntityId, globalEntityId, zoneScheduleId } from './lib/naming';
+import { slugify, zoneEntityId, globalEntityId, zoneScheduleId, automationEntityId } from './lib/naming';
 import { deviationColor, formatDelta, formatRoomTemp, sanitizeThresholds } from './lib/deviation';
 import { buildDesired, plan, actionable, type Plan, type ProvisionInput } from './lib/provisioning';
 import { defaultSchedules } from './lib/default-schedules';
@@ -1042,6 +1043,23 @@ export class MzcsCard extends LitElement {
 
   private _appliedTheme?: string;
   private _renderedMinute = -1;
+  private _tick?: ReturnType<typeof setInterval>;
+
+  public connectedCallback(): void {
+    super.connectedCallback();
+    // The render gate suppresses renders when no watched entity changed, so
+    // time-derived output (next-block line, runtime figures, the staleness
+    // transition) needs its own heartbeat - a frozen sensor produces no state
+    // change of its own to trigger the render that would label it.
+    this._renderedMinute = -1;
+    this._tick = setInterval(() => this.requestUpdate(), 30_000);
+  }
+
+  public disconnectedCallback(): void {
+    super.disconnectedCallback();
+    if (this._tick) clearInterval(this._tick);
+    this._tick = undefined;
+  }
 
   private _applyTheme(): void {
     const stored = this.hass?.states[globalEntityId('theme', this._prefix)]?.state;
@@ -1063,9 +1081,15 @@ export class MzcsCard extends LitElement {
    * be represented here or the card will show stale data. A test cross-checks
    * this list against the card's reads.
    */
+  private _watchedIds?: { key: string; ids: string[] };
+
   private _watchedEntities(): string[] {
     const cfg = this._config;
     if (!cfg) return [];
+    // Rebuilt only when the config or active season changes - this runs on the
+    // hottest path in the card.
+    const memoKey = `${this._prefix}|${this._activeSeasonKey() ?? ''}|${JSON.stringify(cfg.zones)}|${JSON.stringify(cfg.seasons)}`;
+    if (this._watchedIds?.key === memoKey) return this._watchedIds.ids;
     const p = this._prefix;
     const ids: string[] = [];
     for (const z of cfg.zones ?? []) {
@@ -1075,9 +1099,15 @@ export class MzcsCard extends LitElement {
       const slug = slugify(z.name);
       for (const cls of ZONE_WATCH) ids.push(zoneEntityId(cls, p, slug));
       for (const s of cfg.seasons ?? []) ids.push(zoneScheduleId(p, slug, s.key));
+      // The renderer resolves the ACTIVE season, which can differ from the
+      // configured list (no `seasons` key, or the helper holds a name the
+      // config no longer has). Watch what is actually read.
+      const active = this._activeSeasonKey();
+      if (active) ids.push(zoneScheduleId(p, slug, active));
     }
     for (const cls of GLOBAL_WATCH) ids.push(globalEntityId(cls, p));
     for (const t of MANAGE_TUNABLES) ids.push(globalEntityId(t.cls, p));
+    this._watchedIds = { key: memoKey, ids };
     return ids;
   }
 
@@ -1453,8 +1483,10 @@ export class MzcsCard extends LitElement {
 
   private _scheduleEntityId(zone: ZoneConfig): string | null {
     const season = this._activeSeasonKey();
-    if (!season) return null;
-    return `schedule.${this._prefix}_${slugify(zone.name)}_${season}`;
+    if (!season || !zone.name) return null;
+    // Must go through the generator: a hand-assembled id can silently diverge
+    // from the render gate's watch list (QA finding, 0.9.4).
+    return zoneScheduleId(this._prefix, slugify(zone.name), season);
   }
 
   private async _loadWeek(zone: ZoneConfig): Promise<void> {
@@ -1780,7 +1812,7 @@ export class MzcsCard extends LitElement {
                   .disabled=${this._schedBusy}
                   @click=${() => {
                     const marker = zoneEntityId('applied_block_marker', this._prefix, slugify(zone.name));
-                    void applyScheduleNow(this.hass!, marker, `automation.${this._prefix}_schedule_engine`);
+                    void applyScheduleNow(this.hass!, marker, automationEntityId(this._prefix, 'engine'));
                   }}
                 >
                   Apply now
@@ -1979,14 +2011,18 @@ export class MzcsCard extends LitElement {
       numberHelperValue(hass, globalEntityId('dev_green_max', this._prefix)),
       numberHelperValue(hass, globalEntityId('dev_amber_max', this._prefix)),
     );
+    const sensors = normalizeRoomSensors(zone.room_sensors);
+    // Reference "now" from HA's own freshest report among this zone's entities,
+    // so a wall tablet with a drifted clock cannot fake staleness (QA 0.9.4).
+    const ref = reportReference(hass, [zone.entity, ...sensors.map((x) => x.entity)]);
     return html`
       <div class="rooms">
-        ${normalizeRoomSensors(zone.room_sensors).map((rs) => {
-          const reading = roomReading(hass, rs.entity);
+        ${sensors.map((rs) => {
+          const reading = roomReading(hass, rs.entity, ref);
           const r = { ...reading, name: rs.name?.trim() || reading.name };
           if (r.temp == null || setpoint == null || r.stale) {
             return html`
-              <div class="room" title=${r.stale ? 'This sensor has not reported for hours - the reading below is stale.' : ''}>
+              <div class="room" title=${r.stale ? 'This sensor has not reported for hours - the reading below may be out of date.' : nothing}>
                 <span class="rname">${r.name}</span>
                 <span class="rtemp muted">
                   ${r.temp == null

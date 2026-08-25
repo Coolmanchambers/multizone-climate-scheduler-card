@@ -10,6 +10,7 @@ import {
   RESERVED_SLUGS,
   type ZoneClass,
   type GlobalClass,
+  automationEntityId,
 } from '../src/lib/naming';
 
 const PREFIX = 'climate';
@@ -139,5 +140,18 @@ describe('reserved slugs and automations', () => {
     expect(automationUniqueId(PREFIX, 'engine')).toBe('climate_mzcs_engine');
     expect(automationAlias(PREFIX, 'engine')).toBe('Climate: schedule engine');
     expect(automationAlias(PREFIX, 'fan_timer', 'Upstairs')).toBe('Climate: Upstairs fan timer finished');
+  });
+});
+
+describe('automationEntityId', () => {
+  it('matches the entity id HA derives from the generated alias', () => {
+    expect(automationEntityId('climate', 'engine')).toBe('automation.climate_schedule_engine');
+    expect(automationEntityId('climate', 'fan_timer', "the owner's Office")).toBe(
+      'automation.climate_owner_s_office_fan_timer_finished',
+    );
+  });
+
+  it('is prefix-scoped so a second instance targets its own engine', () => {
+    expect(automationEntityId('mzcsqa', 'engine')).toBe('automation.mzcsqa_schedule_engine');
   });
 });
