@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 
 ## [Unreleased]
 
+### Changed
+- The card now re-renders only when something it actually displays changed, instead of on
+  every Home Assistant state change. On a large instance that is a constant stream of
+  updates the card was re-rendering for; wall-mounted tablets should idle noticeably cooler.
+  Time-derived text (the next-block line, runtime figures) still refreshes on a wall-clock
+  minute tick, so nothing goes stale.
+
 ### Added
 - Stale room sensors are marked instead of shown as fact. A sensor that has not reported for
   three hours keeps publishing its last value; the card now labels the row "stale", greys the

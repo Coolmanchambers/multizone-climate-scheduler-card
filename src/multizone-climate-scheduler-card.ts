@@ -75,7 +75,7 @@ const CUSTOM_COLOR_LABELS: Array<{ key: keyof ThemeTokens; label: string }> = [
   { key: 'warn', label: 'Warn (heat / season / high)' },
   { key: 'bad', label: 'Alert (out of range)' },
 ];
-import type { GlobalClass } from './lib/naming';
+import type { GlobalClass, ZoneClass } from './lib/naming';
 
 // Only tunables something actually CONSUMES are shown. The provisioned
 // alert-days and season confirm/dwell helpers are reserved for the post-v1
@@ -94,6 +94,18 @@ interface ObjectRow {
 function zonesEmptyGuard(hass: HassLike, prefix: string, zones: Array<{ name: string }>): boolean {
   return !zones.some((z) => z.name && entityExists(hass, zoneEntityId('zone_enabled', prefix, slugify(z.name))));
 }
+
+/** Per-zone entity classes the card renders from (see _watchedEntities). */
+const ZONE_WATCH: ZoneClass[] = [
+  'fan_timer',
+  'running_sensor',
+  'runtime_today',
+  'expected_runtime',
+  'applied_block_marker',
+  'zone_enabled',
+];
+/** Global entity classes the card renders from, beyond MANAGE_TUNABLES. */
+const GLOBAL_WATCH: GlobalClass[] = ['season_select', 'theme'];
 
 const MANAGE_TUNABLES: Array<{ cls: GlobalClass; label: string }> = [
   { cls: 'dev_green_max', label: 'Room deviation · green up to (°)' },
@@ -139,7 +151,7 @@ const SET_LABELS: Record<string, string> = {
   wd: 'Weekdays',
   we: 'Weekend',
 };
-import { slugify, zoneEntityId, globalEntityId } from './lib/naming';
+import { slugify, zoneEntityId, globalEntityId, zoneScheduleId } from './lib/naming';
 import { deviationColor, formatDelta, formatRoomTemp, sanitizeThresholds } from './lib/deviation';
 import { buildDesired, plan, actionable, type Plan, type ProvisionInput } from './lib/provisioning';
 import { defaultSchedules } from './lib/default-schedules';
@@ -1029,6 +1041,7 @@ export class MzcsCard extends LitElement {
   }
 
   private _appliedTheme?: string;
+  private _renderedMinute = -1;
 
   private _applyTheme(): void {
     const stored = this.hass?.states[globalEntityId('theme', this._prefix)]?.state;
@@ -1042,6 +1055,53 @@ export class MzcsCard extends LitElement {
     for (const [k, cssVar] of THEME_VAR_MAP) {
       this.style.setProperty(cssVar, tokens[k]);
     }
+  }
+
+  /**
+   * Every entity id this card reads. The render gate below compares only these
+   * between hass objects, so ANY new hass.states[...] read in a renderer must
+   * be represented here or the card will show stale data. A test cross-checks
+   * this list against the card's reads.
+   */
+  private _watchedEntities(): string[] {
+    const cfg = this._config;
+    if (!cfg) return [];
+    const p = this._prefix;
+    const ids: string[] = [];
+    for (const z of cfg.zones ?? []) {
+      if (z.entity) ids.push(z.entity);
+      for (const rs of normalizeRoomSensors(z.room_sensors)) ids.push(rs.entity);
+      if (!z.name) continue;
+      const slug = slugify(z.name);
+      for (const cls of ZONE_WATCH) ids.push(zoneEntityId(cls, p, slug));
+      for (const s of cfg.seasons ?? []) ids.push(zoneScheduleId(p, slug, s.key));
+    }
+    for (const cls of GLOBAL_WATCH) ids.push(globalEntityId(cls, p));
+    for (const t of MANAGE_TUNABLES) ids.push(globalEntityId(t.cls, p));
+    return ids;
+  }
+
+  /**
+   * HA hands the card a NEW hass object on every state change anywhere - on a
+   * 3,400-entity instance that is constant. Re-render only when something this
+   * card actually reads changed (state objects are immutable, so reference
+   * equality is exact), or when the wall-clock minute advanced, since the
+   * next-block line and runtime figures are time-derived.
+   */
+  protected shouldUpdate(changed: Map<string, unknown>): boolean {
+    if (changed.size > 1 || !changed.has('hass')) return true;
+    const prev = changed.get('hass') as HassLike | undefined;
+    const next = this.hass;
+    if (!prev || !next) return true;
+    const minute = Math.floor(Date.now() / 60000);
+    if (minute !== this._renderedMinute) {
+      this._renderedMinute = minute;
+      return true;
+    }
+    for (const id of this._watchedEntities()) {
+      if (prev.states[id] !== next.states[id]) return true;
+    }
+    return false;
   }
 
   protected render() {
