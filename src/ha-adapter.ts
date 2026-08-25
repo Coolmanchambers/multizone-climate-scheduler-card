@@ -283,12 +283,25 @@ export interface DailyRuntime {
  * (resets at midnight → the day's max IS the day's total). Today's live value
  * comes from the sensor state instead; LTS lags by up to an hour.
  */
+/**
+ * A recorder read that either succeeded (possibly with nothing in it) or did
+ * not happen at all.
+ *
+ * These used to return a bare array, so a failed query and a genuinely empty
+ * history were the same value - and the card rendered both as "History accrues
+ * daily...", telling the user to wait for data that was never coming. Empty and
+ * broken are different facts and the caller has to be able to tell them apart.
+ */
+export type RecorderResult<T> = { ok: true; rows: T[] } | { ok: false; error: string };
+
 export async function fetchDailyRuntime(
   hass: HassLike,
   runtimeSensorId: string,
   days: number,
-): Promise<DailyRuntime[]> {
-  if (!hass.callWS) return [];
+): Promise<RecorderResult<DailyRuntime>> {
+  if (!hass.callWS) {
+    return { ok: false, error: 'This Home Assistant connection cannot read history.' };
+  }
   const start = new Date();
   start.setHours(0, 0, 0, 0);
   start.setDate(start.getDate() - (days - 1));
@@ -301,11 +314,14 @@ export async function fetchDailyRuntime(
       types: ['max'],
     })) as Record<string, Array<{ start: number; max?: number | null }>>;
     const rows = res?.[runtimeSensorId] ?? [];
-    return rows
-      .filter((r) => typeof r.max === 'number')
-      .map((r) => ({ day: r.start, hours: r.max as number }));
-  } catch {
-    return [];
+    return {
+      ok: true,
+      rows: rows
+        .filter((r) => typeof r.max === 'number')
+        .map((r) => ({ day: r.start, hours: r.max as number })),
+    };
+  } catch (e) {
+    return { ok: false, error: errorText(e) };
   }
 }
 
@@ -348,8 +364,10 @@ export async function fetchDayHistory(
   dayStart: number,
   dayEnd: number,
   attribute?: string,
-): Promise<HistoryPoint[]> {
-  if (!hass.callWS) return [];
+): Promise<RecorderResult<HistoryPoint>> {
+  if (!hass.callWS) {
+    return { ok: false, error: 'This Home Assistant connection cannot read history.' };
+  }
   try {
     const res = (await hass.callWS({
       type: 'history/history_during_period',
@@ -360,9 +378,9 @@ export async function fetchDayHistory(
       no_attributes: !attribute,
       significant_changes_only: false,
     })) as Record<string, WsHistoryRow[]>;
-    return wsHistoryToPoints(res?.[entityId] ?? [], attribute);
-  } catch {
-    return [];
+    return { ok: true, rows: wsHistoryToPoints(res?.[entityId] ?? [], attribute) };
+  } catch (e) {
+    return { ok: false, error: errorText(e) };
   }
 }
 

@@ -194,6 +194,10 @@ export class MzcsCard extends LitElement {
   @state() private _schedGran?: DayGranularity;
   @state() private _rtOpen = false;
   @state() private _rtDaily?: DailyRuntime[];
+  /** Set when a recorder read failed, so "no data" is never shown for a broken query. */
+  @state() private _rtError?: string;
+  @state() private _rt30Error?: string;
+  @state() private _rtDayError?: string;
   private _rtLoadedFor?: string;
   @state() private _rtDayOpen: number | null = null;
   @state() private _rtDayDetail?: { segs: Segment[]; bubs: SetpointChange[]; start: number; end: number };
@@ -1301,6 +1305,7 @@ export class MzcsCard extends LitElement {
                     this._rtDayCache.clear();
                     this._rtDayOpen = null;
                     this._rtDayDetail = undefined;
+                    this._rtDayError = undefined;
                   }}
                 >
                   ${z.name}
@@ -1369,9 +1374,11 @@ export class MzcsCard extends LitElement {
     if (this._rtLoadedFor !== todayId) {
       this._rtLoadedFor = todayId;
       this._rtDaily = undefined;
+      this._rtError = undefined;
       queueMicrotask(() =>
         void fetchDailyRuntime(hass, todayId, 7).then((d) => {
-          this._rtDaily = d;
+          if (d.ok) this._rtDaily = d.rows;
+          else this._rtError = d.error;
         }),
       );
     }
@@ -1417,8 +1424,10 @@ export class MzcsCard extends LitElement {
                   @click=${() => {
                     this._rtRange = 30;
                     if (!this._rt30) {
+                      this._rt30Error = undefined;
                       void fetchDailyRuntime(hass, todayId, 30).then((d) => {
-                        this._rt30 = d;
+                        if (d.ok) this._rt30 = d.rows;
+                        else this._rt30Error = d.error;
                       });
                     }
                   }}
@@ -1444,11 +1453,16 @@ export class MzcsCard extends LitElement {
                         false,
                       ),
                     )}
-                    ${days.length === 0
-                      ? html`<p class="muted" style="font-size:11px;margin:6px 0;">
-                          History accrues daily - past days appear as statistics build up.
+                    ${this._rtError
+                      ? html`<p class="rt-fail">
+                          Could not read history from Home Assistant, so this is not "no
+                          runtime yet" - it is unknown. ${this._rtError}
                         </p>`
-                      : nothing}
+                      : days.length === 0
+                        ? html`<p class="muted" style="font-size:11px;margin:6px 0;">
+                            History accrues daily - past days appear as statistics build up.
+                          </p>`
+                        : nothing}
                     <p class="muted" style="font-size:10px;margin:6px 0 0;">
                       Tap a day for its run segments and setpoint changes.
                     </p>
@@ -1462,6 +1476,12 @@ export class MzcsCard extends LitElement {
 
   private _render30() {
     const rows = this._rt30;
+    if (this._rt30Error) {
+      return html`<p class="rt-fail">
+        Could not read long-term statistics, so the 30-day view is unknown rather than
+        empty. ${this._rt30Error}
+      </p>`;
+    }
     if (!rows) return html`<p class="muted" style="font-size:11px;">Loading…</p>`;
     if (rows.length === 0) {
       return html`<p class="muted" style="font-size:11px;">
@@ -1508,14 +1528,25 @@ export class MzcsCard extends LitElement {
     if (!this.hass) return;
     this._rtDayLoading = true;
     this._rtDayDetail = undefined;
+    this._rtDayError = undefined;
     try {
       const slug = slugify(zone.name);
       const runningId = zoneEntityId('running_sensor', this._prefix, slug);
       const dayEnd = Math.min(dayStart + 86_400_000, Date.now());
-      const [runPts, setPts] = await Promise.all([
+      const [runRes, setRes] = await Promise.all([
         fetchDayHistory(this.hass, runningId, dayStart, dayEnd),
         fetchDayHistory(this.hass, zone.entity, dayStart, dayEnd, 'temperature'),
       ]);
+      // The run history is what the timeline IS; a failure there must not be
+      // drawn as a day with no runs. Setpoint bubbles are decoration on top, so
+      // losing those alone still leaves a truthful timeline.
+      if (!runRes.ok) {
+        this._rtDayError = runRes.error;
+        return;
+      }
+      this._rtDayError = undefined;
+      const runPts = runRes.rows;
+      const setPts = setRes.ok ? setRes.rows : [];
       const detail = {
         segs: extractRunSegments(runPts, dayStart, dayEnd),
         bubs: extractSetpointChanges(setPts),
@@ -1555,6 +1586,12 @@ export class MzcsCard extends LitElement {
 
   private _renderDayDetail() {
     if (this._rtDayLoading) return html`<p class="muted" style="font-size:11px;">Loading day…</p>`;
+    if (this._rtDayError) {
+      return html`<p class="rt-fail">
+        Could not read this day's history, so it is unknown rather than a day with no
+        runs. ${this._rtDayError}
+      </p>`;
+    }
     const d = this._rtDayDetail;
     if (!d) return nothing;
     return html`
@@ -2900,6 +2937,11 @@ export class MzcsCard extends LitElement {
     .objstat.del {
       background: var(--mzcs-bad);
       color: #fff;
+    }
+    .rt-fail {
+      font-size: 11px;
+      margin: 6px 0;
+      color: var(--mzcs-warn);
     }
     .diagopt {
       display: flex;

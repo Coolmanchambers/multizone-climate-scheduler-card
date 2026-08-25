@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 
 ## [Unreleased]
 
+### Fixed
+- A failed history query no longer looks like an empty one. When Home Assistant's recorder could
+  not be read, the runtime drawer said "History accrues daily - past days appear as statistics
+  build up", which told you to wait for data that was never going to arrive. The three runtime
+  views now say plainly that the history could not be read, and why, instead of reporting a
+  broken query as an empty one.
+
 ### Added
 - A diagnostics report for bug reports, on the settings **Objects** tab. It gathers the card and
   Home Assistant versions, the shape of your configuration, the result of your last preview, and
