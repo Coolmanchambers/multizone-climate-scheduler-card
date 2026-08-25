@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 
 ## [Unreleased]
 
+### Added
+- A diagnostics report for bug reports, on the settings **Objects** tab. It gathers the card and
+  Home Assistant versions, the shape of your configuration, the result of your last preview, and
+  the status of every object the card manages. **Your entity ids and the names you gave your zones
+  and rooms are left out by default** - the report is still useful without them, there is a
+  tick-box to include them if a maintainer asks, and the text is shown to you in full before you
+  copy it so you always see what you are about to share.
+
 ## [0.7.0] - 2026-08-25
 
 First public release. Feature-complete for day-to-day use and running against a real

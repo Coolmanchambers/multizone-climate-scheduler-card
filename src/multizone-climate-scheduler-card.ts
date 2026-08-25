@@ -1,6 +1,7 @@
 import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { CARD_TYPE, CARD_NAME, CARD_VERSION, EDITOR_TYPE } from './const';
+import { buildDiagnostics } from './lib/diagnostics';
 import type { MzcsCardConfig, ZoneConfig } from './types';
 import { resolveEcoPreset, normalizeRoomSensors } from './types';
 import type { HassLike } from './ha-types';
@@ -218,6 +219,10 @@ export class MzcsCard extends LitElement {
   /** danger flow: are-you-sure shown, and the typed confirmation text */
   @state() private _tdAsk = false;
   @state() private _tdConfirm = '';
+  @state() private _diagText?: string;
+  @state() private _diagIds = false;
+  @state() private _diagCopied = false;
+
   @state() private _objects?: ObjectRow[];
   @state() private _objectsLoading = false;
   @state() private _objectsError?: string;
@@ -755,6 +760,64 @@ export class MzcsCard extends LitElement {
     `;
   }
 
+  /**
+   * Assemble the diagnostics text. Deliberately NOT written straight to the
+   * clipboard: this contains the user's configuration, so they see it before it
+   * goes anywhere. `_diagIds` is theirs to set and always starts false.
+   */
+  private _buildDiag() {
+    const hass = this.hass;
+    const cfg = this._config;
+    if (!hass || !cfg) return;
+    const zoneEnabled = (cfg.zones ?? [])
+      .map((z) => ({ zone: z.name, id: zoneEntityId('zone_enabled', this._prefix, slugify(z.name)) }))
+      .filter((z) => entityExists(hass, z.id))
+      .map((z) => ({ zone: z.zone, state: hass.states[z.id]?.state ?? 'unknown' }));
+    const plan = this._dryRun;
+    this._diagText = buildDiagnostics({
+      cardVersion: CARD_VERSION,
+      haVersion: hass.config?.version,
+      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
+      config: cfg,
+      plan: plan
+        ? {
+            create: plan.create.length,
+            adopt: plan.adopt.length,
+            update: plan.update.length,
+            delete: plan.delete.length,
+            noop: plan.noop.length,
+          }
+        : null,
+      planKind: this._dryRunKind,
+      objectStatuses: this._objects ? this._objects.map((o) => o.status) : null,
+      zoneEnabled,
+      activeSeason: hass.states[globalEntityId('season_select', this._prefix)]?.state,
+      identifiers: this._diagIds,
+    });
+    this._diagCopied = false;
+  }
+
+  /**
+   * Home Assistant is commonly served over plain http on a LAN, where
+   * `navigator.clipboard` does not exist. Falling back to selecting the text
+   * keeps the button honest instead of silently doing nothing.
+   */
+  private async _copyDiag(ta: HTMLTextAreaElement) {
+    const text = this._diagText ?? '';
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        this._diagCopied = true;
+        return;
+      }
+    } catch {
+      /* fall through to selection */
+    }
+    ta.focus();
+    ta.select();
+    this._diagCopied = false;
+  }
+
   private _renderObjectsTab() {
     const rows = this._objects;
     const groups: Array<{ label: string; kinds: string[] }> = [
@@ -802,6 +865,52 @@ export class MzcsCard extends LitElement {
         : this._objectsLoading
           ? nothing
           : html`<p class="setup-sub">Nothing loaded yet.</p>`}
+      ${this._renderDiagnostics()}
+    `;
+  }
+
+  private _renderDiagnostics() {
+    return html`
+      <p class="plan-h">Diagnostics</p>
+      <p class="setup-sub">
+        A summary of this card's version, configuration and last preview, for a bug report.
+        <b>Entity ids and the names you gave your zones and rooms are left out</b> - the report is
+        still useful without them. Tick the box only if a maintainer asks for them.
+      </p>
+      <label class="diagopt">
+        <input
+          type="checkbox"
+          .checked=${this._diagIds}
+          @change=${(e: Event) => {
+            this._diagIds = (e.target as HTMLInputElement).checked;
+            if (this._diagText) this._buildDiag();
+          }}
+        />
+        Include entity ids and names
+      </label>
+      <button class="chip" @click=${() => this._buildDiag()}>
+        ${this._diagText ? 'Rebuild' : 'Build report'}
+      </button>
+      ${this._diagText
+        ? html`
+            <textarea class="diagbox" readonly .value=${this._diagText} @focus=${(e: Event) =>
+              (e.target as HTMLTextAreaElement).select()}></textarea>
+            <button
+              class="chip"
+              @click=${() => {
+                const ta = this.renderRoot.querySelector('.diagbox') as HTMLTextAreaElement | null;
+                if (ta) void this._copyDiag(ta);
+              }}
+            >
+              ${this._diagCopied ? 'Copied' : 'Copy'}
+            </button>
+            ${this._diagIds
+              ? html`<p class="setup-err">
+                  This report now contains your entity ids and the names of your zones and rooms.
+                </p>`
+              : nothing}
+          `
+        : nothing}
     `;
   }
 
@@ -2791,6 +2900,29 @@ export class MzcsCard extends LitElement {
     .objstat.del {
       background: var(--mzcs-bad);
       color: #fff;
+    }
+    .diagopt {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12.5px;
+      color: var(--mzcs-text-dim);
+      margin: 6px 0;
+    }
+    .diagbox {
+      width: 100%;
+      min-height: 150px;
+      margin-top: 8px;
+      background: var(--mzcs-track);
+      color: var(--mzcs-text);
+      border: 0.5px solid var(--mzcs-border);
+      border-radius: 6px;
+      padding: 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      line-height: 1.45;
+      resize: vertical;
+      white-space: pre;
     }
     .stalechip {
       font-size: 10px;

@@ -16,6 +16,8 @@ export interface HassEntity {
 
 export interface HassLike {
   states: Record<string, HassEntity | undefined>;
+  /** Core version, for the diagnostics blob. Absent in older fixtures. */
+  config?: { version?: string };
   callService(
     domain: string,
     service: string,

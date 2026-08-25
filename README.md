@@ -412,6 +412,7 @@ deliberately apart from everything else).
 | See how much the system ran | Tap the **Runtime ·** row; tap a day for its individual runs. |
 | Change the look | Gear icon → **Theme** tab. |
 | See everything the card manages | Gear icon → **Objects** tab. |
+| Report a bug | Gear icon → **Objects** tab → **Build report**. |
 | Move the card to another dashboard | Just move it — see [Moving or copying the card](#moving-or-copying-the-card-to-another-dashboard). Nothing is re-provisioned. |
 
 You can also edit any schedule from **Settings → Devices & Services → Helpers** using Home
@@ -521,8 +522,18 @@ for the nightly learning to run. It skips mild days by design.
 alone on purpose — the **Objects** tab marks it *Customized*. Delete it manually if you want a
 fresh generated copy.
 
-**Re-running Apply keeps showing the same edit.** Open an issue with the preview contents — a
+**Re-running Apply keeps showing the same edit.** Open an issue and attach a diagnostics report — a
 healthy install settles to "Unchanged" for everything after one apply.
+
+**Reporting a bug — send a diagnostics report.** Gear icon → **Objects** tab → **Build report**.
+It gathers the card version, your Home Assistant version, the shape of your configuration, the
+result of your last preview, and the status of everything the card manages.
+
+> [!NOTE]
+> **Your entity ids and the names you gave your zones and rooms are left out by default.** The
+> report is still useful without them. There is a tick-box to include them if a maintainer asks,
+> and the report is shown to you in full before you copy it, so you always see what you are
+> sharing.
 
 ---
 
@@ -567,8 +578,10 @@ See [CONTRACT.md](CONTRACT.md) for the frozen naming and schema contract, and
 ## Contributing
 
 Issues and pull requests are welcome — and while the project is still finding its feet, bug
-reports are especially valuable. For bugs, the most useful report includes your Home Assistant
-version, the card version, and — for provisioning problems — the contents of the dry-run preview.
+reports are especially valuable. For bugs, the fastest thing you can send is a **diagnostics
+report** — gear icon → **Objects** tab → **Build report** — which carries the versions, your
+configuration's shape and the last preview result, with your entity ids and room names left out
+by default.
 
 If you'd like to test changes before they reach everyone, see the
 [Beta testing guide](docs/beta-testing.md).
