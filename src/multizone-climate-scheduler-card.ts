@@ -186,6 +186,8 @@ export class MzcsCard extends LitElement {
   @state() private _schedBusy = false;
   @state() private _schedSel?: { setKey: string; idx: number };
   @state() private _schedDrafts = new Map<string, ScheduleBlock[]>();
+  /** Set keys the user genuinely edited (not merely produced by a clone). */
+  private _schedEdited = new Set<string>();
   @state() private _schedNotice?: string;
   /** pending day-granularity change (draft; applied on Save) */
   @state() private _schedGran?: DayGranularity;
@@ -1530,11 +1532,13 @@ export class MzcsCard extends LitElement {
     const m = new Map(this._schedDrafts);
     m.set(setKey, draft);
     this._schedDrafts = m;
+    this._schedEdited.add(setKey);
     this._schedNotice = undefined;
   }
 
   private _clearSchedEdit(): void {
     this._schedDrafts = new Map();
+    this._schedEdited = new Set();
     this._schedSel = undefined;
     this._schedGran = undefined;
   }
@@ -1555,13 +1559,21 @@ export class MzcsCard extends LitElement {
   private _switchGranularity(to: DayGranularity): void {
     const week = this._schedWeek;
     if (!week) return;
-    const det = this._activeDet(week);
-    if (det.granularity === to) return;
+    if (this._activeDet(week).granularity === to) return;
+    // Transition from what is SAVED, not from the current on-screen
+    // granularity. Chaining wdwe -> all -> days used to feed each clone into
+    // the next, so a stored weekend was silently replaced by the weekday
+    // schedule; a lingering unsaved switch made that reachable just by
+    // reopening the drawer. Deriving from the stored week makes switching
+    // idempotent and non-destructive.
+    const storedDet = detectSets(week);
     const curSets: Record<string, ScheduleBlock[]> = {};
-    for (const [k, days] of Object.entries(det.sets)) {
-      curSets[k] = this._setBlocks(week, k, days).map((b) => ({ ...b }));
+    for (const [k, days] of Object.entries(storedDet.sets)) {
+      // A set the user actually edited still wins over the stored value.
+      const edited = this._schedEdited.has(k) ? this._schedDrafts.get(k) : undefined;
+      curSets[k] = (edited ?? rangesToDayBlocks((week[days[0]!] ?? []) as TimeRange[])).map((b) => ({ ...b }));
     }
-    const newSets = transitionSets(det.granularity, to, curSets);
+    const newSets = transitionSets(storedDet.granularity, to, curSets);
     const m = new Map<string, ScheduleBlock[]>();
     for (const [k, blocks] of Object.entries(newSets)) m.set(k, blocks.map((b) => ({ ...b })));
     this._schedDrafts = m;

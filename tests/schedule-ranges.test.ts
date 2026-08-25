@@ -136,3 +136,41 @@ describe('transitionSets (CONTRACT §2)', () => {
     expect(back.all).toEqual(UP_SUMMER_WD);
   });
 });
+
+describe('granularity switching is non-destructive (0.9.4 live bug)', () => {
+  // Reported: switching weekday/weekend -> individual days copied the WEEKDAY
+  // schedule onto Saturday and Sunday, losing the stored weekend. It happened
+  // only when an earlier, unsaved granularity switch was still in effect - the
+  // clone from that switch became the source for the next one. Discarding and
+  // retrying worked, which is what made it look intermittent.
+  const wd: ScheduleBlock[] = [
+    { time: '06:00', name: 'Wake', mode: 'cool', cool_temp: 78, heat_temp: null },
+    { time: '21:30', name: 'Sleep', mode: 'cool', cool_temp: 76, heat_temp: null },
+  ];
+  const we: ScheduleBlock[] = [
+    { time: '07:30', name: 'Wake', mode: 'cool', cool_temp: 79, heat_temp: null },
+    { time: '22:30', name: 'Sleep', mode: 'cool', cool_temp: 77, heat_temp: null },
+  ];
+
+  it('wdwe -> days keeps the weekend distinct from the weekdays', () => {
+    const out = transitionSets('wdwe', 'days', { wd, we });
+    expect(out.monday).toEqual(wd);
+    expect(out.friday).toEqual(wd);
+    expect(out.saturday).toEqual(we);
+    expect(out.sunday).toEqual(we);
+    expect(out.saturday).not.toEqual(out.monday);
+  });
+
+  it('chaining through a collapse is what destroyed the weekend', () => {
+    // This is the mechanism, asserted so the reasoning stays visible: chaining
+    // clone-onto-clone is lossy BY DESIGN, which is why the card must always
+    // transition from the STORED week rather than from the previous switch.
+    const collapsed = transitionSets('wdwe', 'all', { wd, we });
+    const chained = transitionSets('all', 'days', collapsed);
+    expect(chained.saturday).toEqual(chained.monday);
+
+    // Transitioning from the stored week instead preserves it.
+    const fromStored = transitionSets('wdwe', 'days', { wd, we });
+    expect(fromStored.saturday).not.toEqual(fromStored.monday);
+  });
+});

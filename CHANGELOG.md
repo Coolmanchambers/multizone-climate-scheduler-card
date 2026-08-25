@@ -14,6 +14,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
   Time-derived text (the next-block line, runtime figures) refreshes on its own heartbeat,
   so nothing goes stale even when the instance is quiet.
 
+### Fixed
+- Switching the schedule editor to individual days could copy the weekday schedule onto
+  Saturday and Sunday, losing the stored weekend. Each granularity switch used the previous
+  switch as its source, so chaining them compounded - and because an unsaved switch survived
+  closing the drawer, simply reopening it could put you in that state without realising.
+  Switching now always derives from the saved schedule, with any block you actually edited
+  kept on top, so it is repeatable and cannot silently discard a day-set.
+
 ### Added
 - Stale room sensors are marked instead of shown as fact. A sensor that has not reported for
   three hours is labelled "stale", its reading greyed and its deviation badge suppressed,
