@@ -181,6 +181,23 @@ refresh.
    `/local/multizone-climate-scheduler-card.js`, type **JavaScript module**.
 4. Reload your browser.
 
+### Beta releases (optional)
+
+Some builds ship first as **betas**, published as GitHub pre-releases. HACS hides those unless
+you ask for them, so **you will never be given one by accident** — stable is the default and
+requires nothing from you.
+
+If you want to help test, enable the **Pre-release** switch on the card's device under
+**Settings → Devices & services → HACS** (it's disabled by default, so you enable the entity
+first, then turn it on). Betas then show up in HACS like any other update.
+
+Rolling back is quick and safe: HACS → three-dot menu → **Redownload** → **Need a different
+version?** → pick the last good one, then hard-refresh. Your schedules and helpers live in Home
+Assistant, not in the card, so nothing is lost.
+
+Full instructions, including how to confirm which version is actually running and what to put in
+a report: **[Beta testing guide](docs/beta-testing.md)**.
+
 ---
 
 ## Quick start
@@ -552,6 +569,9 @@ See [CONTRACT.md](CONTRACT.md) for the frozen naming and schema contract, and
 Issues and pull requests are welcome — and while the project is still finding its feet, bug
 reports are especially valuable. For bugs, the most useful report includes your Home Assistant
 version, the card version, and — for provisioning problems — the contents of the dry-run preview.
+
+If you'd like to test changes before they reach everyone, see the
+[Beta testing guide](docs/beta-testing.md).
 
 ## License
 
