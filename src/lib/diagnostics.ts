@@ -167,7 +167,7 @@ export function buildDiagnostics(input: DiagnosticsInput): string {
       zone_count: zones.length,
       zones,
       seasons_defaulted: !cfg.seasons?.length,
-      seasons: seasons.map((s, i) => {
+      seasons: seasons.filter((s) => s != null).map((s, i) => {
         const name = typeof s.name === 'string' ? s.name : '';
         return {
           name: ids ? name : `Season ${i + 1}`,

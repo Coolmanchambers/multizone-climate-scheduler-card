@@ -394,6 +394,17 @@ export async function fetchDayHistory(
  * prevent. Every branch here returns a non-empty, readable string (QA R5).
  */
 export function errorText(e: unknown): string {
+  try {
+    return errorTextInner(e);
+  } catch {
+    // This runs inside catch blocks; if IT throws, the rejection escapes and
+    // the caller's failure handling never runs. A hostile object (a throwing
+    // getter, a Proxy) must degrade, not propagate.
+    return 'Home Assistant gave no reason.';
+  }
+}
+
+function errorTextInner(e: unknown): string {
   if (e instanceof Error && e.message) return e.message;
   if (e && typeof e === 'object') {
     const o = e as { message?: unknown; code?: unknown };

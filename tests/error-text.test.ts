@@ -44,4 +44,12 @@ describe('errorText always returns a usable message', () => {
     expect(errorText(undefined)).toMatch(/[a-z]/i);
     expect(errorText(undefined)).not.toBe('undefined');
   });
+
+  it('degrades rather than throwing on a hostile object (Fable pass)', () => {
+    // errorText runs inside catch blocks; if it throws, the rejection escapes
+    // and the failure handling it exists to feed never runs.
+    const hostile = { get message(): string { throw new Error('trap'); } };
+    expect(() => errorText(hostile)).not.toThrow();
+    expect(errorText(hostile).length).toBeGreaterThan(0);
+  });
 });

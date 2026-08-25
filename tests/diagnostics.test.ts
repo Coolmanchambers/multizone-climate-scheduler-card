@@ -266,3 +266,10 @@ describe('QA remediation: correctness', () => {
     expect(parse(buildDiagnostics({ cardVersion: '0.7.0', config: bad })).config.prefix).toBe('climate');
   });
 });
+
+describe('Fable pass: residual no-throw holes', () => {
+  it('survives a null entry inside the seasons list', () => {
+    const cfg: any = { type: 'x', zones: [], seasons: [null, { key: 's', name: 'S', default_mode: 'cool' }] };
+    expect(() => buildDiagnostics({ cardVersion: 'v', config: cfg })).not.toThrow();
+  });
+});
