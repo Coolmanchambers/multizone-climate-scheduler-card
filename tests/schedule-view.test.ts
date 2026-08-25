@@ -23,7 +23,7 @@ const cool = (time: string, name: string, temp: number): ScheduleBlock => ({
   heat_temp: null,
 });
 
-// the owner's real Upstairs Summer schedule as provisioned in prod (S7).
+// A realistic multi-block summer schedule: weekdays plus a lighter weekend.
 const WD = [
   cool('06:00', 'Wake', 78),
   cool('08:00', 'Away', 80),

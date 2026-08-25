@@ -71,7 +71,7 @@ function splitId(entityId: string): { domain: string; objectId: string } {
   return { domain: entityId.slice(0, dot), objectId: entityId.slice(dot + 1) };
 }
 
-/** HA's own name→object_id slugification (apostrophes become separators: "the owner's" → "owner_s"). */
+/** HA's own name→object_id slugification (apostrophes become separators: "Owner's" → "owner_s"). */
 function haSlug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 }
@@ -356,7 +356,7 @@ async function createOne(
   const { domain, objectId } = splitId(a.id);
   if (['timer', 'input_text', 'input_select', 'input_number', 'input_boolean', 'schedule'].includes(domain)) {
     // HA derives the object_id from the create name (its slugify differs from the
-    // contract's - "the owner's" becomes "owner_s"). Creating with name = the contract
+    // contract's - "Owner's" becomes "owner_s"). Creating with name = the contract
     // object_id makes the generated item id and entity_id exact, then a follow-up
     // update sets the display name without touching the id.
     const prettyName = String(spec.name ?? objectId);

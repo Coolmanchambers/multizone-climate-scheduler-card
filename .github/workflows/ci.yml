@@ -15,6 +15,9 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # This repo is public and its working copy lives beside a real Home
+      # Assistant install. Generic checks only here - see the script's header.
+      - run: npm run privacy
       - run: npm run typecheck
       - run: npm test
       - run: npm run build

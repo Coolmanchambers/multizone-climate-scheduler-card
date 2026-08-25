@@ -16,7 +16,7 @@ const cool = (time: string, name: string, temp: number): ScheduleBlock => ({
   heat_temp: null,
 });
 
-// the owner's real Upstairs summer weekday schedule (CONTRACT §7 seed data).
+// A realistic multi-block summer weekday cooling schedule.
 const UP_SUMMER_WD: ScheduleBlock[] = [
   cool('06:00', 'Wake', 78),
   cool('08:00', 'Away', 80),

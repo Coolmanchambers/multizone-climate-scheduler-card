@@ -141,24 +141,15 @@ features: { fan_timer: [15, 30, 60], anomaly_alerts: true, fan_guard: input_bool
 ```
 `fan_guard` is optional. `room_sensors` per zone drives the read-only deviation chips.
 
-## 7. Reference data (the original onboarding schedules, decoded 2026-07-26)
+## 7. Reference data - REMOVED (privacy, 2026-08-25)
 
-Reference for the original onboarding, NOT what the public card seeds - a fresh install seeds
-a generic single "Day" block per season (`src/lib/default-schedules.ts`).
+This section held the maintainer's actual per-floor, per-season schedules from the original
+onboarding: wake, away, pre-cool, evening and sleep times for a specific occupied house. It was
+reference material only - a fresh install seeds a generic single "Day" block per season
+(`src/lib/default-schedules.ts`) - so it has been removed rather than sanitised. The original
+is retained privately.
 
-**Upstairs · Summer (cool) · wdwe:**
-- wd: 06:00 Wake 78 · 08:00 Away 80 · 14:00 Pre-cool 76 · 16:00 On-peak 79 · 18:45 Evening 77 · 21:30 Sleep 76
-- we: 07:30 Wake 78 · 21:30 Sleep 76
-
-**Upstairs · Winter (heat_cool) · all:** 06:00 Day 84/66 · 19:00 Evening 78/68
-
-**Downstairs · Summer (cool) · wdwe:**
-- wd: 06:00 Wake 80 · 07:00 Morning 79 · 09:30 Day 78 · 14:00 Pre-cool 76 · 16:00 On-peak 79 · 17:15 Evening 82 · 21:30 Night 82
-- we: 07:00 Wake 79 · 09:45 Day 78 · 17:45 Evening 80 · 19:45 Night 82
-
-**Downstairs · Winter (heat_cool) · all:** 07:00 Day 78/68 · 19:00 Evening 84/66
-
-Office mini-split: zone supported, on hold - not provisioned at onboarding.
+Nothing in the card, the contract, or the tests depends on those values.
 
 ## 7b. Comfort steering (added pre-S1, spec §14) - **DEFERRED post-v1**
 

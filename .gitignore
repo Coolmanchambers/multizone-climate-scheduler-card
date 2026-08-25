@@ -11,3 +11,14 @@ dist/multizone-climate-scheduler-card-dev.js
 
 # Agent/editor tooling, not repo content
 .claude/
+
+# Session state, not product documentation. Carried the maintainer's home
+# layout, family names, LAN address and email into a PUBLIC repo (backlog
+# item 5, 2026-08-25). It stays at this path for the workflow, backed up by
+# OneDrive, but it is never tracked again. scripts/privacy-scan.mjs guards
+# what is.
+HANDOFF.md
+
+# Literal personal terms for the local privacy scan. Never tracked - a public
+# list of the things you are hiding is not a control.
+.privacy-terms

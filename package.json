@@ -9,6 +9,7 @@
     "dev": "vite",
     "build": "vite build && esbuild dist/multizone-climate-scheduler-card.js --minify-whitespace --allow-overwrite --outfile=dist/multizone-climate-scheduler-card.js",
     "test": "vitest run",
+    "privacy": "node scripts/privacy-scan.mjs",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "build:dev": "vite build --mode dev && esbuild dist/multizone-climate-scheduler-card-dev.js --minify-whitespace --allow-overwrite --outfile=dist/multizone-climate-scheduler-card-dev.js"

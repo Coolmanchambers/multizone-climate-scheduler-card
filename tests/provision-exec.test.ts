@@ -410,32 +410,32 @@ describe('executePlan', () => {
     const { hass, calls } = fakeHass();
     const p = emptyPlan();
     p.create.push(
-      create('timer.climate_owners_office_fan', 'helper', { name: "Climate the owner's Office fan", restore: true }),
+      create('timer.climate_owners_office_fan', 'helper', { name: "Climate Owner's Office fan", restore: true }),
     );
     const res = await executePlan(hass, p, ctx());
     expect(res.ok).toBe(true);
-    // HA slugifies the create name into the object_id ("the owner's" -> "owner_s"), so the
+    // HA slugifies the create name into the object_id ("Owner's" -> "owner_s"), so the
     // create must use the contract object_id as the name...
     const c = calls.find((x) => x.key === 'timer/create')!;
     expect(c.data!.name).toBe('climate_owners_office_fan');
     // ...and a follow-up update sets the display name without changing the id.
     const u = calls.find((x) => x.key === 'timer/update')!;
     expect(u.data!.timer_id).toBe('climate_owners_office_fan');
-    expect(u.data!.name).toBe("Climate the owner's Office fan");
+    expect(u.data!.name).toBe("Climate Owner's Office fan");
   });
 
   it('renames flow-created sensors to the contract id when HA slugification diverges', async () => {
     const { hass, calls } = fakeHass();
     const officeCtx: ExecContext = {
       prefix: 'climate',
-      zones: [{ slug: 'owners_office', name: "the owner's Office", climate: 'climate.owners_office' }],
+      zones: [{ slug: 'owners_office', name: "Owner's Office", climate: 'climate.owners_office' }],
       seasons: SEASONS,
       log: () => undefined,
     };
     const p = emptyPlan();
     p.create.push(
       create('binary_sensor.climate_owners_office_running', 'template_sensor', {
-        name: "Climate the owner's Office running",
+        name: "Climate Owner's Office running",
         source: 'hvac_action',
       }),
     );
@@ -541,14 +541,14 @@ describe('flow-entity resolution (S12c incident regression)', () => {
     reg.set('binary_sensor.climate_owner_s_office_running', 'someone_elses_entry');
     const officeCtx: ExecContext = {
       prefix: 'climate',
-      zones: [{ slug: 'owners_office', name: "the owner's Office", climate: 'climate.x' }],
+      zones: [{ slug: 'owners_office', name: "Owner's Office", climate: 'climate.x' }],
       seasons: SEASONS,
       log: () => undefined,
     };
     const p = emptyPlan();
     p.create.push(
       create('binary_sensor.climate_owners_office_running', 'template_sensor', {
-        name: "Climate the owner's Office running",
+        name: "Climate Owner's Office running",
         source: 'hvac_action',
       }),
     );

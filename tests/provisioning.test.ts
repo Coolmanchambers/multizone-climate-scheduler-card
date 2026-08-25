@@ -36,7 +36,7 @@ function baseInput(): ProvisionInput {
     zones: [
       { slug: 'upstairs', name: 'Upstairs' },
       { slug: 'downstairs', name: 'Downstairs' },
-      { slug: 'owners_office', name: "the owner's Office" },
+      { slug: 'owners_office', name: "Owner's Office" },
     ],
     seasons: [
       { key: 'summer', name: 'Summer', default_mode: 'cool' },

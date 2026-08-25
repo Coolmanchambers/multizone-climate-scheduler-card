@@ -1,5 +1,5 @@
 {
-  "_captured": "2026-08-23 via HA MCP, live instance (America/Phoenix). Mini-split quirk: min_temp/max_temp are Celsius bounds (7/35) while temps are Fahrenheit - adapter must not trust min/max on that zone. timer.* entities are synthetic (not yet provisioned).",
+  "_captured": "2026-08-23 via HA MCP, from a live instance. Mini-split quirk: min_temp/max_temp are Celsius bounds (7/35) while temps are Fahrenheit - adapter must not trust min/max on that zone. timer.* entities are synthetic (not yet provisioned).",
   "climate.upstairs_thermostat": {
     "state": "cool",
     "attributes": {
@@ -54,7 +54,7 @@
       "fan_mode": "auto",
       "preset_mode": "none",
       "swing_mode": "off",
-      "friendly_name": "the owner’s Office Mini-split",
+      "friendly_name": "Owner’s Office Mini-split",
       "supported_features": 441
     }
   },

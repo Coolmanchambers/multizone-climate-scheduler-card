@@ -52,7 +52,7 @@ const GLOBAL_CLASSES: GlobalClass[] = [
 describe('slugify', () => {
   it('handles names, apostrophes, and whitespace', () => {
     expect(slugify('Upstairs')).toBe('upstairs');
-    expect(slugify("the owner's Office")).toBe('owners_office');
+    expect(slugify("Owner's Office")).toBe('owners_office');
     expect(slugify('  Down  Stairs ')).toBe('down_stairs');
     expect(slugify('Loft #2')).toBe('loft_2');
   });
@@ -121,9 +121,9 @@ describe('parser rejections', () => {
   });
 
   it('prefers the longest zone slug (underscore zones)', () => {
-    const withTims = ['tims', 'owners_office'];
+    const withOwners = ['owners', 'owners_office'];
     expect(
-      parseEntityId('timer.climate_owners_office_fan', PREFIX, withTims, SEASONS),
+      parseEntityId('timer.climate_owners_office_fan', PREFIX, withOwners, SEASONS),
     ).toEqual({ cls: 'fan_timer', zone: 'owners_office' });
   });
 });
@@ -146,7 +146,7 @@ describe('reserved slugs and automations', () => {
 describe('automationEntityId', () => {
   it('matches the entity id HA derives from the generated alias', () => {
     expect(automationEntityId('climate', 'engine')).toBe('automation.climate_schedule_engine');
-    expect(automationEntityId('climate', 'fan_timer', "the owner's Office")).toBe(
+    expect(automationEntityId('climate', 'fan_timer', "Owner's Office")).toBe(
       'automation.climate_owner_s_office_fan_timer_finished',
     );
   });
