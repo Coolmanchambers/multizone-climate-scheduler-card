@@ -24,8 +24,8 @@ jobs:
       # source does not reproduce it is a broken release - fail loudly.
       - name: Verify committed bundle matches the source build
         run: git diff --exit-code dist/multizone-climate-scheduler-card.js
-      # A tag carrying a semver pre-release identifier (v0.9.5-beta.1) is
-      # published as a GitHub pre-release; a plain tag (v0.9.5) is not. HACS
+      # A tag carrying a semver pre-release identifier (v0.7.1-beta.1) is
+      # published as a GitHub pre-release; a plain tag (v0.7.1) is not. HACS
       # hides pre-releases from anyone who has not enabled the repository's
       # "Pre-release" switch, so this is what keeps the beta channel opt-in
       # and stable users untouched. See docs/beta-testing.md.

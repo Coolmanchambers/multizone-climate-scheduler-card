@@ -142,7 +142,7 @@ export function resolveTheme(stored: string | undefined | null): {
 } {
   const fallback = { presetKey: DEFAULT_THEME, tokens: THEME_PRESETS[DEFAULT_THEME]!.tokens };
   if (!stored) return fallback;
-  // The default preset was renamed in 0.9.2; installs that stored the old key
+  // The default preset was renamed during development; installs that stored the old key
   // must keep the same look rather than silently reverting.
   const key = stored === 'nest-blue' ? DEFAULT_THEME : stored;
   const preset = THEME_PRESETS[key];

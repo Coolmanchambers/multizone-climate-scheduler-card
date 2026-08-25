@@ -112,7 +112,7 @@ export function automationUniqueId(prefix: string, key: string): string {
 /**
  * entity_id HA derives for a generated automation, from its alias. Callers must
  * use this rather than assembling the id: a hand-built id silently diverges
- * from the aliases the executor labels and the card watches (QA 0.9.4).
+ * from the aliases the executor labels and the card watches (live QA).
  */
 export function automationEntityId(prefix: string, key: string, zoneName?: string): string {
   const slug = automationAlias(prefix, key, zoneName)

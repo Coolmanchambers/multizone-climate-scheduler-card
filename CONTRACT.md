@@ -8,7 +8,7 @@ provisions (added the applied-block marker, per-zone k, theme, and the outdoor-t
 chain; recorded the runtime-learning automation), marked the season recommender and comfort
 steering (§7b) as deferred post-v1, simplified the shipped watchdog/alert descriptions to
 match the code, added Adopt to §8's taxonomy, and corrected day-key names in §2. All changes
-are contract-side: they document shipped v0.9.0 behavior; no object shapes changed.
+are contract-side: they document shipped v0.7.0 behavior; no object shapes changed.
 
 ## 1. Identity
 
@@ -104,7 +104,7 @@ never collide in HA's name→object_id slugification (S12c incident rule).
 - "Climate: schedule engine" (block transitions → climate.set_temperature / set_hvac_mode incl.
   heat_cool dual range and off; per-zone enable + applied-block-marker + standby-preset gates;
   15-min safety tick; season name→key map). The standby gate is configurable via
-  `features.eco_preset` (default `'eco'` = pre-0.9.1 behavior and byte-identical to the 0.9.0
+  `features.eco_preset` (default `'eco'` = original behavior and byte-identical to the 0.7.0
   generator; a string names a different preset; `false` removes the gate)
 - "Climate: <Zone> fan timer finished" (per zone; stands down while the configured fan-guard
   helper is on)
@@ -153,7 +153,7 @@ Nothing in the card, the contract, or the tests depends on those values.
 
 ## 7b. Comfort steering (added pre-S1, spec §14) - **DEFERRED post-v1**
 
-Not shipped in v0.9.0: `features.steering` is hard-off in the card and no steering automation
+Not shipped in v0.7.0: `features.steering` is hard-off in the card and no steering automation
 generator exists (desiring one would be a perpetual phantom Create - QA-R A2-5). The helper
 inventory below stays feature-gated and ready.
 

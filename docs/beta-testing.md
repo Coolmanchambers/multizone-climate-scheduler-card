@@ -12,13 +12,13 @@ This page covers how to opt in, how to get back off, and what to do when a beta 
 
 | | Stable | Beta |
 |---|---|---|
-| Tag | `v0.9.5` | `v0.9.5-beta.1` |
+| Tag | `v0.7.1` | `v0.7.1-beta.1` |
 | On GitHub | Normal release, marked *Latest* | Marked **Pre-release** |
 | Who sees it in HACS | Everyone | Only people who enabled the pre-release switch |
 
 HACS hides GitHub pre-releases from anyone who has not asked for them, so a beta cannot reach a
 normal user by accident. A beta version always sorts *below* the stable release of the same
-number: `0.9.5-beta.1` comes before `0.9.5`. When the stable `v0.9.5` ships, beta testers are
+number: `0.7.1-beta.1` comes before `0.7.1`. When the stable `v0.7.1` ships, beta testers are
 offered it as a normal update.
 
 ---
@@ -60,7 +60,7 @@ no matter what HACS says.
 Open your browser's developer console and reload the dashboard. The card prints a banner:
 
 ```
- Multi-Zone Climate Scheduler Card   v0.9.5-beta.1
+ Multi-Zone Climate Scheduler Card   v0.7.1-beta.1
 ```
 
 That banner is the running bundle, and it is the only version number that matters when
@@ -74,7 +74,7 @@ reporting a problem. (The card does not yet show its version in the UI — that 
 
 1. HACS → **Multi-Zone Climate Scheduler Card** → three-dot menu → **Redownload**.
 2. Expand **Need a different version?** and pick the last version that worked — usually the most
-   recent stable, e.g. `v0.9.4`.
+   recent stable, e.g. `v0.7.0`.
 3. Hard-refresh the browser.
 4. Confirm the console banner shows the version you picked.
 

@@ -1487,7 +1487,7 @@ export class MzcsCard extends LitElement {
     const season = this._activeSeasonKey();
     if (!season || !zone.name) return null;
     // Must go through the generator: a hand-assembled id can silently diverge
-    // from the render gate's watch list (QA finding, 0.9.4).
+    // from the render gate's watch list (live QA finding).
     return zoneScheduleId(this._prefix, slugify(zone.name), season);
   }
 
@@ -2025,7 +2025,7 @@ export class MzcsCard extends LitElement {
     );
     const sensors = normalizeRoomSensors(zone.room_sensors);
     // Reference "now" from HA's own freshest report among this zone's entities,
-    // so a wall tablet with a drifted clock cannot fake staleness (QA 0.9.4).
+    // so a wall tablet with a drifted clock cannot fake staleness (live QA).
     const ref = reportReference(hass, [zone.entity, ...sensors.map((x) => x.entity)]);
     return html`
       <div class="rooms">

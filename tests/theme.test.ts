@@ -50,7 +50,7 @@ describe('resolveTheme', () => {
     expect(r.tokens).toEqual(tokens);
   });
 
-  it('the pre-0.9.2 theme key still resolves to the same look (rename back-compat)', () => {
+  it('the legacy theme key still resolves to the same look (rename back-compat)', () => {
     const legacy = resolveTheme('nest-blue');
     expect(legacy.presetKey).toBe('cobalt');
     expect(legacy.tokens).toEqual(THEME_PRESETS['cobalt']!.tokens);

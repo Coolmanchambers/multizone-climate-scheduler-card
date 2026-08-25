@@ -137,7 +137,7 @@ describe('transitionSets (CONTRACT §2)', () => {
   });
 });
 
-describe('granularity switching is non-destructive (0.9.4 live bug)', () => {
+describe('granularity switching is non-destructive (live bug)', () => {
   // Reported: switching weekday/weekend -> individual days copied the WEEKDAY
   // schedule onto Saturday and Sunday, losing the stored weekend. It happened
   // only when an earlier, unsaved granularity switch was still in effect - the

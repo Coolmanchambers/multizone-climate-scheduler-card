@@ -6,87 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 
 ## [Unreleased]
 
-## [0.9.4] - 2026-08-25
-
-### Changed
-- The settings tab formerly labelled "Look" is now "Theme", which is what it actually is.
-- The card now re-renders only when something it actually displays changed, instead of on
-  every Home Assistant state change. On a large instance that is a constant stream of
-  updates the card was re-rendering for; wall-mounted tablets should idle noticeably cooler.
-  Time-derived text (the next-block line, runtime figures) refreshes on its own heartbeat,
-  so nothing goes stale even when the instance is quiet.
-
-### Fixed
-- Switching the schedule editor to individual days could copy the weekday schedule onto
-  Saturday and Sunday, losing the stored weekend. Each granularity switch used the previous
-  switch as its source, so chaining them compounded - and because an unsaved switch survived
-  closing the drawer, simply reopening it could put you in that state without realising.
-  Switching now always derives from the saved schedule, with any block you actually edited
-  kept on top, so it is repeatable and cannot silently discard a day-set.
-
-### Added
-- Stale room sensors are marked instead of shown as fact. A sensor that has not reported for
-  three hours is labelled "stale", its reading greyed and its deviation badge suppressed,
-  rather than presenting a frozen number as truth. Staleness is measured from when the sensor
-  last *reported*, not when its value last *changed*, so a healthy sensor sitting at a steady
-  temperature is not mistaken for a dead one - and it is measured against Home Assistant's own
-  clock, so a tablet with a drifted clock cannot fake it.
-- The settings Zones tab now says where zone and room-sensor configuration lives (the
-  dashboard card editor), which is not obvious from inside the card.
-
-## [0.9.3] - 2026-08-24
-
-### Added
-- Room sensors accept the standard `{entity, name}` row form, so you can label a sensor on the
-  card without renaming the entity in Home Assistant. Bare entity ids still work, and the two
-  can be mixed. The card editor gains a label field per selected sensor.
-
-### Fixed
-- Room temperatures are rounded for display. Sensors that report at high precision (Zigbee
-  ones commonly send three decimals) were shown unrounded, e.g. "82.832".
-
-## [0.9.2] - 2026-08-24
-
-### Changed
-- Removed third-party thermostat brand names from the project. They were only ever shorthand
-  for "a familiar thermostat UI", but this card is its own design and shouldn't imply
-  otherwise. Documentation, the card's description in the picker, the editor hints, and the
-  example entity ids are all brand-neutral now.
-- The default theme preset is renamed **Cobalt**. Installs that stored the old key keep the
-  identical look - the old value still resolves, pinned by a test - so nothing changes for
-  existing users.
-
-### Documentation
-- Install instructions now state plainly that this is a **dashboard card, not an
-  integration**, and that HACS must be given the category **Dashboard** (**Lovelace** or
-  **Plugin** on older HACS). Choosing Integration makes HACS look for a
-  `custom_components/` folder and reject the repository as "not compliant" - now called out
-  up front, in the numbered steps, and in troubleshooting.
-
-## [0.9.1] - 2026-08-24
-
-### Added
-- Configurable Eco/standby preset (`features.eco_preset`): choose which thermostat preset
-  makes the engine stand down for a zone (the default stays `eco`, the most common name), or set it
-  to `false` so Home Assistant owns standby behaviour entirely. The card's Eco chip follows
-  the same setting. Existing installs are untouched: with the default, the generated engine
-  is byte-identical to 0.9.0, so no automation update is planned on upgrade.
-- Tabbed settings screen: the gear panel is now Zones / Tuning / Objects / Setup / Look /
-  Danger instead of one long scroll, with Close pinned to the header.
-- Safer removal. The danger zone has its own tab, so the remove button is never rendered
-  beside Close, and deletion now takes three deliberate steps: an are-you-sure prompt, the
-  itemized red preview, and typing the install's entity prefix to enable the final button.
-  Arming is discarded whenever you switch tabs or close the panel.
-- New "Objects" tab listing every helper, schedule, sensor, and automation the card manages,
-  grouped by kind, each with a status: Managed, Missing, Customized (you hand-edited it, so
-  the card will never touch it), Unmanaged, or Not in config. Tap a row to open it in Home
-  Assistant.
-
-## [0.9.0] - 2026-08-24
+## [0.7.0] - 2026-08-25
 
 First public release. Feature-complete for day-to-day use and running against a real
-multi-zone installation, but not yet proven across many homes - hence 0.9 rather than 1.0.
-1.0.0 follows once real-world use confirms it.
+multi-zone installation, but not yet proven across many homes - hence 0.7 rather than 1.0.
+Expect rough edges and changes between releases until it has run in more than one house.
 
 ### Card
 - Multi-zone climate view for 1-4 zones: hero row with setpoint stepper, mode/fan/eco
@@ -112,6 +36,27 @@ multi-zone installation, but not yet proven across many homes - hence 0.9 rather
 - Everything is prefix-scoped and labeled `mzcs`; multiple card instances coexist.
 - "Remove everything" teardown: zones stand down first, then automations, sensors,
   schedules, and helpers are removed in dependency order with logged snapshots.
+
+### Also included
+- Settings are grouped into tabs - Zones, Tuning, Objects, Setup, Theme, Danger - with the
+  destructive actions isolated on their own tab behind a three-step confirmation that ends in
+  typing your entity prefix.
+- An Objects tab inventorying everything the card manages, each with a status, including
+  automations you have hand-edited, which it marks *Customized* and will never touch.
+- Stale room sensors are marked rather than presented as fact: a sensor that has not reported
+  for three hours is labelled "stale", greyed, and its deviation badge suppressed. Staleness is
+  measured from when the sensor last *reported*, against Home Assistant's own clock, so neither
+  a steady temperature nor a drifted tablet clock can fake it.
+- Room sensors accept the `{entity, name}` row form, so you can label a sensor on the card
+  without renaming the entity in Home Assistant. Bare entity ids still work and the two can mix.
+  Room temperatures are rounded for display, since Zigbee sensors commonly report three decimals.
+- The standby preset the engine stands down for is configurable (`features.eco_preset`), for
+  thermostats that call it something other than `eco`, and can be switched off entirely.
+- The card re-renders only when something it displays actually changed, rather than on every
+  Home Assistant state change; wall-mounted tablets idle noticeably cooler. Time-derived text
+  refreshes on its own heartbeat so nothing goes stale on a quiet instance.
+- Theme presets with a full custom builder, stored in Home Assistant so a change reaches every
+  device at once.
 
 ### Engine
 - Backend schedule engine automation applies season blocks per zone (single setpoint,

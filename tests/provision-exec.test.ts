@@ -212,11 +212,11 @@ const emptyPlan = (): Plan => ({ create: [], adopt: [], update: [], delete: [], 
 const create = (id: string, kind: PlanAction['kind'], spec: Record<string, unknown> = {}) =>
   ({ op: 'create', id, kind, spec }) as Extract<PlanAction, { op: 'create' }>;
 
-describe('configurable eco/standby preset (0.9.1 item A)', () => {
+describe('configurable eco/standby preset (initial release)', () => {
   const cond = (a: Record<string, unknown>): string =>
     (JSON.stringify(a).match(/is_state.repeat.item.enabled[^"]*/) ?? [''])[0]!;
 
-  it('default output is BYTE-IDENTICAL to the pre-0.9.1 generator (no drift on upgrade)', () => {
+  it('default output is BYTE-IDENTICAL to the original generator (no drift on upgrade)', () => {
     const def = engineAutomation('climate', ZONES, SEASONS);
     const explicit = engineAutomation('climate', ZONES, SEASONS, 'eco');
     expect(contentHash(def)).toBe(contentHash(explicit));
@@ -615,7 +615,7 @@ describe('config-entry sensor deletion (teardown / zone removal)', () => {
   });
 });
 
-describe('pristine reporting for the Objects tab (0.9.1 item D)', () => {
+describe('pristine reporting for the Objects tab (initial release)', () => {
   it('reports pristine=false for a hand-edited automation and true for a generated one', async () => {
     const generated = engineAutomation('climate', ZONES, SEASONS);
     const edited = { ...generated, description: String(generated.description) + ' my own note' };

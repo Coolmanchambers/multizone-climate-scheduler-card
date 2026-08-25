@@ -94,7 +94,7 @@ export function engineAutomation(
   ecoPreset: string | null = 'eco',
 ): Record<string, unknown> {
   // For the default 'eco' every string below is byte-identical to the
-  // pre-0.9.1 generator, so existing installs keep their signature and plan
+  // original generator, so existing installs keep their signature and plan
   // NO engine update. Only a changed setting regenerates.
   const preset = ecoPreset === null ? null : ecoPreset.replace(/['"\\]/g, '').trim() || 'eco';
   const standDown =

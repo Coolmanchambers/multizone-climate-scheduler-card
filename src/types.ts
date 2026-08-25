@@ -48,7 +48,7 @@ export interface MzcsCardConfig {
     fan_guard?: string;
     /**
      * Thermostat preset that makes the engine stand down for a zone.
-     * Omitted = 'eco' (the pre-0.9.1 behavior); a string names a
+     * Omitted = 'eco' (the original behavior); a string names a
      * different preset (e.g. 'away'); false disables the stand-down entirely
      * so Home Assistant owns standby behavior.
      */
