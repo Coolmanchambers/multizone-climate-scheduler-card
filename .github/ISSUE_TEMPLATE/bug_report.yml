@@ -1,0 +1,95 @@
+name: Bug report
+description: Something in the card behaves differently from what you expected.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Three quick checks below resolve most reports on their
+        own — they are the three things that have actually gone wrong so far.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before you file
+      options:
+        - label: >-
+            The schedule in my thermostat's own app is **off** for the affected zone.
+            Two schedulers on one thermostat is the most common cause of setpoints
+            appearing to change themselves.
+          required: true
+        - label: >-
+            I hard-refreshed the browser (or reset the Companion app's frontend cache)
+            after installing or updating the card.
+          required: true
+        - label: >-
+            I read [Important things to know](https://github.com/Coolmanchambers/multizone-climate-scheduler-card#important-things-to-know).
+          required: true
+
+  - type: input
+    id: card_version
+    attributes:
+      label: Card version
+      description: HACS shows this on the repository page, e.g. v0.7.0.
+      placeholder: v0.7.0
+    validations:
+      required: true
+
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant version
+      placeholder: "2026.8.2"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened
+      description: What you saw, and where — which zone, which screen, what time.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics report
+      description: >-
+        Gear icon → **Objects** tab → **Build report**, then paste it here. This is the
+        single most useful thing you can attach. **It leaves out your entity ids and the
+        names of your zones and rooms by default, and that redacted version is what we
+        want** — only tick the include-identifiers box if we ask. Skip this field if the
+        card will not load at all.
+      render: json
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Browser console errors
+      description: Copy as text rather than a screenshot, so it is searchable.
+      render: shell
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How is the card installed?
+      options:
+        - HACS
+        - Manually, copied into config/www
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: anything_else
+    attributes:
+      label: Anything else
+      description: Screenshots welcome. Blur anything you would rather not publish.

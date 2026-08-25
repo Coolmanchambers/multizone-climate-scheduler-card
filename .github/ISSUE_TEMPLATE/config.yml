@@ -1,0 +1,13 @@
+blank_issues_enabled: false
+contact_links:
+  - name: "HACS says: repository structure is not compliant"
+    url: https://github.com/Coolmanchambers/multizone-climate-scheduler-card#troubleshooting
+    about: >-
+      The repository was added under the wrong category. This is a Dashboard card, not an
+      Integration. The fix is in Troubleshooting — no issue needed.
+  - name: The card does not appear after installing
+    url: https://github.com/Coolmanchambers/multizone-climate-scheduler-card#troubleshooting
+    about: Almost always a browser cache. Troubleshooting has the steps for both the browser and the Companion app.
+  - name: Testing a beta, or rolling one back
+    url: https://github.com/Coolmanchambers/multizone-climate-scheduler-card/blob/main/docs/beta-testing.md
+    about: How to opt in to pre-releases, and how to get back off one quickly.

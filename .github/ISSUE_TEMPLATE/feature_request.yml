@@ -1,0 +1,35 @@
+name: Feature request
+description: Suggest something the card should do.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Some things are already planned rather than missing — the README's
+        [Not in this release](https://github.com/Coolmanchambers/multizone-climate-scheduler-card#not-in-this-release)
+        section lists them. Worth a look first.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: >-
+        The situation rather than the solution. Knowing what you are actually trying to
+        achieve often turns up a way to do it today.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like the card to do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: setup
+    attributes:
+      label: Your setup
+      description: >-
+        How many zones, what kind of thermostats, and which integration they come from.
+        Support for other brands and layouts is exactly what this card has least of.
