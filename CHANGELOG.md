@@ -7,6 +7,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 ## [Unreleased]
 
 ### Fixed
+- Unsaved schedule changes are visible with the drawer closed. Edits and granularity switches
+  survive collapsing the schedule drawer, but the Save and Discard buttons only existed inside it,
+  so the collapsed row looked exactly like a saved schedule while holding changes that were not
+  running. The row now carries an "unsaved" marker and says plainly that the changes are not in
+  effect until you save them.
 - A failed history query no longer looks like an empty one. When Home Assistant's recorder could
   not be read, the runtime drawer said "History accrues daily - past days appear as statistics
   build up", which told you to wait for data that was never going to arrive. The three runtime

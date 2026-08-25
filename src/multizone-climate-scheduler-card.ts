@@ -1788,17 +1788,30 @@ export class MzcsCard extends LitElement {
     const nextLine = next
       ? `Next · ${fmtTime(next.time)} ${next.name}${nextTemp != null ? ` → ${nextTemp}°` : ''}`
       : 'Schedule';
+    // Drafts outlive the drawer being collapsed, and a collapsed row that looks
+    // identical to a saved schedule is how someone comes back believing their
+    // week is what they see. Say so on the row itself, not only inside the body.
+    const unsaved = this._schedDrafts.size > 0;
     return html`
       <button
-        class="schedrow"
+        class="schedrow ${unsaved ? 'unsaved' : ''}"
         @click=${() => {
           this._schedOpen = !this._schedOpen;
           if (!this._schedWeek) void this._loadWeek(zone);
         }}
       >
-        <span>${nextLine} <span class="season">· ${seasonName}</span></span>
+        <span>
+          ${nextLine} <span class="season">· ${seasonName}</span>
+          ${unsaved ? html`<span class="unsavedchip">unsaved</span>` : nothing}
+        </span>
         <span aria-hidden="true">${this._schedOpen ? '▴' : '▾'}</span>
       </button>
+      ${!this._schedOpen && unsaved
+        ? html`<p class="unsavedhint">
+            This schedule has changes you have not saved. They are not running - open the
+            schedule to save or discard them.
+          </p>`
+        : nothing}
       ${this._schedOpen ? this._renderScheduleBody(zone) : nothing}
     `;
   }
@@ -2937,6 +2950,24 @@ export class MzcsCard extends LitElement {
     .objstat.del {
       background: var(--mzcs-bad);
       color: #fff;
+    }
+    .schedrow.unsaved {
+      border-left: 2px solid var(--mzcs-warn);
+    }
+    .unsavedchip {
+      font-size: 10px;
+      border-radius: 999px;
+      padding: 1px 6px;
+      margin-left: 6px;
+      background: var(--mzcs-warn);
+      color: #16202a;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .unsavedhint {
+      font-size: 11px;
+      margin: 4px 2px 0;
+      color: var(--mzcs-warn);
     }
     .rt-fail {
       font-size: 11px;
