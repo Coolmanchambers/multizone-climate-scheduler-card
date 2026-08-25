@@ -4,7 +4,6 @@
 [![Release](https://img.shields.io/github/v/release/Coolmanchambers/multizone-climate-scheduler-card?display_name=tag)](https://github.com/Coolmanchambers/multizone-climate-scheduler-card/releases)
 [![Status: Work in progress](https://img.shields.io/badge/status-work%20in%20progress-orange.svg)](#-project-status-work-in-progress)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-FF813F.svg?logo=buymeacoffee&logoColor=white)](https://buymeacoffee.com/Coolmanchambers)
 
 **Run your whole house's heating and cooling from one Home Assistant card — with real
 schedules that live in Home Assistant, not in your thermostat's cloud app.**
@@ -25,6 +24,19 @@ schedules that live in Home Assistant, not in your thermostat's cloud app.**
 
 <p align="center">
   <img src="docs/hero.png" alt="The card showing zone tabs, the current setpoint, room temperature deviations, the next scheduled block, and today's runtime" width="460">
+</p>
+
+---
+
+<p align="center">
+  I build this in my free time. If it's useful to you, any little bit helps me keep supporting the
+  project and working through feature and bug requests.
+</p>
+
+<p align="center">
+  <a href="https://buymeacoffee.com/Coolmanchambers">
+    <img src="https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=&slug=Coolmanchambers&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" alt="Buy me a coffee" height="46">
+  </a>
 </p>
 
 ---
@@ -609,11 +621,9 @@ If you'd like to test changes before they reach everyone, see the
 
 ## Support
 
-This is a side project, and everything in it runs in my own house before it ships anywhere else.
-If it saved you an evening, a coffee is welcome — entirely optional, and honestly a good bug
-report is worth more.
-
-[Buy me a coffee](https://buymeacoffee.com/Coolmanchambers)
+Everything here runs in my own house before it ships anywhere else. If it saved you an evening,
+[a coffee](https://buymeacoffee.com/Coolmanchambers) is welcome — entirely optional, and a good
+bug report is worth just as much.
 
 ## License
 
