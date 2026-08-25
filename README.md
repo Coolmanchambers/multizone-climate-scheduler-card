@@ -120,8 +120,12 @@ objects, all tagged with the label `mzcs` so you can audit them at any time unde
 | `input_text.<prefix>_<zone>_applied_block` | Lets manual changes hold until the next block |
 
 **Global:** an active-season selector, tuning numbers (deviation thresholds, alert margin,
-learning window, degree-day base), a theme store, a next-block sensor, and — if you set a
-weather entity — an outdoor temperature sensor plus its 24-hour mean.
+learning window, degree-day base), a theme store, a next-block sensor, and an outdoor
+temperature sensor plus its 24-hour mean.
+
+Four more helpers are created and reserved for features that are not shipped yet — a season
+mode selector, season confirm/dwell day counts, and a runtime alert day count. They are inert;
+nothing reads them today.
 
 **Automations:** the schedule engine, one fan-timer automation per zone, nightly runtime
 learning, the runtime anomaly alert, and an engine watchdog.
@@ -140,7 +144,9 @@ re-asserts the current block if a transition was ever missed.
   `schedule` helpers with custom block data).
 - One to four `climate` entities.
 - **Optional:** a `weather` entity — enables outdoor-temperature tracking, runtime learning,
-  and the anomaly alert. Everything else works without it.
+  and the anomaly alert. Everything else works without it, but see the note on the outdoor
+  sensors under [Troubleshooting](#troubleshooting): without a weather entity the preview keeps
+  listing two of them as pending, by design.
 - **Optional:** temperature sensors per room, for the deviation chips.
 
 ---
@@ -437,13 +443,15 @@ zones:
       - entity: sensor.zb_landing_temp_sensor      # or label it yourself
         name: Landing
 seasons:
-  - name: Summer
+  - key: summer                       # REQUIRED - fixed id used in entity names
+    name: Summer                      # display name; rename freely, key stays
     default_mode: cool                # cool | heat | heat_cool | off
-  - name: Winter
+  - key: winter
+    name: Winter
     default_mode: heat_cool
 weather_entity: weather.home          # optional, enables runtime learning
 features:
-  fan_timer: [15, 30, 60]             # minutes; omit to hide fan chips
+  fan_timer: [15, 30, 60]             # minutes; use [] to hide the fan chips
   anomaly_alerts: true
   fan_guard: input_boolean.help_fan   # optional: fan-off automations stand
                                       # down while this helper is on
@@ -457,9 +465,11 @@ features:
 | `zones[].name` | string | — | Display name; also determines the zone's entity ids. |
 | `zones[].entity` | string | — | Any `climate.*` entity. |
 | `zones[].room_sensors` | list | — | Temperature sensors shown as deviation chips. Each item is either an entity id or `{entity, name}` when you want a different label than the entity's friendly name. |
+| `seasons[].key` | string | — | **Required.** Fixed id used in this season's entity names. Choose it once and leave it — changing it renames every object for that season. |
+| `seasons[].name` | string | — | Display name. Safe to rename at any time; the `key` is what entity ids use. |
 | `seasons[].default_mode` | enum | — | `cool`, `heat`, `heat_cool`, or `off`. |
 | `weather_entity` | string | — | Enables outdoor tracking, learning, and alerts. |
-| `features.fan_timer` | list | `[15,30,60]` | Fan timer presets, in minutes. |
+| `features.fan_timer` | list | `[15,30,60]` | Fan timer presets, in minutes. Omitting the key keeps the defaults; set it to `[]` to hide the chips and skip the fan timers and their automations. |
 | `features.anomaly_alerts` | bool | `true` | Creates the evening runtime alert automation. |
 | `features.fan_guard` | string | — | A helper that suppresses fan-off while it is on. |
 | `features.eco_preset` | string \| `false` | `eco` | Standby preset the engine stands down for; `false` disables the gate. |
@@ -525,15 +535,25 @@ fresh generated copy.
 **Re-running Apply keeps showing the same edit.** Open an issue and attach a diagnostics report — a
 healthy install settles to "Unchanged" for everything after one apply.
 
+**The preview always shows 2 pending creates, and I have no weather entity.** That is expected, not
+a bug. The two outdoor sensors are always part of the plan so that an existing one is never queued
+for deletion, but they are only actually created when a weather entity is configured. With no
+weather entity they stay pending indefinitely and nothing else is affected. Set a weather entity,
+or ignore those two.
+
 **Reporting a bug — send a diagnostics report.** Gear icon → **Objects** tab → **Build report**.
 It gathers the card version, your Home Assistant version, the shape of your configuration, the
 result of your last preview, and the status of everything the card manages.
 
 > [!NOTE]
-> **Your entity ids and the names you gave your zones and rooms are left out by default.** The
-> report is still useful without them. There is a tick-box to include them if a maintainer asks,
-> and the report is shown to you in full before you copy it, so you always see what you are
-> sharing.
+> **Your entity ids and the names you gave your zones and rooms are left out by default.** So are
+> your season names, your entity prefix, and the value of any free-text option. What remains is
+> structure: how many zones and seasons, which options are set, your per-zone scheduling switch
+> states, the result of your last preview, and your browser and platform (e.g. "Chrome on
+> Android") — not your device model or OS build.
+>
+> There is a tick-box to include the identifiers if a maintainer asks, and the report is shown to
+> you in full before you copy it, so you always see exactly what you are sharing.
 
 ---
 

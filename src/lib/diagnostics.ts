@@ -34,14 +34,62 @@ export interface DiagnosticsInput {
   planKind?: 'setup' | 'teardown';
   /** Statuses from the Objects tab, or null when it has not been loaded. */
   objectStatuses?: string[] | null;
-  /** Per-zone scheduling switch states, keyed by zone name. */
-  zoneEnabled?: Array<{ zone: string; state: string }>;
+  /**
+   * Per-zone scheduling switch state. `index` is the zone's position in
+   * `config.zones`, so redacted labels line up with the `zones` block; `state`
+   * is `not provisioned` when a zone has no enable helper at all - a CONTRACT
+   * 7c violation worth reporting rather than silently omitting.
+   */
+  zoneEnabled?: Array<{ zone: string; state: string; index?: number }>;
   activeSeason?: string;
   /** Include real entity ids and names. Default false. */
   identifiers?: boolean;
 }
 
 const DEFAULT_PREFIX = 'climate';
+
+/** Mirrors `_provisionInput` in the card: a config with no `seasons` key still provisions these. */
+const DEFAULT_SEASONS = [
+  { key: 'summer', name: 'Summer', default_mode: 'cool' },
+  { key: 'winter', name: 'Winter', default_mode: 'heat_cool' },
+] as const;
+
+const BLOCK_MODES = ['cool', 'heat', 'heat_cool', 'off'];
+const SWITCH_MODES = ['manual', 'semi', 'full'];
+
+/**
+ * Config reaches this function straight from Lovelace YAML, which nothing
+ * validates at runtime. `?? default` only catches `undefined`, so any field
+ * echoed verbatim is a free-text channel out of a "redacted" report (QA P2-P4).
+ */
+function clampTo(value: unknown, legal: string[]): string {
+  return typeof value === 'string' && legal.includes(value) ? value : '<invalid>';
+}
+
+/**
+ * Browser family and platform answer "is this a rendering bug on one browser",
+ * which is why the field exists. The full string additionally carries OS build,
+ * app build and device model - a device fingerprint, in a report designed to be
+ * published (QA P5).
+ */
+export function coarsenUserAgent(ua?: string): string {
+  if (!ua) return 'unknown';
+  const has = (re: RegExp) => re.test(ua);
+  const browser = has(/\bEdg\//) ? 'Edge'
+    : has(/\bOPR\//) ? 'Opera'
+    : has(/\bFirefox\//) ? 'Firefox'
+    : has(/\bChrome\//) ? 'Chrome'
+    : has(/\bSafari\//) ? 'Safari'
+    : 'other browser';
+  const platform = has(/Android/) ? 'Android'
+    : has(/iPhone|iPad|iPod/) ? 'iOS'
+    : has(/Windows/) ? 'Windows'
+    : has(/Macintosh|Mac OS/) ? 'macOS'
+    : has(/Linux/) ? 'Linux'
+    : 'unknown platform';
+  const app = has(/HomeAssistant/) ? ' (HA companion app)' : '';
+  return browser + ' on ' + platform + app;
+}
 
 function countBy(values: string[]): Record<string, number> {
   const out: Record<string, number> = {};
@@ -59,11 +107,30 @@ function describePrefix(prefix: string, identifiers: boolean): string {
   return prefix === DEFAULT_PREFIX ? DEFAULT_PREFIX : '<custom>';
 }
 
+function describeActiveSeason(value: string | undefined, ids: boolean): string {
+  if (!value) return 'not read';
+  // The literal states input_select.<prefix>_season holds when the engine has
+  // no season to apply; mapping them to "set" reported a broken selector as
+  // healthy (QA D4).
+  if (value === 'unknown' || value === 'unavailable' || value === 'none') return value;
+  return ids ? value : 'set';
+}
+
+function describeEcoPreset(features: { eco_preset?: string | false }, ids: boolean): string {
+  if (features.eco_preset === false) return 'disabled';
+  const resolved = resolveEcoPreset(features) ?? 'eco';
+  if (ids) return resolved;
+  return resolved === 'eco' ? 'eco (default)' : '<custom>';
+}
+
 export function buildDiagnostics(input: DiagnosticsInput): string {
   const ids = input.identifiers === true;
   const cfg = input.config;
-  const prefix = (cfg.prefix ?? DEFAULT_PREFIX).trim() || DEFAULT_PREFIX;
-  const seasons = cfg.seasons ?? [];
+  // Both are hand-editable YAML; a non-string prefix or a season with no name
+  // used to throw, and the throw happens inside a click handler with no catch,
+  // so "Build report" silently did nothing (QA D5).
+  const prefix = (typeof cfg.prefix === 'string' && cfg.prefix.trim()) || DEFAULT_PREFIX;
+  const seasons = cfg.seasons?.length ? cfg.seasons : DEFAULT_SEASONS;
   const features = cfg.features ?? {};
 
   const zones = (cfg.zones ?? []).map((z, i) => {
@@ -80,8 +147,12 @@ export function buildDiagnostics(input: DiagnosticsInput): string {
     };
   });
 
+  // Labelled from the SAME index space as `zones` above. The caller used to send
+  // a filtered list which this then re-numbered, so on a half-provisioned
+  // install - exactly what a report is filed about - a maintainer read the wrong
+  // zone's kill-switch state (QA D1).
   const enabled = (input.zoneEnabled ?? []).map((z, i) => ({
-    zone: ids ? z.zone : `Zone ${i + 1}`,
+    zone: ids ? z.zone : `Zone ${(z.index ?? i) + 1}`,
     scheduling: z.state,
   }));
 
@@ -89,27 +160,36 @@ export function buildDiagnostics(input: DiagnosticsInput): string {
     card_version: input.cardVersion,
     ha_version: input.haVersion ?? 'unknown',
     identifiers_included: ids,
-    user_agent: input.userAgent ?? 'unknown',
+    user_agent: coarsenUserAgent(input.userAgent),
 
     config: {
       prefix: describePrefix(prefix, ids),
       zone_count: zones.length,
       zones,
-      seasons: seasons.map((s, i) => ({
-        name: ids ? s.name : `Season ${i + 1}`,
-        // The key is frozen at provisioning time and drives entity ids, so a
-        // key/name mismatch is a real class of bug worth surfacing either way.
-        key_matches_name_slug: s.key === s.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_'),
-        default_mode: s.default_mode,
-      })),
-      active_season: ids ? (input.activeSeason ?? 'unknown') : input.activeSeason ? 'set' : 'unknown',
+      seasons_defaulted: !cfg.seasons?.length,
+      seasons: seasons.map((s, i) => {
+        const name = typeof s.name === 'string' ? s.name : '';
+        return {
+          name: ids ? name : `Season ${i + 1}`,
+          // The key is frozen at provisioning time and drives entity ids, so a
+          // key/name mismatch is a real class of bug worth surfacing either way.
+          key_matches_name_slug: s.key === name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_'),
+          default_mode: clampTo(s.default_mode, BLOCK_MODES),
+        };
+      }),
+      active_season: describeActiveSeason(input.activeSeason, ids),
       weather_entity: ids ? (cfg.weather_entity ?? null) : cfg.weather_entity ? 'set' : null,
-      season_switch: cfg.season_switch ?? 'manual',
+      season_switch: cfg.season_switch === undefined ? 'manual' : clampTo(cfg.season_switch, SWITCH_MODES),
       features: {
-        fan_timer: features.fan_timer ?? null,
+        fan_timer: Array.isArray(features.fan_timer)
+          ? features.fan_timer.filter((n) => typeof n === 'number' && Number.isFinite(n))
+          : null,
         anomaly_alerts: features.anomaly_alerts !== false,
         fan_guard: ids ? (features.fan_guard ?? null) : features.fan_guard ? 'set' : null,
-        eco_preset: resolveEcoPreset(features),
+        // Free text in the card editor, so it can hold a household name. The
+        // shape of the answer - default, disabled, or customised - is what a
+        // maintainer diagnoses with (QA P1).
+        eco_preset: describeEcoPreset(features, ids),
       },
     },
 
@@ -126,6 +206,13 @@ export function buildDiagnostics(input: DiagnosticsInput): string {
           // A healthy install settles here; anything else is the first thing to
           // look at, so state it rather than making a reader do the arithmetic.
           settled: input.plan.create + input.plan.adopt + input.plan.update + input.plan.delete === 0,
+          // Without a weather entity the two outdoor sensors are always in the
+          // plan but never created, so such an install never reaches settled.
+          // Saying so here stops the artifact that exists to triage a report
+          // pointing at a non-bug (QA X2).
+          ...(cfg.weather_entity
+            ? {}
+            : { note: 'no weather entity: 2 outdoor sensors stay pending by design' }),
         }
       : 'not run',
 

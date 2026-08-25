@@ -66,7 +66,9 @@ describe('diagnostics redaction (the default)', () => {
     expect(d.config.zones[0].room_sensor_count).toBe(2);
     expect(d.config.zones[0].room_sensors_labelled).toBe(1);
     expect(d.config.seasons.map((s: any) => s.default_mode)).toEqual(['cool', 'heat_cool']);
-    expect(d.config.features.eco_preset).toBe('away');
+    // QA P1: eco_preset is free text in the editor, so the redacted form reports
+    // its SHAPE, never the value the user typed.
+    expect(d.config.features.eco_preset).toBe('<custom>');
     expect(d.config.features.fan_timer).toEqual([15, 30]);
   });
 
@@ -161,7 +163,10 @@ describe('diagnostics degrades rather than throwing', () => {
     };
     const d = parse(buildDiagnostics({ cardVersion: '0.7.0', config: cfg }));
     expect(d.config.prefix).toBe('climate');
-    expect(d.config.seasons).toEqual([]);
+    // QA D3: a seasonless config still provisions Summer and Winter, so
+    // reporting zero seasons pointed diagnosis at the wrong thing.
+    expect(d.config.seasons.map((x: any) => x.default_mode)).toEqual(['cool', 'heat_cool']);
+    expect(d.seasons_defaulted ?? d.config.seasons_defaulted).toBe(true);
     expect(d.config.zones[0].room_sensor_count).toBe(0);
     expect(d.ha_version).toBe('unknown');
     expect(d.scheduling_switches).toBe('not read');
@@ -170,5 +175,94 @@ describe('diagnostics degrades rather than throwing', () => {
   it('produces valid JSON in both modes', () => {
     expect(() => parse(buildDiagnostics(BASE))).not.toThrow();
     expect(() => parse(buildDiagnostics({ ...BASE, identifiers: true }))).not.toThrow();
+  });
+});
+
+describe('QA remediation: redaction holes closed', () => {
+  it('never emits a user-typed standby preset in redacted mode (P1)', () => {
+    const cfg = { ...CONFIG, features: { eco_preset: 'away_for_a_person' } };
+    const text = buildDiagnostics({ ...BASE, config: cfg });
+    expect(text).not.toContain('away_for_a_person');
+    expect(parse(text).config.features.eco_preset).toBe('<custom>');
+  });
+
+  it('still distinguishes default from disabled from customised (P1)', () => {
+    const shape = (eco: any) =>
+      parse(buildDiagnostics({ ...BASE, config: { ...CONFIG, features: { eco_preset: eco } } }))
+        .config.features.eco_preset;
+    expect(shape(undefined)).toBe('eco (default)');
+    expect(shape(false)).toBe('disabled');
+    expect(shape('away')).toBe('<custom>');
+  });
+
+  it('clamps season_switch to its legal values (P2)', () => {
+    const cfg = { ...CONFIG, season_switch: 'a_person_mode' } as any;
+    const text = buildDiagnostics({ ...BASE, config: cfg });
+    expect(text).not.toContain('a_person_mode');
+    expect(parse(text).config.season_switch).toBe('<invalid>');
+  });
+
+  it('clamps a season default_mode to its legal values (P3)', () => {
+    const cfg = {
+      ...CONFIG,
+      seasons: [{ key: 'summer', name: 'Summer', default_mode: 'cool_for_sensor.a_person' }],
+    } as any;
+    const text = buildDiagnostics({ ...BASE, config: cfg });
+    expect(text).not.toContain('a_person');
+    expect(parse(text).config.seasons[0].default_mode).toBe('<invalid>');
+  });
+
+  it('drops non-numeric fan_timer entries (P4)', () => {
+    const cfg = { ...CONFIG, features: { fan_timer: [15, 'a_person_30'] } } as any;
+    const text = buildDiagnostics({ ...BASE, config: cfg });
+    expect(text).not.toContain('a_person_30');
+    expect(parse(text).config.features.fan_timer).toEqual([15]);
+  });
+
+  it('coarsens the user agent to browser and platform (P5)', () => {
+    const ua =
+      'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) ' +
+      'Chrome/120.0 Mobile Safari/537.36 HomeAssistant/2026.8.1-full';
+    const d = parse(buildDiagnostics({ ...BASE, userAgent: ua }));
+    expect(d.user_agent).toBe('Chrome on Android (HA companion app)');
+    expect(d.user_agent).not.toContain('SM-S918B');
+  });
+});
+
+describe('QA remediation: correctness', () => {
+  it('keeps redacted switch labels aligned with the zones block (D1)', () => {
+    // Zone 1 has no enable helper - the half-provisioned case a report is for.
+    const d = parse(
+      buildDiagnostics({
+        ...BASE,
+        zoneEnabled: [
+          { zone: "Owner's Office", index: 0, state: 'not provisioned' },
+          { zone: 'Upstairs', index: 1, state: 'on' },
+        ],
+      }),
+    );
+    expect(d.scheduling_switches).toEqual([
+      { zone: 'Zone 1', scheduling: 'not provisioned' },
+      { zone: 'Zone 2', scheduling: 'on' },
+    ]);
+  });
+
+  it('reports a missing season selector as broken, not as healthy (D4)', () => {
+    for (const state of ['unknown', 'unavailable']) {
+      expect(parse(buildDiagnostics({ ...BASE, activeSeason: state })).config.active_season).toBe(state);
+    }
+    expect(parse(buildDiagnostics({ ...BASE, activeSeason: 'Summer' })).config.active_season).toBe('set');
+    expect(parse(buildDiagnostics({ ...BASE, activeSeason: undefined })).config.active_season).toBe('not read');
+  });
+
+  it('does not throw on the malformed configs it exists to diagnose (D5)', () => {
+    const bad: any = {
+      type: 'custom:multizone-climate-scheduler-card',
+      prefix: 7,
+      zones: [{ name: 'Only', entity: 'climate.only' }],
+      seasons: [{ key: 'summer', default_mode: 'cool' }],
+    };
+    expect(() => buildDiagnostics({ cardVersion: '0.7.0', config: bad })).not.toThrow();
+    expect(parse(buildDiagnostics({ cardVersion: '0.7.0', config: bad })).config.prefix).toBe('climate');
   });
 });

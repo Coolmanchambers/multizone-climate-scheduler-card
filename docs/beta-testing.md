@@ -63,8 +63,8 @@ Open your browser's developer console and reload the dashboard. The card prints 
  Multi-Zone Climate Scheduler Card   v0.7.1-beta.1
 ```
 
-That banner is the running bundle, and it is the only version number that matters when
-reporting a problem. (The card does not yet show its version in the UI — that is planned.)
+That banner is the running bundle. The card also reports its version in the diagnostics report
+(gear icon → **Objects** tab → **Build report**), which is the easier route.
 
 ---
 
@@ -114,7 +114,9 @@ Open an issue at
 [github.com/Coolmanchambers/multizone-climate-scheduler-card/issues](https://github.com/Coolmanchambers/multizone-climate-scheduler-card/issues)
 and include:
 
-- **The card version** from the console banner, and your **Home Assistant version**.
+- **A diagnostics report** — gear icon → **Objects** tab → **Build report**. It carries the card
+  and Home Assistant versions and the shape of your setup, with your entity ids and room names
+  left out by default.
 - **What you expected and what happened.**
 - **For anything to do with provisioning** — objects created, edited or deleted, or an apply that
   won't settle — the contents of the dry-run preview (gear icon → **Setup** tab → **Run dry-run

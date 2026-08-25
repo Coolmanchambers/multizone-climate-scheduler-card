@@ -24,6 +24,7 @@ import {
   updateScheduleWeek,
   applyScheduleNow,
   errorText,
+  type RecorderResult,
   setNumberHelper,
   selectOption,
   setZoneEnabled,
@@ -84,6 +85,7 @@ import type { GlobalClass, ZoneClass } from './lib/naming';
 // consecutive-days alert and season recommender - dead controls would imply
 // behavior that does not exist yet (scan S13-conformance 1/2).
 type SetupTab = 'zones' | 'tuning' | 'objects' | 'setup' | 'appearance' | 'danger';
+type DayDetail = { segs: Segment[]; bubs: SetpointChange[]; start: number; end: number };
 type ObjectStatus = 'managed' | 'missing' | 'customized' | 'unmanaged' | 'extra';
 interface ObjectRow {
   id: string;
@@ -118,6 +120,7 @@ const MANAGE_TUNABLES: Array<{ cls: GlobalClass; label: string }> = [
 ];
 import {
   detectSets,
+  draftsChangeWeek,
   rangesToDayBlocks,
   nextBlockAfter,
   replaceSetBlocks,
@@ -193,18 +196,22 @@ export class MzcsCard extends LitElement {
   /** pending day-granularity change (draft; applied on Save) */
   @state() private _schedGran?: DayGranularity;
   @state() private _rtOpen = false;
-  @state() private _rtDaily?: DailyRuntime[];
-  /** Set when a recorder read failed, so "no data" is never shown for a broken query. */
-  @state() private _rtError?: string;
-  @state() private _rt30Error?: string;
-  @state() private _rtDayError?: string;
+  /**
+   * Runtime reads are stored as ONE discriminated value each, not as a data
+   * field beside an error field. The paired form let three code paths clear one
+   * and forget the other, so a stale failure hid good data and one zone's error
+   * was reported against another's (QA R1-R4). With a single field the question
+   * cannot be got wrong.
+   */
+  @state() private _rt7?: RecorderResult<DailyRuntime>;
+  @state() private _rt30?: RecorderResult<DailyRuntime>;
+  @state() private _rtDay?: { ok: true; detail: DayDetail } | { ok: false; error: string };
   private _rtLoadedFor?: string;
   @state() private _rtDayOpen: number | null = null;
-  @state() private _rtDayDetail?: { segs: Segment[]; bubs: SetpointChange[]; start: number; end: number };
   @state() private _rtDayLoading = false;
-  private _rtDayCache = new Map<number, { segs: Segment[]; bubs: SetpointChange[]; start: number; end: number }>();
+  private _rtDayCache = new Map<number, DayDetail>();
   @state() private _rtRange: 7 | 30 = 7;
-  @state() private _rt30?: DailyRuntime[];
+  private _rt30LoadedFor?: string;
   @state() private _dryRun?: Plan;
   /** Which flow produced _dryRun. A teardown plan must NEVER render on the
    * Setup tab (it would show as an innocuous-looking all-delete preview), and
@@ -224,8 +231,10 @@ export class MzcsCard extends LitElement {
   @state() private _tdAsk = false;
   @state() private _tdConfirm = '';
   @state() private _diagText?: string;
+  /** Whether the text currently on screen contains identifiers - not what the box says (QA D7). */
+  @state() private _diagTextHasIds = false;
   @state() private _diagIds = false;
-  @state() private _diagCopied = false;
+  @state() private _diagStatus?: 'copied' | 'selected';
 
   @state() private _objects?: ObjectRow[];
   @state() private _objectsLoading = false;
@@ -263,6 +272,10 @@ export class MzcsCard extends LitElement {
     // A config change invalidates any previewed plan (QA-R C1-1): Apply must
     // never execute a plan computed for a different config.
     this._dryRun = undefined;
+    // A report describes a configuration; keeping it on screen after an edit
+    // leaves a copyable artifact about a config that no longer exists (QA D6).
+    this._diagText = undefined;
+    this._diagTextHasIds = false;
     this._dryRunKind = undefined;
     this._execConfirm = false;
     this._execResult = undefined;
@@ -773,10 +786,17 @@ export class MzcsCard extends LitElement {
     const hass = this.hass;
     const cfg = this._config;
     if (!hass || !cfg) return;
-    const zoneEnabled = (cfg.zones ?? [])
-      .map((z) => ({ zone: z.name, id: zoneEntityId('zone_enabled', this._prefix, slugify(z.name)) }))
-      .filter((z) => entityExists(hass, z.id))
-      .map((z) => ({ zone: z.zone, state: hass.states[z.id]?.state ?? 'unknown' }));
+    // Every zone, never filtered: a zone with no enable helper is a CONTRACT 7c
+    // violation and the most useful thing in the report, and dropping it also
+    // shifted every later zone's redacted label onto the wrong zone (QA D1/D2).
+    const zoneEnabled = (cfg.zones ?? []).map((z, index) => {
+      const id = zoneEntityId('zone_enabled', this._prefix, slugify(z.name));
+      return {
+        zone: z.name,
+        index,
+        state: entityExists(hass, id) ? (hass.states[id]?.state ?? 'unknown') : 'not provisioned',
+      };
+    });
     const plan = this._dryRun;
     this._diagText = buildDiagnostics({
       cardVersion: CARD_VERSION,
@@ -798,7 +818,8 @@ export class MzcsCard extends LitElement {
       activeSeason: hass.states[globalEntityId('season_select', this._prefix)]?.state,
       identifiers: this._diagIds,
     });
-    this._diagCopied = false;
+    this._diagTextHasIds = this._diagIds;
+    this._diagStatus = undefined;
   }
 
   /**
@@ -811,15 +832,22 @@ export class MzcsCard extends LitElement {
     try {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(text);
-        this._diagCopied = true;
+        this._diagStatus = 'copied';
         return;
       }
     } catch {
       /* fall through to selection */
     }
+    // Home Assistant is commonly served over plain http on a LAN, where
+    // `navigator.clipboard` does not exist. Selecting the text is the fallback,
+    // but on iOS Safari - the wall tablet, i.e. the case this is for -
+    // `select()` on a readonly textarea raises no selection at all, and saying
+    // nothing left the button indistinguishable from broken (QA C1).
+    ta.readOnly = false;
     ta.focus();
-    ta.select();
-    this._diagCopied = false;
+    ta.setSelectionRange(0, text.length);
+    ta.readOnly = true;
+    this._diagStatus = 'selected';
   }
 
   private _renderObjectsTab() {
@@ -906,9 +934,16 @@ export class MzcsCard extends LitElement {
                 if (ta) void this._copyDiag(ta);
               }}
             >
-              ${this._diagCopied ? 'Copied' : 'Copy'}
+              ${this._diagStatus === 'copied' ? 'Copied' : 'Copy'}
             </button>
-            ${this._diagIds
+            ${this._diagStatus === 'selected'
+              ? html`<p class="setup-sub">
+                  This browser will not let a page write to the clipboard, which is normal when
+                  Home Assistant is served over plain http. The report is selected above - copy it
+                  yourself.
+                </p>`
+              : nothing}
+            ${this._diagTextHasIds
               ? html`<p class="setup-err">
                   This report now contains your entity ids and the names of your zones and rooms.
                 </p>`
@@ -1302,10 +1337,10 @@ export class MzcsCard extends LitElement {
                     // Runtime caches are zone-specific - never serve another
                     // zone's 30-day chart or day details (QA-R C2-6).
                     this._rt30 = undefined;
+                    this._rt30LoadedFor = undefined;
                     this._rtDayCache.clear();
                     this._rtDayOpen = null;
-                    this._rtDayDetail = undefined;
-                    this._rtDayError = undefined;
+                    this._rtDay = undefined;
                   }}
                 >
                   ${z.name}
@@ -1373,18 +1408,18 @@ export class MzcsCard extends LitElement {
     const todayLabel = Number.isFinite(todayHours) ? formatHoursQuarter(todayHours) : '–';
     if (this._rtLoadedFor !== todayId) {
       this._rtLoadedFor = todayId;
-      this._rtDaily = undefined;
-      this._rtError = undefined;
+      this._rt7 = undefined;
       queueMicrotask(() =>
         void fetchDailyRuntime(hass, todayId, 7).then((d) => {
-          if (d.ok) this._rtDaily = d.rows;
-          else this._rtError = d.error;
+          // The user may have switched zone while this was in flight; without
+          // this guard the old zone's result lands on the new zone's panel.
+          if (this._rtLoadedFor === todayId) this._rt7 = d;
         }),
       );
     }
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const days = (this._rtDaily ?? [])
+    const days = (this._rt7?.ok ? this._rt7.rows : [])
       .filter((d) => d.day < today.getTime())
       .sort((a, b) => b.day - a.day);
     const todayStart = today.getTime();
@@ -1423,19 +1458,13 @@ export class MzcsCard extends LitElement {
                   class=${this._rtRange === 30 ? 'chip mode-on' : 'chip'}
                   @click=${() => {
                     this._rtRange = 30;
-                    if (!this._rt30) {
-                      this._rt30Error = undefined;
-                      void fetchDailyRuntime(hass, todayId, 30).then((d) => {
-                        if (d.ok) this._rt30 = d.rows;
-                        else this._rt30Error = d.error;
-                      });
-                    }
+                    this._load30(hass, todayId);
                   }}
                 >
                   30 days
                 </button>
               </div>
-              ${this._rtRange === 30 ? this._render30() : nothing}
+              ${this._rtRange === 30 ? (this._load30(hass, todayId), this._render30()) : nothing}
               ${this._rtRange === 7
                 ? html`${this._renderPill(zone, 'Today', Number.isFinite(todayHours) ? todayHours : 0, todayStart, true)}`
                 : nothing}
@@ -1453,10 +1482,10 @@ export class MzcsCard extends LitElement {
                         false,
                       ),
                     )}
-                    ${this._rtError
+                    ${this._rt7 && !this._rt7.ok
                       ? html`<p class="rt-fail">
                           Could not read history from Home Assistant, so this is not "no
-                          runtime yet" - it is unknown. ${this._rtError}
+                          runtime yet" - it is unknown. ${this._rt7.error}
                         </p>`
                       : days.length === 0
                         ? html`<p class="muted" style="font-size:11px;margin:6px 0;">
@@ -1474,15 +1503,30 @@ export class MzcsCard extends LitElement {
     `;
   }
 
+  /**
+   * Idempotent per runtime sensor. The 30-day range persists across a zone
+   * switch, so this has to be reachable from render as well as from the chip -
+   * otherwise the new zone shows a spinner nothing ever resolves (QA R3).
+   */
+  private _load30(hass: HassLike, todayId: string): void {
+    if (this._rt30LoadedFor === todayId) return;
+    this._rt30LoadedFor = todayId;
+    this._rt30 = undefined;
+    void fetchDailyRuntime(hass, todayId, 30).then((d) => {
+      if (this._rt30LoadedFor === todayId) this._rt30 = d;
+    });
+  }
+
   private _render30() {
-    const rows = this._rt30;
-    if (this._rt30Error) {
+    const res = this._rt30;
+    if (res && !res.ok) {
       return html`<p class="rt-fail">
         Could not read long-term statistics, so the 30-day view is unknown rather than
-        empty. ${this._rt30Error}
+        empty. ${res.error}
       </p>`;
     }
-    if (!rows) return html`<p class="muted" style="font-size:11px;">Loading…</p>`;
+    if (!res) return html`<p class="muted" style="font-size:11px;">Loading…</p>`;
+    const rows = res.rows;
     if (rows.length === 0) {
       return html`<p class="muted" style="font-size:11px;">
         Long-term statistics build daily - the 30-day view fills in as days accumulate.
@@ -1522,13 +1566,12 @@ export class MzcsCard extends LitElement {
     this._rtDayOpen = dayStart;
     const cached = this._rtDayCache.get(dayStart);
     if (cached) {
-      this._rtDayDetail = cached;
+      this._rtDay = { ok: true, detail: cached };
       return;
     }
     if (!this.hass) return;
     this._rtDayLoading = true;
-    this._rtDayDetail = undefined;
-    this._rtDayError = undefined;
+    this._rtDay = undefined;
     try {
       const slug = slugify(zone.name);
       const runningId = zoneEntityId('running_sensor', this._prefix, slug);
@@ -1541,10 +1584,12 @@ export class MzcsCard extends LitElement {
       // drawn as a day with no runs. Setpoint bubbles are decoration on top, so
       // losing those alone still leaves a truthful timeline.
       if (!runRes.ok) {
-        this._rtDayError = runRes.error;
+        // Same in-flight guard as the success path below: a slow failure for a
+        // day the user has already navigated away from must not overwrite the
+        // day they are looking at now.
+        if (this._rtDayOpen === dayStart) this._rtDay = { ok: false, error: runRes.error };
         return;
       }
-      this._rtDayError = undefined;
       const runPts = runRes.rows;
       const setPts = setRes.ok ? setRes.rows : [];
       const detail = {
@@ -1554,7 +1599,7 @@ export class MzcsCard extends LitElement {
         end: dayStart + 86_400_000,
       };
       this._rtDayCache.set(dayStart, detail);
-      if (this._rtDayOpen === dayStart) this._rtDayDetail = detail;
+      if (this._rtDayOpen === dayStart) this._rtDay = { ok: true, detail };
     } finally {
       this._rtDayLoading = false;
     }
@@ -1586,13 +1631,13 @@ export class MzcsCard extends LitElement {
 
   private _renderDayDetail() {
     if (this._rtDayLoading) return html`<p class="muted" style="font-size:11px;">Loading day…</p>`;
-    if (this._rtDayError) {
+    if (this._rtDay && !this._rtDay.ok) {
       return html`<p class="rt-fail">
         Could not read this day's history, so it is unknown rather than a day with no
-        runs. ${this._rtDayError}
+        runs. ${this._rtDay.error}
       </p>`;
     }
-    const d = this._rtDayDetail;
+    const d = this._rtDay?.ok ? this._rtDay.detail : undefined;
     if (!d) return nothing;
     return html`
       <div class="daydetail">
@@ -1771,10 +1816,13 @@ export class MzcsCard extends LitElement {
     const schedId = this._scheduleEntityId(zone);
     if (!schedId || !entityExists(this.hass, schedId)) return nothing;
     if (this._schedLoadedFor !== schedId) {
-      if (this._schedDrafts.size > 0) {
-        // QA-R C1-3: never silently eat unsaved edits - tell the user.
-        this._schedNotice = 'Unsaved schedule edits were discarded (zone or season changed).';
-      }
+      // QA-R C1-3: never silently eat unsaved edits - tell the user. QA S2: only
+      // when there was something to lose, and cleared otherwise so the notice
+      // cannot resurface later against a different zone's schedule.
+      this._schedNotice =
+        this._schedWeek && draftsChangeWeek(this._schedWeek, this._activeDet(this._schedWeek), this._schedDrafts)
+          ? 'Unsaved schedule edits were discarded (zone or season changed).'
+          : undefined;
       this._schedLoadedFor = schedId;
       this._schedWeek = undefined;
       this._clearSchedEdit();
@@ -1791,7 +1839,10 @@ export class MzcsCard extends LitElement {
     // Drafts outlive the drawer being collapsed, and a collapsed row that looks
     // identical to a saved schedule is how someone comes back believing their
     // week is what they see. Say so on the row itself, not only inside the body.
-    const unsaved = this._schedDrafts.size > 0;
+    // "Would saving change anything", not "do drafts exist". A granularity
+    // switch clones values without altering them, and calling that unsaved told
+    // users a running schedule was not running (QA S1).
+    const unsaved = week ? draftsChangeWeek(week, this._activeDet(week), this._schedDrafts) : false;
     return html`
       <button
         class="schedrow ${unsaved ? 'unsaved' : ''}"
@@ -1806,6 +1857,9 @@ export class MzcsCard extends LitElement {
         </span>
         <span aria-hidden="true">${this._schedOpen ? '▴' : '▾'}</span>
       </button>
+      ${!this._schedOpen && this._schedNotice
+        ? html`<p class="unsavedhint">${this._schedNotice}</p>`
+        : nothing}
       ${!this._schedOpen && unsaved
         ? html`<p class="unsavedhint">
             This schedule has changes you have not saved. They are not running - open the
@@ -1840,7 +1894,7 @@ export class MzcsCard extends LitElement {
     let hi = temps.length ? Math.max(...temps) : 80;
     if (hi - lo < 6) { const mid = (hi + lo) / 2; lo = mid - 3; hi = mid + 3; }
     const small = det.granularity === 'days';
-    const dirty = this._schedDrafts.size > 0;
+    const dirty = draftsChangeWeek(week, this._activeDet(week), this._schedDrafts);
     // Schedules with OFF gaps (authored in HA's native grid editor) are shown
     // read-only: the card's contiguous block model would silently convert the
     // inactive periods into active coverage on save (QA-R A1-3).

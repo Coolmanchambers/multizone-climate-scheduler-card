@@ -7,6 +7,35 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 ## [Unreleased]
 
 ### Fixed
+- A dropped connection to Home Assistant is now reported as one. Some failures carry no message,
+  and those were turning into a blank error that the card read as "no error at all", so a failed
+  history read still showed "History accrues daily" - the very message the failure text replaced.
+- Runtime history errors no longer follow you around. A failure reading one zone, or one day,
+  could stay on screen while you looked at another that had loaded perfectly well, and a slow
+  failure for a day you had already navigated away from could overwrite the day you were reading.
+- The 30-day view now loads when you switch zones while it is open, instead of waiting forever.
+- Looking at a different view of your schedule no longer claims you have unsaved changes.
+  Switching between "every day" and "weekday/weekend" rearranges the same values, so the card
+  now asks whether saving would actually change anything rather than whether you switched.
+- The note explaining that unsaved edits were discarded is visible with the schedule closed,
+  and no longer reappears later against a different zone.
+- The configuration reference gained the required `seasons[].key`, without which a YAML-mode
+  install creates mis-named schedule entities or reports a naming collision that blames the
+  wrong thing. `features.fan_timer` is documented correctly: omitting it keeps the fan chips,
+  and `[]` is what hides them.
+- Documented that an install with no weather entity keeps two outdoor sensors listed as pending
+  in the preview by design, so it is not mistaken for a provisioning bug.
+
+### Changed
+- The diagnostics report redacts more than it did. Free-text options - the standby preset name in
+  particular - are reported by shape rather than by value, since anything typed into them can be a
+  household name. The browser is reported as family and platform ("Chrome on Android") rather than
+  the full user agent, which carries device model and OS build.
+- The diagnostics report is more accurate: scheduling switches stay lined up with their zones on a
+  part-provisioned install instead of shifting onto the wrong one, a config with no seasons reports
+  the two it actually provisions, and a season selector reading unknown or unavailable is reported
+  as such instead of as healthy.
+
 - Unsaved schedule changes are visible with the drawer closed. Edits and granularity switches
   survive collapsing the schedule drawer, but the Save and Discard buttons only existed inside it,
   so the collapsed row looked exactly like a saved schedule while holding changes that were not

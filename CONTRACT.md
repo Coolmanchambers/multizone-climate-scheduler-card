@@ -15,7 +15,9 @@ are contract-side: they document shipped v0.7.0 behavior; no object shapes chang
 - Card: **Multi-Zone Climate Scheduler Card** · type `custom:multizone-climate-scheduler-card`
 - Repo: `Coolmanchambers/multizone-climate-scheduler-card` (public, MIT)
 - Bundle: `dist/multizone-climate-scheduler-card.js` (ES2022 - Lit 3 requires it)
-- Label on every provisioned object: `mzcs` · Automation category: "Climate Scheduler"
+- Label on every provisioned object: `mzcs`. **No automation category is assigned** - category
+  assignment is deferred post-v1 (§5). An earlier draft of this line promised one; the code never
+  set it, and §5 is the section that governs.
 - Entity prefix: user-chosen in wizard, default `climate` (examples below use it)
 
 ## 2. Zones and day-type granularity
@@ -203,7 +205,7 @@ Invariants the wizard and engine MUST uphold:
 ## 8. Universal change-set rule
 
 Every wizard apply (first run or any later structural edit) = diff → categorized preview
-(Create n / Adopt n / Edit n / Delete n highlighted individually / Unchanged n, exact names) →
+(Create n / Adopt n / Update n / Delete n highlighted individually / Unchanged n, exact names) →
 explicit confirm → freshness gate (replan against the live registry; refuse on drift) →
 ordered apply with rollback list → verify replan. No silent writes, ever. Adopt labels only;
 a divergent display name then converges via an explicit Edit on the following apply.

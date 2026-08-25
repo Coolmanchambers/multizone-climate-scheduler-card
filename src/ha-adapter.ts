@@ -384,10 +384,40 @@ export async function fetchDayHistory(
   }
 }
 
+/**
+ * Home Assistant rejects a websocket command with whatever it likes: an Error,
+ * an object carrying `message` or `code`, or - when a sleeping tablet drops its
+ * socket - a bare numeric code. The old fallback was `JSON.stringify`, which
+ * returns the VALUE `undefined` for `undefined` input despite this function's
+ * `: string` type. A falsy "error" then read as "no error", and a failed history
+ * read rendered as "no data yet" - the defect the failure path exists to
+ * prevent. Every branch here returns a non-empty, readable string (QA R5).
+ */
 export function errorText(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  if (e && typeof e === 'object' && 'message' in e) return String((e as { message: unknown }).message);
-  return JSON.stringify(e);
+  if (e instanceof Error && e.message) return e.message;
+  if (e && typeof e === 'object') {
+    const o = e as { message?: unknown; code?: unknown };
+    if (typeof o.message === 'string' && o.message) return o.message;
+    if (o.message != null && String(o.message)) return String(o.message);
+    if (o.code != null) return describeCode(o.code);
+  }
+  if (typeof e === 'number' || typeof e === 'string') {
+    const asText = String(e);
+    if (asText) return describeCode(e);
+  }
+  return 'Home Assistant gave no reason.';
+}
+
+/**
+ * HA's own numeric/string websocket codes mean nothing to a user, and printing
+ * a bare "3" reads like a bug in the card rather than a dropped connection.
+ */
+function describeCode(code: unknown): string {
+  const raw = String(code);
+  if (/connection|closed|lost|3/i.test(raw)) {
+    return `The connection to Home Assistant dropped (${raw}).`;
+  }
+  return `Home Assistant reported error ${raw}.`;
 }
 
 /** Clear the zone's applied-block marker and re-trigger the engine (Apply now). */

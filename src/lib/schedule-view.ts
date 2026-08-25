@@ -332,3 +332,58 @@ function blocksBackToRanges(blocks: ScheduleBlock[]): TimeRange[] {
   }
   return ranges;
 }
+
+/**
+ * Would saving these drafts actually change the stored week?
+ *
+ * Draft presence is not the same question. `_switchGranularity` populates drafts
+ * on every granularity change, and those expansions are value-preserving by
+ * design - splitting one schedule into weekday/weekend clones the same blocks.
+ * Treating "drafts exist" as "unsaved changes" therefore told users their
+ * schedule was not running when it was, purely because they had looked at a
+ * different view of it (QA S1).
+ *
+ * Compares the week the drafts would produce against the week as stored.
+ */
+export function draftsChangeWeek(
+  week: Week,
+  det: DetectedSets,
+  drafts: Map<string, ScheduleBlock[]>,
+): boolean {
+  if (drafts.size === 0) return false;
+  let out: Week = week;
+  for (const [key, days] of Object.entries(det.sets)) {
+    const blocks = drafts.get(key);
+    if (blocks) out = replaceSetBlocks(out, days, blocks);
+  }
+  return !weeksEqual(out, week);
+}
+
+/** Structural comparison of two weeks, per day and per range. */
+export function weeksEqual(a: Week, b: Week): boolean {
+  for (const day of ALL_DAYS) {
+    const ra = a[day] ?? [];
+    const rb = b[day] ?? [];
+    if (ra.length !== rb.length) return false;
+    for (let i = 0; i < ra.length; i++) {
+      const x = ra[i]!;
+      const y = rb[i]!;
+      if (x.from !== y.from || x.to !== y.to) return false;
+      // Field-wise, not JSON.stringify: regenerating ranges from blocks can
+      // reorder keys or add an explicit undefined, and neither is a change the
+      // user made.
+      const dx = dataOf(x);
+      const dy = dataOf(y);
+      if (
+        dx.time !== dy.time ||
+        (dx.name ?? '') !== (dy.name ?? '') ||
+        (dx.mode ?? null) !== (dy.mode ?? null) ||
+        (dx.cool_temp ?? null) !== (dy.cool_temp ?? null) ||
+        (dx.heat_temp ?? null) !== (dy.heat_temp ?? null)
+      ) {
+        return false;
+      }
+    }
+  }
+  return true;
+}

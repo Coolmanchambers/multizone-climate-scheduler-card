@@ -2,52 +2,78 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 
 /**
- * Backlog item 26: unsaved schedule drafts survive the drawer being collapsed,
- * but the Save/Discard pair only exists inside the drawer body. So a user could
- * close the drawer and come back to a row that looked exactly like their saved
- * schedule while holding edits that were not running.
+ * Backlog item 26 / QA S1, S2, T1.
  *
- * The fix is that the *collapsed* row says so. This pins that, in the source-scan
- * style of render-gate.test.ts, because the suite runs in node with no DOM:
- * the unsaved signal must be computed in `_renderSchedule` - the part that always
- * renders - and not only in `_renderScheduleBody`, which renders only when open.
+ * Unsaved schedule drafts outlive the drawer being collapsed, but Save and
+ * Discard render only inside the drawer body — so a collapsed row could look
+ * exactly like a saved schedule while holding changes that were not running.
+ *
+ * The first version of this file was itself a QA finding: it scanned raw source
+ * including comments (so a mention in a comment satisfied it) and pinned the
+ * textual order of a boolean conjunction (so an equivalent rewrite broke it
+ * while a genuinely wrong nesting still passed). It now strips comments and
+ * asserts order-insensitively.
  */
-const SRC = readFileSync(new URL('../src/multizone-climate-scheduler-card.ts', import.meta.url), 'utf8');
+const RAW = readFileSync(new URL('../src/multizone-climate-scheduler-card.ts', import.meta.url), 'utf8');
 
-/** The body of a method, from its signature to the next method at the same indent. */
+/** Source with comments removed, so a claim in prose cannot satisfy a check. */
+function stripComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+}
+
+/** The body of a method, from its signature to the next member at the same indent. */
 function methodBody(name: string): string {
-  const at = SRC.indexOf(`private ${name}(`);
+  const src = stripComments(RAW);
+  const at = src.indexOf(`private ${name}(`);
   expect(at, `${name} should exist`).toBeGreaterThan(-1);
-  const rest = SRC.slice(at);
+  const rest = src.slice(at);
   const next = rest.slice(1).search(/\n  (?:private|public|protected|@state|static) /);
   return next < 0 ? rest : rest.slice(0, next + 1);
 }
 
-describe('unsaved schedule drafts are visible with the drawer closed', () => {
+describe('unsaved schedule state is truthful and visible when collapsed', () => {
   const render = methodBody('_renderSchedule');
+  const body = methodBody('_renderScheduleBody');
 
-  it('computes the unsaved state in the always-rendered part of the schedule row', () => {
+  it('asks whether saving would CHANGE the week, not merely whether drafts exist', () => {
+    // QA S1: a granularity switch clones values without altering them, so
+    // draft-presence flagged a running schedule as unsaved.
+    expect(
+      /draftsChangeWeek\s*\(/.test(render),
+      '_renderSchedule must derive its unsaved state from draftsChangeWeek',
+    ).toBe(true);
     expect(
       /_schedDrafts\.size\s*>\s*0/.test(render),
-      '_renderSchedule must consult _schedDrafts; otherwise the only unsaved indicator ' +
-        'lives in _renderScheduleBody and disappears when the drawer is collapsed',
-    ).toBe(true);
+      'draft-presence must not be used as the unsaved signal',
+    ).toBe(false);
   });
 
-  it('marks the collapsed row itself, not just the open body', () => {
-    // The indicator has to be attached to the row markup, which renders in both states.
-    expect(/schedrow[^`]*unsaved/.test(render) || /unsavedchip/.test(render)).toBe(true);
+  it('uses the same question inside the drawer, so the row and the buttons cannot disagree', () => {
+    expect(/draftsChangeWeek\s*\(/.test(body)).toBe(true);
+    expect(/_schedDrafts\.size\s*>\s*0/.test(body)).toBe(false);
   });
 
-  it('explains the state somewhere reachable while the drawer is closed', () => {
-    // A bare chip is a hint; the row must also be able to say what it means when
-    // the body - which holds Save/Discard - is not on screen.
-    expect(/!this\._schedOpen\s*&&\s*unsaved/.test(render)).toBe(true);
+  it('marks the collapsed row itself, not only the open body', () => {
+    // The chip must appear in the row markup, which renders in both states.
+    expect(/unsavedchip/.test(render)).toBe(true);
+    expect(/unsavedchip/.test(body)).toBe(false);
   });
 
-  it('still tells the user when drafts are dropped by a zone or season change', () => {
-    // The neighbouring guarantee, already shipped - kept here so a refactor of this
-    // area cannot quietly remove it while satisfying the checks above.
-    expect(SRC).toContain('Unsaved schedule edits were discarded');
+  it('explains the state while the drawer is closed, whichever way the guard is written', () => {
+    // Order-insensitive: the point is that the closed state and the unsaved
+    // state are both consulted in the always-rendered method.
+    expect(/_schedOpen/.test(render)).toBe(true);
+    expect(/unsavedhint/.test(render)).toBe(true);
+    expect(/unsavedhint/.test(body), 'the hint must not live only in the open body').toBe(false);
+  });
+
+  it('surfaces the discarded-edits notice where a collapsed user can see it', () => {
+    // QA S2: the notice used to render only inside the drawer - the one state
+    // the collapsed hint invites the user to stay in.
+    expect(/_schedNotice/.test(render)).toBe(true);
+  });
+
+  it('still warns when drafts are dropped by a zone or season change', () => {
+    expect(stripComments(RAW)).toContain('Unsaved schedule edits were discarded');
   });
 });
