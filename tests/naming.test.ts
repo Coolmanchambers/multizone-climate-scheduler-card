@@ -54,7 +54,7 @@ describe('slugify', () => {
     expect(slugify('Upstairs')).toBe('upstairs');
     expect(slugify("Owner's Office")).toBe('owners_office');
     expect(slugify('  Down  Stairs ')).toBe('down_stairs');
-    expect(slugify('Loft #2')).toBe('loft_2');
+    expect(slugify('Landing #2')).toBe('landing_2');
   });
 });
 

@@ -25,14 +25,14 @@ const config: MzcsCardConfig = {
       entity: 'climate.upstairs_thermostat',
       name: 'Upstairs',
       room_sensors: [
-        { entity: 'sensor.guest_room_temperature', name: 'Guest Room' },
+        { entity: 'sensor.bedroom_3_temperature', name: 'Bedroom 3' },
         { entity: 'sensor.bedroom_1_temperature', name: 'Bedroom 1' },
         'sensor.bedroom_2_temperature',
-        'sensor.loft_temperature',
+        'sensor.landing_temperature',
         'sensor.dead_sensor_temperature',
       ],
     },
-    { entity: 'climate.owner_s_office_mini_split', name: 'Office' },
+    { entity: 'climate.studio_mini_split', name: 'Studio' },
   ],
 };
 
@@ -67,7 +67,7 @@ if (shot) {
   // A realistic post-Apply install, so the Setup/Manage screenshot shows the
   // per-zone kill switches (all OFF, exactly as a fresh Apply leaves them)
   // and the full tuning set rather than the sparse fixture subset.
-  for (const slug of ['downstairs', 'upstairs', 'office']) {
+  for (const slug of ['downstairs', 'upstairs', 'studio']) {
     hass.set(`input_boolean.climate_${slug}_enabled`, {
       state: 'off',
       attributes: { friendly_name: `Climate ${slug} enabled` },

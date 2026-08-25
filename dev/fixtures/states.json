@@ -40,7 +40,7 @@
       "supported_features": 411
     }
   },
-  "climate.owner_s_office_mini_split": {
+  "climate.studio_mini_split": {
     "state": "cool",
     "attributes": {
       "hvac_modes": ["off", "cool", "dry", "fan_only", "auto", "heat"],
@@ -54,18 +54,18 @@
       "fan_mode": "auto",
       "preset_mode": "none",
       "swing_mode": "off",
-      "friendly_name": "Owner’s Office Mini-split",
+      "friendly_name": "Studio Mini-split",
       "supported_features": 441
     }
   },
-  "weather.openweathermap": {
+  "weather.forecast_home": {
     "state": "sunny",
     "attributes": {
       "temperature": 111,
       "apparent_temperature": 111,
       "humidity": 17,
       "temperature_unit": "°F",
-      "friendly_name": "OpenWeatherMap"
+      "friendly_name": "Home Forecast"
     }
   },
   "timer.climate_upstairs_fan": {
@@ -76,13 +76,13 @@
     "state": "idle",
     "attributes": { "duration": "0:30:00", "friendly_name": "Climate Downstairs Fan" }
   },
-  "timer.climate_owners_office_fan": {
+  "timer.climate_studio_fan": {
     "state": "idle",
-    "attributes": { "duration": "0:30:00", "friendly_name": "Climate Office Fan" }
+    "attributes": { "duration": "0:30:00", "friendly_name": "Climate Studio Fan" }
   },
-  "sensor.guest_room_temperature": {
+  "sensor.bedroom_3_temperature": {
     "state": "71.2",
-    "attributes": { "friendly_name": "Guest Room Temperature", "unit_of_measurement": "°F" }
+    "attributes": { "friendly_name": "Bedroom 3 Temperature", "unit_of_measurement": "°F" }
   },
   "sensor.bedroom_1_temperature": {
     "state": "77.8",
@@ -92,9 +92,9 @@
     "state": "72.4",
     "attributes": { "friendly_name": "Bedroom 2 Temperature", "unit_of_measurement": "°F" }
   },
-  "sensor.loft_temperature": {
+  "sensor.landing_temperature": {
     "state": "81.1",
-    "attributes": { "friendly_name": "Loft Temperature", "unit_of_measurement": "°F" }
+    "attributes": { "friendly_name": "Landing Temperature", "unit_of_measurement": "°F" }
   },
   "sensor.dead_sensor_temperature": {
     "state": "unavailable",

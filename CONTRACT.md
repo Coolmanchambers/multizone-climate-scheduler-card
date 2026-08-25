@@ -20,7 +20,7 @@ are contract-side: they document shipped v0.9.0 behavior; no object shapes chang
 
 ## 2. Zones and day-type granularity
 
-- 1-4 zones. Zone key = slug of display name (`upstairs`, `downstairs`, `office`).
+- 1-4 zones. Zone key = slug of display name (`upstairs`, `downstairs`, `studio`).
 - Per zone x season, day granularity is one of:
   - `all` - one block set (keys: `all`)
   - `wdwe` - two sets (keys: `wd`, `we`)
@@ -127,15 +127,15 @@ prefix: climate
 zones:
   - entity: climate.upstairs_thermostat
     name: Upstairs
-    room_sensors: [sensor.guest_room_temperature, ...]
+    room_sensors: [sensor.bedroom_3_temperature, ...]
   - entity: climate.downstairs_thermostat
     name: Downstairs
 seasons:
   - { key: summer, name: Summer, default_mode: cool }
   - { key: winter, name: Winter, default_mode: heat_cool }
 season_switch: manual        # manual (semi | full reserved for the post-v1 recommender)
-weather_entity: weather.openweathermap   # optional; enables the CDD learning chain
-features: { fan_timer: [15, 30, 60], anomaly_alerts: true, fan_guard: input_boolean.help_hvac_fan }
+weather_entity: weather.forecast_home   # optional; enables the CDD learning chain
+features: { fan_timer: [15, 30, 60], anomaly_alerts: true, fan_guard: input_boolean.hvac_fan_guard }
 # features.eco_preset: 'away'   # optional: standby preset the engine respects ('eco' default;
 #                               # false disables the stand-down gate)
 ```

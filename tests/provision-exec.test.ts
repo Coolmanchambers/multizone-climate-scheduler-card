@@ -488,10 +488,10 @@ describe('automation signatures + safe regeneration', () => {
 
   it('fan guard is part of the fan automation signature and payload', () => {
     const un = automationSignatures('climate', ZONES, SEASONS);
-    const gu = automationSignatures('climate', ZONES, SEASONS, 'input_boolean.help_hvac_fan');
+    const gu = automationSignatures('climate', ZONES, SEASONS, 'input_boolean.hvac_fan_guard');
     expect(gu['climate_mzcs_fan_timer_upstairs']).not.toBe(un['climate_mzcs_fan_timer_upstairs']);
-    const payload = fanAutomation('climate', ZONES[0]!, 'input_boolean.help_hvac_fan');
-    expect(JSON.stringify(payload)).toContain('input_boolean.help_hvac_fan');
+    const payload = fanAutomation('climate', ZONES[0]!, 'input_boolean.hvac_fan_guard');
+    expect(JSON.stringify(payload)).toContain('input_boolean.hvac_fan_guard');
   });
 
   it('generated payloads verify against their own embedded signature', () => {

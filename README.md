@@ -432,9 +432,9 @@ zones:
   - name: Upstairs
     entity: climate.upstairs_thermostat
     room_sensors:                     # optional, drives deviation chips
-      - sensor.guest_room_temperature           # uses the entity's own name
-      - entity: sensor.zb_loft_temp_sensor      # or label it yourself
-        name: Loft
+      - sensor.bedroom_3_temperature           # uses the entity's own name
+      - entity: sensor.zb_landing_temp_sensor      # or label it yourself
+        name: Landing
 seasons:
   - name: Summer
     default_mode: cool                # cool | heat | heat_cool | off

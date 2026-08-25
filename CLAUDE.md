@@ -15,7 +15,7 @@ in the commit; never delete a check to get a commit through.
 ### Never commit
 
 - **Real entity ids, area names, or device names from a live instance.** Fixtures use neutral
-  names (`bedroom_1`, `Owner's Office`) for exactly this reason. If you capture live state for a
+  names (`bedroom_1`, `Studio`) for exactly this reason. If you capture live state for a
   fixture, neutralise it in the same edit, not later.
 - **Anything identifying the household**: personal names, a LAN address or hostname, an email,
   a timezone or utility that narrows the location, real occupancy hours.

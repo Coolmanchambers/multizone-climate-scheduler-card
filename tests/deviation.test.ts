@@ -24,7 +24,7 @@ describe('deviationColor', () => {
     expect(deviationColor(71 - 76)).toBe('red'); // Guest -5
     expect(deviationColor(77 - 76)).toBe('green'); // bedroom 1, +1
     expect(deviationColor(72 - 76)).toBe('amber'); // bedroom 2, -4
-    expect(deviationColor(81 - 76)).toBe('red'); // Loft +5
+    expect(deviationColor(81 - 76)).toBe('red'); // Landing +5
   });
 });
 
@@ -65,12 +65,12 @@ describe('formatRoomTemp', () => {
 describe('room sensor labels (normalizeRoomSensors)', () => {
   it('accepts bare ids, {entity, name} rows, and a mix of both', () => {
     expect(normalizeRoomSensors(['sensor.a'])).toEqual([{ entity: 'sensor.a' }]);
-    expect(normalizeRoomSensors([{ entity: 'sensor.a', name: 'Guest Room' }])).toEqual([
-      { entity: 'sensor.a', name: 'Guest Room' },
+    expect(normalizeRoomSensors([{ entity: 'sensor.a', name: 'Bedroom 3' }])).toEqual([
+      { entity: 'sensor.a', name: 'Bedroom 3' },
     ]);
-    expect(normalizeRoomSensors(['sensor.a', { entity: 'sensor.b', name: 'Loft' }])).toEqual([
+    expect(normalizeRoomSensors(['sensor.a', { entity: 'sensor.b', name: 'Landing' }])).toEqual([
       { entity: 'sensor.a' },
-      { entity: 'sensor.b', name: 'Loft' },
+      { entity: 'sensor.b', name: 'Landing' },
     ]);
   });
 
