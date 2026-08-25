@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-08-25
+
 ### Fixed
 - A dropped connection to Home Assistant is now reported as one. Some failures carry no message,
   and those were turning into a blank error that the card read as "no error at all", so a failed
