@@ -1,7 +1,16 @@
-# MZCS CONTRACT.md - v1.1 (S13 release-gate sync)
+# MZCS CONTRACT.md - v1.2 (config-migration policy)
 
 The naming/schema contract. Everything in the card, wizard, differ, and engine builds against
 this file. Changes after freeze require a version bump + migration note.
+
+**v1.2 (2026-08-26, message-only - no behaviour change):** added the config-migration policy
+pointer to §6 and made the uniqueness of `seasons[].key` normative. `buildDesired` refuses season
+sets whose keys COLLIDE - duplicate keys, or two-plus seasons with no key at all, when at least
+one zone exists to collide in - with a message naming the real cause. Every such config already
+failed at v0.7.1 with "rename the conflicting zone or season", advice that could not help.
+Everything that provisioned at v0.7.1 still provisions: a single keyless season (measured: it
+converges), distinct unusual keys (`null` beside absent, numbers, booleans), and zero-zone
+configs, which emit no schedule ids to collide. No object shapes changed and no signature moved.
 
 **v1.1 (2026-08-24, no migration needed):** synced §5's inventory to what the code actually
 provisions (added the applied-block marker, per-zone k, theme, and the outdoor-temperature
@@ -77,7 +86,9 @@ never collide in HA's name→object_id slugification (S12c incident rule).
 **Per zone:**
 - `timer.climate_<zone>_fan` + automation "Climate: <Zone> fan timer finished"
 - `binary_sensor.climate_<zone>_running` (template, from hvac_action) [adopted if pre-existing]
-- `sensor.climate_<zone>_runtime_today` (history_stats; the runtime drawer reads LTS max)
+- `sensor.climate_<zone>_runtime_today` (history_stats; feeds today's figure and the learning
+  automation. The runtime drawer's PAST days come from the running sensor's raw recorder history
+  - history_stats entries carry no state_class, so they have no long-term statistics to read)
 - `sensor.climate_<zone>_expected_runtime` (template: k x CDD)
 - `input_text.climate_<zone>_applied_block` (engine hold marker)
 - `input_number.climate_<zone>_k` (learned runtime per cooling-degree-day; written nightly)
@@ -142,6 +153,13 @@ features: { fan_timer: [15, 30, 60], anomaly_alerts: true, fan_guard: input_bool
 #                               # false disables the stand-down gate)
 ```
 `fan_guard` is optional. `room_sensors` per zone drives the read-only deviation chips.
+
+`seasons[].key` is REQUIRED and is refused, not guessed, when absent: it is the permanent id baked
+into entity names, so deriving one would move an existing install's provisioned objects. Config
+shapes that have changed, and the rules governing future changes, are in
+[`docs/config-compatibility.md`](docs/config-compatibility.md) - old shapes stay readable forever
+(R1), the reading bundle ships before the writing one (R2), and a migration may not perturb
+`buildDesired` output or automation signatures (R3).
 
 ## 7. Reference data - REMOVED (privacy, 2026-08-25)
 
@@ -213,6 +231,8 @@ a divergent display name then converges via an explicit Edit on the following ap
 ## 9. Non-goals (v1)
 
 Card never executes schedules (backend automations do). No vendor temp-sensor access (API
-limitation). Segment detail beyond recorder window (LTS totals only). Mini-split hero parity
-(zone on hold). Graph-based schedule editor (v1.x backlog, kneave/climate-scheduler MIT
+limitation). No runtime data beyond the recorder window - daily totals and segment detail both
+read raw recorder history, so both end where the purge does. (A mirror sensor carrying a
+state_class, which would accrue true long-term statistics, is future provisioning work.)
+Mini-split hero parity (zone on hold). Graph-based schedule editor (v1.x backlog, kneave/climate-scheduler MIT
 patterns).

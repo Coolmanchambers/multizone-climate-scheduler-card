@@ -6,6 +6,38 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-08-29
+
+### Fixed
+- **Runtime history now shows past days.** The 7- and 30-day views read long-term statistics that
+  no install has ever had: the runtime sensors are created through Home Assistant's history_stats
+  config flow, which offers no `state_class` field, and HA only records long-term statistics for
+  sensors that declare one. Both views were therefore permanently stuck on their empty state - on
+  every install - telling you statistics would "build up" when they never would. Past days are now
+  summed from the running sensor's raw recorder history.
+
+### Changed
+- The runtime drawer shows a single 10-day view in place of the 7/30-day toggle. Ten days matches
+  Home Assistant's default recorder retention, which is what actually bounds this data; a 30-day
+  view honest about that would sit mostly empty. The oldest day is marked "≥" when the recorder
+  has already trimmed its start, and days with no recorded history at all are omitted rather than
+  drawn as zero-runtime days - an empty bar would claim a fact nobody has.
+- Seasons whose keys collide - duplicate keys, or two-plus seasons with no key at all - are
+  refused with a message naming the real cause. Previously the message blamed your zone and season
+  NAMES and suggested renaming, which could not have helped. Nothing that provisioned at 0.7.1 is
+  refused now: a single keyless season, distinct unusual keys, and zero-zone configs all keep
+  working exactly as before.
+- **No generated automation changed.** Signatures are byte-identical to 0.7.1, so an existing
+  install plans zero Updates from this release.
+
+### Added
+- `docs/config-compatibility.md`: the rules governing changes to the card's own config shape, the
+  registry of shapes that have changed, and the compatibility tests that hold them.
+- An engine snapshot test harness (golden files, pinned signatures, semantic invariants and a
+  variant matrix) so a change to a generated automation cannot pass unnoticed. Contributor-facing;
+  no user-visible effect.
+
+
 ## [0.7.1] - 2026-08-25
 
 ### Fixed

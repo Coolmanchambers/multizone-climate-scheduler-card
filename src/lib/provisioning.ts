@@ -125,7 +125,75 @@ function weeklySpec(set: ScheduleSet): Record<DayKey, TimeRange[]> {
   return buildWeeklySchedule(set.granularity, set.sets);
 }
 
+/**
+ * Refuse season sets whose keys COLLIDE - and only those.
+ *
+ * The failure this exists for: schedule ids embed the season key verbatim
+ * (`schedule.<prefix>_<zone>_<key>`), so two seasons with the same effective
+ * key produce the same entity id for every zone. v0.7.1 caught that via the
+ * generic naming-collision check below, whose message told the user to RENAME
+ * their zones and seasons - advice that cannot help when the cause is a
+ * missing or duplicated key. This block names the real cause. It never widens
+ * what is refused: every config it throws for also threw at v0.7.1.
+ *
+ * What it deliberately does NOT do, each learned the hard way (QA rounds 2-3):
+ * - It does not refuse a SINGLE keyless season. Measured against released
+ *   v0.7.1: that config provisions (27 objects at 1 zone x 1 season), the
+ *   engine applies blocks against `schedule.<prefix>_<zone>_undefined`, and a
+ *   fully-applied install replans to all-Unchanged - fetchExisting's orphan-
+ *   schedule fallback claims the entity even though the season parser cannot.
+ *   Refusing a converging install is the breaking change R3 forbids. (Its one
+ *   real defect - the card's schedule drawer looks the entity up by slugified
+ *   NAME and finds nothing - is a card bug on the backlog, not a reason to
+ *   stop provisioning.)
+ * - It does not test key TYPES. `key: 1` and `key: off` name live entities.
+ * - It does not group by trimmed or normalized keys. `key: null` beside an
+ *   absent key yields `_null` and `_undefined` - DISTINCT ids that provisioned
+ *   and converged at v0.7.1 - so grouping is by the EXACT string the id
+ *   template embeds: `String(key)`.
+ * - It does not fire with zero zones: no schedule ids exist, nothing collides,
+ *   and v0.7.1 accepted the config.
+ *
+ * Every caller runs buildDesired inside try/catch that renders the message as
+ * a panel error, so the card keeps rendering.
+ */
+function assertUniqueSeasonKeys(seasons: ProvisionSeason[], zoneCount: number): void {
+  if (zoneCount === 0) return;
+  const groups = new Map<string, Array<{ s: ProvisionSeason; i: number }>>();
+  seasons.forEach((s, i) => {
+    const k = String(s?.key);
+    const g = groups.get(k) ?? [];
+    g.push({ s, i });
+    groups.set(k, g);
+  });
+  for (const [key, group] of groups) {
+    if (group.length < 2) continue;
+    const allMissing = group.every(({ s }) => s?.key == null || String(s.key).trim() === '');
+    if (allMissing) {
+      const [first] = group;
+      const named = typeof first!.s?.name === 'string' && first!.s.name.trim();
+      const which = named ? `"${first!.s.name}"` : `at position ${first!.i + 1}`;
+      const suggestion =
+        (named ? first!.s.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') : '') ||
+        `season_${first!.i + 1}`;
+      throw new Error(
+        `${group.length} seasons are missing their required "key", so they would all resolve to the ` +
+          `same schedule entity names and collide. The key is the permanent id used in entity names; ` +
+          `the display name is only a label and can be renamed freely. ` +
+          `Give each season its own key - start with \`key: ${suggestion}\` on season ${which} - or ` +
+          `configure the card with the visual editor, which fills keys in for you.`,
+      );
+    }
+    throw new Error(
+      `${group.length} seasons share the key "${key}", so their schedule entity names collide. ` +
+        `The key is the permanent id used in entity names and must be unique per season; ` +
+        `the display name is only a label and can be renamed freely.`,
+    );
+  }
+}
+
 export function buildDesired(input: ProvisionInput): DesiredObject[] {
+  assertUniqueSeasonKeys(input.seasons, input.zones.length);
   const out: DesiredObject[] = [];
   const p = input.prefix;
   // Display names are PREFIX-DERIVED so two card instances never share a name.
@@ -372,4 +440,64 @@ export function applyPlan(p: Plan, existing: ExistingObject[]): ExistingObject[]
   }
   for (const a of p.delete) byId.delete(a.id);
   return [...byId.values()];
+}
+
+/**
+ * Seasons assumed when a config omits `seasons:` entirely.
+ *
+ * Frozen, and every consumer goes through `defaultSeasons()` for its own copy.
+ * The code this replaced built a fresh literal per call, so handing out a shared
+ * array would have been a new hazard: one in-place sort anywhere - or a test
+ * mutating the export - would corrupt every card instance on the page at once.
+ * `src/editor.ts` already copies defensively for the same reason.
+ */
+const DEFAULT_SEASONS_FROZEN: readonly Readonly<ProvisionSeason>[] = Object.freeze([
+  Object.freeze({ key: 'summer', name: 'Summer', default_mode: 'cool' as const }),
+  Object.freeze({ key: 'winter', name: 'Winter', default_mode: 'heat_cool' as const }),
+]);
+
+/** A fresh, independently mutable copy of the default seasons. */
+export function defaultSeasons(): ProvisionSeason[] {
+  return DEFAULT_SEASONS_FROZEN.map((s) => ({ ...s }));
+}
+
+/**
+ * Card config -> ProvisionInput. THE single mapping (docs/config-compatibility.md),
+ * pure and Lit-free so the engine harness can drive its variant matrix from real
+ * configs rather than from a hand-built ProvisionInput that could drift from what
+ * the card actually passes.
+ *
+ * `schedules` is supplied by the caller because the card seeds placeholder weeks
+ * from default-schedules.ts, which is a card concern, not a differ one.
+ *
+ * Note `fan_timer`: an ABSENT list means the feature is ON (the card's historical
+ * default of three presets), while an explicitly EMPTY list means off. That
+ * distinction is documented in the README and is easy to invert by accident, so
+ * it is pinned by tests rather than left to the reader.
+ */
+export function provisionInputFromConfig(
+  config: {
+    prefix?: string;
+    zones: Array<{ entity: string; name: string }>;
+    seasons?: ProvisionSeason[];
+    weather_entity?: string;
+    features?: { fan_timer?: number[]; anomaly_alerts?: boolean; fan_guard?: string; eco_preset?: string | false };
+  },
+  schedules: ProvisionInput['schedules'],
+  slug: (name: string) => string,
+): ProvisionInput {
+  return {
+    prefix: config.prefix ?? 'climate',
+    zones: config.zones.map((z) => ({ slug: slug(z.name), name: z.name, climate: z.entity })),
+    seasons: config.seasons ?? defaultSeasons(),
+    schedules,
+    features: {
+      fan_timer: (config.features?.fan_timer?.length ?? 3) > 0,
+      anomaly_alerts: config.features?.anomaly_alerts ?? true,
+      steering: false,
+      fan_guard: config.features?.fan_guard,
+      eco_preset: config.features?.eco_preset,
+    },
+    weather_entity: config.weather_entity,
+  };
 }

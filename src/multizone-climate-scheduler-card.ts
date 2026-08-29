@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { CARD_TYPE, CARD_NAME, CARD_VERSION, EDITOR_TYPE } from './const';
 import { buildDiagnostics } from './lib/diagnostics';
 import type { MzcsCardConfig, ZoneConfig } from './types';
-import { resolveEcoPreset, normalizeRoomSensors } from './types';
+import { resolveEcoPreset, normalizeRoomSensors, normalizeCardConfig } from './types';
 import type { HassLike } from './ha-types';
 import {
   climateSummary,
@@ -28,9 +28,8 @@ import {
   setNumberHelper,
   selectOption,
   setZoneEnabled,
-  fetchDailyRuntime,
+  fetchDailyRuntimeFromHistory,
   fetchDayHistory,
-  type DailyRuntime,
 } from './ha-adapter';
 import {
   formatHoursQuarter,
@@ -39,6 +38,7 @@ import {
   segmentToPct,
   type Segment,
   type SetpointChange,
+  type DailyRuntimeDay,
 } from './lib/segments';
 import { computeVerdict } from './lib/verdict';
 import {
@@ -158,7 +158,15 @@ const SET_LABELS: Record<string, string> = {
 };
 import { slugify, zoneEntityId, globalEntityId, zoneScheduleId, automationEntityId } from './lib/naming';
 import { deviationColor, formatDelta, formatRoomTemp, sanitizeThresholds } from './lib/deviation';
-import { buildDesired, plan, actionable, type Plan, type ProvisionInput } from './lib/provisioning';
+import {
+  buildDesired,
+  plan,
+  actionable,
+  provisionInputFromConfig,
+  defaultSeasons,
+  type Plan,
+  type ProvisionInput,
+} from './lib/provisioning';
 import { defaultSchedules } from './lib/default-schedules';
 import { fetchExisting } from './registry-read';
 import { executePlan, type ExecResult } from './provision-exec';
@@ -203,15 +211,12 @@ export class MzcsCard extends LitElement {
    * was reported against another's (QA R1-R4). With a single field the question
    * cannot be got wrong.
    */
-  @state() private _rt7?: RecorderResult<DailyRuntime>;
-  @state() private _rt30?: RecorderResult<DailyRuntime>;
+  @state() private _rtDays?: RecorderResult<DailyRuntimeDay>;
   @state() private _rtDay?: { ok: true; detail: DayDetail } | { ok: false; error: string };
   private _rtLoadedFor?: string;
   @state() private _rtDayOpen: number | null = null;
   @state() private _rtDayLoading = false;
   private _rtDayCache = new Map<number, DayDetail>();
-  @state() private _rtRange: 7 | 30 = 7;
-  private _rt30LoadedFor?: string;
   @state() private _dryRun?: Plan;
   /** Which flow produced _dryRun. A teardown plan must NEVER render on the
    * Setup tab (it would show as an innocuous-looking all-delete preview), and
@@ -242,33 +247,12 @@ export class MzcsCard extends LitElement {
   private _objectsLoadedFor?: string;
 
   public setConfig(config: MzcsCardConfig): void {
-    // Tolerant validation (QA-R C2-2/C2-3): incomplete configs (empty zones,
-    // zone still being picked in the editor, missing names, scalar fan_timer)
-    // must render a helpful placeholder, not brick the card/preview. Only
-    // structurally hopeless configs throw.
-    if (!config || !Array.isArray(config.zones ?? [])) {
-      throw new Error('zones must be a list of { entity, name } items.');
-    }
-    const rawZones = config.zones ?? [];
-    if (rawZones.length > 4) throw new Error('A maximum of 4 zones is supported.');
-    const zones = rawZones.map((z) => ({
-      ...z,
-      name:
-        typeof z.name === 'string' && z.name.trim()
-          ? z.name
-          : z.entity
-            ? z.entity.split('.')[1]!.replace(/_/g, ' ')
-            : 'Zone',
-    }));
-    const ft = config.features?.fan_timer as unknown;
-    const features = config.features
-      ? {
-          ...config.features,
-          fan_timer: Array.isArray(ft) ? (ft as number[]) : typeof ft === 'number' ? [ft] : undefined,
-        }
-      : undefined;
-    this._config = { ...config, zones, ...(features ? { features } : {}) };
-    if (this._zoneIndex >= Math.max(zones.length, 1)) this._zoneIndex = 0;
+    // Normalization lives in ONE place (docs/config-compatibility.md R1), and
+    // deliberately not here: tests cannot import this element, so inline
+    // normalization is unreachable by anything but a source scan.
+    const normalized = normalizeCardConfig(config);
+    this._config = normalized;
+    if (this._zoneIndex >= Math.max(normalized.zones.length, 1)) this._zoneIndex = 0;
     // A config change invalidates any previewed plan (QA-R C1-1): Apply must
     // never execute a plan computed for a different config.
     this._dryRun = undefined;
@@ -321,28 +305,14 @@ export class MzcsCard extends LitElement {
 
   private _provisionInput(): ProvisionInput {
     const cfg = this._config!;
-    const zones = cfg.zones.map((z) => ({ slug: slugify(z.name), name: z.name, climate: z.entity }));
-    const seasons = cfg.seasons ?? [
-      { key: 'summer', name: 'Summer', default_mode: 'cool' as const },
-      { key: 'winter', name: 'Winter', default_mode: 'heat_cool' as const },
-    ];
-    return {
-      prefix: this._prefix,
-      zones,
+    // The mapping itself is pure and lives in provisioning.ts so the engine
+    // harness drives its variant matrix through the SAME code the card uses.
+    const seasons = cfg.seasons ?? defaultSeasons();
+    const schedules = defaultSchedules(
+      cfg.zones.map((z) => slugify(z.name)),
       seasons,
-      schedules: defaultSchedules(
-        zones.map((z) => z.slug),
-        seasons,
-      ),
-      features: {
-        fan_timer: (this._config?.features?.fan_timer?.length ?? 3) > 0,
-        anomaly_alerts: this._config?.features?.anomaly_alerts ?? true,
-        steering: false,
-        fan_guard: this._config?.features?.fan_guard,
-        eco_preset: this._config?.features?.eco_preset,
-      },
-      weather_entity: this._config?.weather_entity,
-    };
+    );
+    return provisionInputFromConfig({ ...cfg, prefix: this._prefix, seasons }, schedules, slugify);
   }
 
   /**
@@ -1334,10 +1304,9 @@ export class MzcsCard extends LitElement {
                   @click=${() => {
                     if (this._zoneIndex === i) return;
                     this._zoneIndex = i;
-                    // Runtime caches are zone-specific - never serve another
-                    // zone's 30-day chart or day details (QA-R C2-6).
-                    this._rt30 = undefined;
-                    this._rt30LoadedFor = undefined;
+                    // Day-detail caches are zone-specific - never serve
+                    // another zone's day details (QA-R C2-6). The daily pills
+                    // re-key on the running sensor id in _renderRuntime.
                     this._rtDayCache.clear();
                     this._rtDayOpen = null;
                     this._rtDay = undefined;
@@ -1406,22 +1375,33 @@ export class MzcsCard extends LitElement {
     if (!entityExists(hass, todayId)) return nothing;
     const todayHours = Number(hass.states[todayId]?.state);
     const todayLabel = Number.isFinite(todayHours) ? formatHoursQuarter(todayHours) : '–';
-    if (this._rtLoadedFor !== todayId) {
-      this._rtLoadedFor = todayId;
-      this._rt7 = undefined;
+    // Past days come from the RUNNING sensor's raw history, not from
+    // long-term statistics of the runtime sensor: history_stats entries carry
+    // no state_class, so those statistics never exist, on any install - the
+    // 0.7.2 bug. Ten days matches HA's default recorder retention.
+    const runningId = zoneEntityId('running_sensor', this._prefix, slug);
+    if (this._rtLoadedFor !== runningId) {
+      this._rtLoadedFor = runningId;
+      this._rtDays = undefined;
       queueMicrotask(() =>
-        void fetchDailyRuntime(hass, todayId, 7).then((d) => {
+        void fetchDailyRuntimeFromHistory(hass, runningId, 10).then((d) => {
           // The user may have switched zone while this was in flight; without
           // this guard the old zone's result lands on the new zone's panel.
-          if (this._rtLoadedFor === todayId) this._rt7 = d;
+          if (this._rtLoadedFor === runningId) this._rtDays = d;
         }),
       );
     }
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const days = (this._rt7?.ok ? this._rt7.rows : [])
-      .filter((d) => d.day < today.getTime())
+    const rows = this._rtDays?.ok ? this._rtDays.rows : [];
+    // Days with NO recorded history are omitted, not drawn as zero-runtime
+    // days - an empty bar would assert a fact nobody has (the item-27 class).
+    const days = rows
+      .filter((d) => d.day < today.getTime() && d.coverage !== 'none')
       .sort((a, b) => b.day - a.day);
+    const purgedDays = rows.filter(
+      (d) => d.day < today.getTime() && d.coverage === 'none',
+    ).length;
     const todayStart = today.getTime();
     const expected = Number(
       hass.states[zoneEntityId('expected_runtime', this._prefix, slug)]?.state,
@@ -1447,114 +1427,48 @@ export class MzcsCard extends LitElement {
       ${this._rtOpen
         ? html`
             <div class="schedbody">
-              <div class="chips" style="margin-bottom:6px;">
-                <button
-                  class=${this._rtRange === 7 ? 'chip mode-on' : 'chip'}
-                  @click=${() => (this._rtRange = 7)}
-                >
-                  7 days
-                </button>
-                <button
-                  class=${this._rtRange === 30 ? 'chip mode-on' : 'chip'}
-                  @click=${() => {
-                    this._rtRange = 30;
-                    this._load30(hass, todayId);
-                  }}
-                >
-                  30 days
-                </button>
-              </div>
-              ${this._rtRange === 30 ? (this._load30(hass, todayId), this._render30()) : nothing}
-              ${this._rtRange === 7
-                ? html`${this._renderPill(zone, 'Today', Number.isFinite(todayHours) ? todayHours : 0, todayStart, true)}`
-                : nothing}
-              ${this._rtRange === 7
-                ? html`
-                    ${days.map((d) =>
-                      this._renderPill(
-                        zone,
-                        new Date(d.day).toLocaleDateString(undefined, {
-                          weekday: 'short',
-                          day: 'numeric',
-                        }),
-                        d.hours,
-                        d.day,
-                        false,
-                      ),
-                    )}
-                    ${this._rt7 && !this._rt7.ok
-                      ? html`<p class="rt-fail">
-                          Could not read history from Home Assistant, so this is not "no
-                          runtime yet" - it is unknown. ${this._rt7.error}
-                        </p>`
-                      : days.length === 0
-                        ? html`<p class="muted" style="font-size:11px;margin:6px 0;">
-                            History accrues daily - past days appear as statistics build up.
-                          </p>`
-                        : nothing}
-                    <p class="muted" style="font-size:10px;margin:6px 0 0;">
-                      Tap a day for its run segments and setpoint changes.
-                    </p>
-                  `
-                : nothing}
+              ${this._renderPill(zone, 'Today', Number.isFinite(todayHours) ? todayHours : 0, todayStart, true)}
+              ${days.map((d) =>
+                this._renderPill(
+                  zone,
+                  new Date(d.day).toLocaleDateString(undefined, {
+                    weekday: 'short',
+                    day: 'numeric',
+                  }),
+                  d.hours,
+                  d.day,
+                  false,
+                  d.coverage === 'partial',
+                ),
+              )}
+              ${this._rtDays && !this._rtDays.ok
+                ? html`<p class="rt-fail">
+                    Could not read history from Home Assistant, so this is not "no
+                    runtime yet" - it is unknown. ${this._rtDays.error}
+                  </p>`
+                : this._rtDays && days.length === 0
+                  ? html`<p class="muted" style="font-size:11px;margin:6px 0;">
+                      No recorded history for this zone yet - past days appear as the
+                      recorder collects them.
+                    </p>`
+                  : nothing}
+              ${purgedDays > 0 && days.length > 0
+                ? html`<p class="muted" style="font-size:10px;margin:6px 0 0;">
+                    Recorded history covers the last ${days.length + 1} days - older days
+                    are gone once the recorder purges them.
+                  </p>`
+                : days.some((d) => d.coverage === 'partial')
+                  ? html`<p class="muted" style="font-size:10px;margin:6px 0 0;">
+                      The oldest day shows ≥ because the recorder has already trimmed
+                      its start.
+                    </p>`
+                  : nothing}
+              <p class="muted" style="font-size:10px;margin:6px 0 0;">
+                Tap a day for its run segments and setpoint changes.
+              </p>
             </div>
           `
         : nothing}
-    `;
-  }
-
-  /**
-   * Idempotent per runtime sensor. The 30-day range persists across a zone
-   * switch, so this has to be reachable from render as well as from the chip -
-   * otherwise the new zone shows a spinner nothing ever resolves (QA R3).
-   */
-  private _load30(hass: HassLike, todayId: string): void {
-    if (this._rt30LoadedFor === todayId) return;
-    this._rt30LoadedFor = todayId;
-    this._rt30 = undefined;
-    void fetchDailyRuntime(hass, todayId, 30).then((d) => {
-      if (this._rt30LoadedFor === todayId) this._rt30 = d;
-    });
-  }
-
-  private _render30() {
-    const res = this._rt30;
-    if (res && !res.ok) {
-      return html`<p class="rt-fail">
-        Could not read long-term statistics, so the 30-day view is unknown rather than
-        empty. ${res.error}
-      </p>`;
-    }
-    if (!res) return html`<p class="muted" style="font-size:11px;">Loading…</p>`;
-    const rows = res.rows;
-    if (rows.length === 0) {
-      return html`<p class="muted" style="font-size:11px;">
-        Long-term statistics build daily - the 30-day view fills in as days accumulate.
-      </p>`;
-    }
-    const sorted = [...rows].sort((a, b) => a.day - b.day);
-    const max = Math.max(...sorted.map((r) => r.hours), 1);
-    const avg = sorted.reduce((a, r) => a + r.hours, 0) / sorted.length;
-    const fmtDay = (t: number) =>
-      new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-    return html`
-      <div class="cols">
-        ${sorted.map(
-          (r) => html`<span
-            class="col"
-            title="${fmtDay(r.day)}: ${formatHoursQuarter(r.hours)}"
-            style="height: ${Math.max(6, (r.hours / max) * 64).toFixed(0)}px"
-          ></span>`,
-        )}
-      </div>
-      <div class="axis">
-        <span>${fmtDay(sorted[0]!.day)}</span>
-        <span>${fmtDay(sorted[sorted.length - 1]!.day)}</span>
-      </div>
-      <p class="muted" style="font-size:11px;margin:6px 0 0;">
-        Avg <b class="rt-b">${formatHoursQuarter(avg)}</b> · Max
-        <b class="rt-b">${formatHoursQuarter(max)}</b> · from long-term statistics (kept forever)
-      </p>
     `;
   }
 
@@ -1611,11 +1525,18 @@ export class MzcsCard extends LitElement {
     hours: number,
     dayStart: number,
     isToday: boolean,
+    partial = false,
   ) {
     const pct = Math.min(100, Math.max(0, (hours / 24) * 100));
     const open = this._rtDayOpen === dayStart;
     return html`
-      <button class="pillrow" @click=${() => void this._openDay(zone, dayStart)}>
+      <button
+        class="pillrow"
+        title=${partial
+          ? 'The recorder has trimmed the start of this day; its total is at least this much.'
+          : nothing}
+        @click=${() => void this._openDay(zone, dayStart)}
+      >
         <span class="pill-label">${label}</span>
         <span class="pill-track">
           <span
@@ -1623,7 +1544,7 @@ export class MzcsCard extends LitElement {
             style="width: ${pct.toFixed(1)}%"
           ></span>
         </span>
-        <span class="pill-hours">${formatHoursQuarter(hours)}</span>
+        <span class="pill-hours">${partial ? '≥ ' : ''}${formatHoursQuarter(hours)}</span>
       </button>
       ${open ? this._renderDayDetail() : nothing}
     `;

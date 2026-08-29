@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fetchDailyRuntime, fetchDayHistory } from '../src/ha-adapter';
+import { fetchDailyRuntimeFromHistory, fetchDayHistory } from '../src/ha-adapter';
 import type { HassLike } from '../src/ha-types';
 
 /**
@@ -17,43 +17,54 @@ function hassWith(callWS?: HassLike['callWS']): HassLike {
 
 const DAY = 24 * 60 * 60 * 1000;
 
-describe('fetchDailyRuntime distinguishes empty from failed', () => {
+describe('fetchDailyRuntimeFromHistory distinguishes empty from failed', () => {
   it('a recorder error is reported as a failure, not as no data', async () => {
     const hass = hassWith(async () => {
       throw new Error('recorder is not running');
     });
-    const res = await fetchDailyRuntime(hass, 'sensor.x_runtime_today', 7);
+    const res = await fetchDailyRuntimeFromHistory(hass, 'binary_sensor.x_running', 10);
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toContain('recorder is not running');
   });
 
-  it('a successful query with no rows is a success that is empty', async () => {
+  it('a successful query with no recorded points succeeds, with every day marked coverage none', async () => {
+    // Success-but-empty must not be a bare [] (the item-27 mistake) NOR a set
+    // of zero-runtime days (the same mistake wearing numbers): each day says
+    // there is no data for it.
     const hass = hassWith(async () => ({}));
-    const res = await fetchDailyRuntime(hass, 'sensor.x_runtime_today', 7);
-    expect(res.ok).toBe(true);
-    if (res.ok) expect(res.rows).toEqual([]);
-  });
-
-  it('returns the rows on success', async () => {
-    const hass = hassWith(async () => ({
-      'sensor.x_runtime_today': [
-        { start: 1_000_000, max: 1.5 },
-        { start: 1_100_000, max: null },
-        { start: 1_200_000, max: 2 },
-      ],
-    }));
-    const res = await fetchDailyRuntime(hass, 'sensor.x_runtime_today', 7);
+    const res = await fetchDailyRuntimeFromHistory(hass, 'binary_sensor.x_running', 10);
     expect(res.ok).toBe(true);
     if (res.ok) {
-      expect(res.rows).toEqual([
-        { day: 1_000_000, hours: 1.5 },
-        { day: 1_200_000, hours: 2 },
-      ]);
+      expect(res.rows).toHaveLength(10);
+      for (const r of res.rows) expect(r.coverage).toBe('none');
+    }
+  });
+
+  it('sums the on-time from raw history rows on success', async () => {
+    const dayStart = new Date();
+    dayStart.setHours(0, 0, 0, 0);
+    const t0 = dayStart.getTime();
+    const hass = hassWith(async () => ({
+      'binary_sensor.x_running': [
+        { s: 'on', lu: (t0 + 3_600_000) / 1000 },
+        { s: 'off', lu: (t0 + 3 * 3_600_000) / 1000 },
+      ],
+    }));
+    const res = await fetchDailyRuntimeFromHistory(hass, 'binary_sensor.x_running', 10);
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      const today = res.rows[res.rows.length - 1]!;
+      expect(today.day).toBe(t0);
+      expect(today.hours).toBeCloseTo(2, 5);
+      // The sensor's first-ever point is 01:00 today, so earlier today is
+      // unknowable and the day is a floor, not a fact.
+      expect(today.coverage).toBe('partial');
+      for (const r of res.rows.slice(0, -1)) expect(r.coverage).toBe('none');
     }
   });
 
   it('treats a core with no websocket as a failure, not as an empty history', async () => {
-    const res = await fetchDailyRuntime(hassWith(undefined), 'sensor.x', 7);
+    const res = await fetchDailyRuntimeFromHistory(hassWith(undefined), 'binary_sensor.x', 10);
     expect(res.ok).toBe(false);
   });
 });
@@ -100,7 +111,7 @@ describe('failures survive whatever Home Assistant rejects with (QA R5)', () => 
     const hass = hassWith(async () => {
       throw 3;
     });
-    const res = await fetchDailyRuntime(hass, 'sensor.x', 7);
+    const res = await fetchDailyRuntimeFromHistory(hass, 'binary_sensor.x', 10);
     expect(res.ok).toBe(false);
     if (!res.ok) {
       expect(res.error).not.toBe('3');
@@ -130,7 +141,7 @@ describe('every card call site consumes the result discriminant (QA T2)', () => 
     // The regression these tests exist for lived in the CARD, not the adapter:
     // a call site that ignores the discriminant re-introduces it while the
     // adapter tests stay green.
-    const calls = [...src.matchAll(/fetch(?:DailyRuntime|DayHistory)\s*\(/g)];
+    const calls = [...src.matchAll(/fetch(?:DailyRuntimeFromHistory|DayHistory)\s*\(/g)];
     expect(calls.length).toBeGreaterThan(0);
     for (const m of calls) {
       const after = src.slice(m.index ?? 0, (m.index ?? 0) + 700);

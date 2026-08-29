@@ -170,17 +170,36 @@ export class MockHass implements HassLike {
       const out: Record<string, Array<{ s?: string; lu: number; a?: Record<string, unknown> }>> = {};
       for (const id of ids) {
         if (id.startsWith('binary_sensor.')) {
-          out[id] = [
-            { s: 'off', lu: start / 1000 },
-            { s: 'on', lu: (start + 6 * H) / 1000 },
-            { s: 'off', lu: (start + 7.5 * H) / 1000 },
-            { s: 'on', lu: (start + 13 * H) / 1000 },
-            { s: 'off', lu: (start + 13.4 * H) / 1000 },
-            { s: 'on', lu: (start + 14 * H) / 1000 },
-            { s: 'off', lu: (start + 16.2 * H) / 1000 },
-            { s: 'on', lu: (start + 19 * H) / 1000 },
-            { s: 'off', lu: (start + 21.5 * H) / 1000 },
+          const endRaw = Date.parse(String(msg.end_time));
+          const end = Number.isFinite(endRaw) ? endRaw : start + 24 * H;
+          // One duty cycle per day across the whole window so the 10-day view
+          // has something to draw. Windows longer than two days lose their
+          // first 36 hours, simulating recorder purge, so the summary's
+          // 'none'/'partial' coverage paths render in the harness. (A one-day
+          // detail window is never trimmed, so the oldest day's detail shows
+          // more than its summary row admits - acceptable in a mock.)
+          const dataStart = end - start > 48 * H ? start + 36 * H : start;
+          const rows: Array<{ s?: string; lu: number; a?: Record<string, unknown> }> = [
+            { s: 'off', lu: dataStart / 1000 },
           ];
+          const cycle: Array<[number, string]> = [
+            [6, 'on'],
+            [7.5, 'off'],
+            [13, 'on'],
+            [13.4, 'off'],
+            [14, 'on'],
+            [16.2, 'off'],
+            [19, 'on'],
+            [21.5, 'off'],
+          ];
+          for (let day = start; day < end; day += 24 * H) {
+            for (const [h, st] of cycle) {
+              const t = day + h * H;
+              if (t <= dataStart || t >= end) continue;
+              rows.push({ s: st, lu: t / 1000 });
+            }
+          }
+          out[id] = rows;
         } else {
           out[id] = [
             { s: 'cool', lu: start / 1000, a: { temperature: 76 } },

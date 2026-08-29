@@ -1,6 +1,6 @@
 {
   "name": "multizone-climate-scheduler-card",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Home Assistant dashboard card (Lovelace): multi-zone climate view for 1-4 zones with seasonal scheduling, fan timers, and runtime history.",
   "license": "MIT",
   "type": "module",
@@ -13,7 +13,8 @@
     "privacy": "node scripts/privacy-scan.mjs",
     "typecheck": "tsc --noEmit",
     "build:dev": "vite build --mode dev && esbuild dist/multizone-climate-scheduler-card-dev.js --minify-whitespace --allow-overwrite --outfile=dist/multizone-climate-scheduler-card-dev.js",
-    "prepare": "git config core.hooksPath .githooks || exit 0"
+    "prepare": "git config core.hooksPath .githooks || exit 0",
+    "goldens": "tsx scripts/update-goldens.ts"
   },
   "repository": {
     "type": "git",

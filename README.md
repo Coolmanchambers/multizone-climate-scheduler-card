@@ -86,8 +86,8 @@ or you want the card to control equipment directly (it never does — automation
 
 | Visual schedule editor | Runtime history |
 |---|---|
-| <img src="docs/schedule.png" alt="Schedule editor with Every day, Weekday-Weekend and Individual days chips above colored temperature strips for weekdays and weekend" width="380"> | <img src="docs/runtime.png" alt="Runtime drawer showing a 7-day bar chart of daily HVAC runtime hours" width="380"> |
-| Colored temperature strips per season. Tap a block to edit it. Switch between one schedule for every day, weekday/weekend, or all seven days. | Daily runtime per zone, 7 or 30 days. Tap a day to see its individual run segments and setpoint changes. |
+| <img src="docs/schedule.png" alt="Schedule editor with Every day, Weekday-Weekend and Individual days chips above colored temperature strips for weekdays and weekend" width="380"> | <img src="docs/runtime.png" alt="Runtime drawer showing daily HVAC runtime for the last 10 days, the oldest day marked as partial" width="380"> |
+| Colored temperature strips per season. Tap a block to edit it. Switch between one schedule for every day, weekday/weekend, or all seven days. | Daily runtime per zone for the last 10 days. Tap a day to see its individual run segments and setpoint changes. |
 
 | Change-set preview | Managed objects |
 |---|---|
@@ -441,7 +441,26 @@ Assistant's own schedule editor — the card reads whatever is there.
 
 ## Configuration reference
 
-The visual editor writes this for you; it's here for reference and for YAML-mode users.
+> **Use the visual editor to configure this card.** Edit the dashboard, then click the pencil on
+> this card. It is *not* behind the card's gear icon — that opens the settings panel, which tunes
+> a card that is already configured. The visual editor writes the current shape for everything you
+> change through it. (It does not retro-fix a hand-written config you paste in.)
+>
+> Hand-writing this YAML is supported but easy to get subtly wrong, because a config that looks
+> fine can still be missing a field that ends up baked into entity names. The clearest example is
+> `seasons[].key`: leave it out on two seasons and they collide, and the card refuses to provision
+> until you give each one its own. Leave it out on a single season and the card still works, but
+> that season's schedule row will not open. Other fields silently fall back to defaults you may not
+> have intended.
+>
+> If you do write it by hand, run the dry-run (gear icon → **Setup** tab → **Run dry-run preview**)
+> and read it before applying. A healthy, fully provisioned install settles to all Unchanged -
+> except without a `weather_entity`, where two pending creates are expected forever (see
+> [Troubleshooting](#troubleshooting)).
+
+The reference below is for understanding what the editor produced, and for YAML-mode users who
+have read the warning above. Old config shapes keep working: see
+[config compatibility](docs/config-compatibility.md).
 
 ```yaml
 type: custom:multizone-climate-scheduler-card
@@ -474,7 +493,7 @@ features:
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
-| `prefix` | string | `climate` | Must be unique per card instance. Slugified automatically. |
+| `prefix` | string | `climate` | Lowercase letters, digits and underscores. The visual editor slugifies what you type; hand-written YAML is used as-is, so keep to that shape. |
 | `zones[].name` | string | — | Display name; also determines the zone's entity ids. |
 | `zones[].entity` | string | — | Any `climate.*` entity. |
 | `zones[].room_sensors` | list | — | Temperature sensors shown as deviation chips. Each item is either an entity id or `{entity, name}` when you want a different label than the entity's friendly name. |

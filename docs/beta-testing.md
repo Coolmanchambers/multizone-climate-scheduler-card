@@ -120,7 +120,8 @@ and include:
 - **What you expected and what happened.**
 - **For anything to do with provisioning** — objects created, edited or deleted, or an apply that
   won't settle — the contents of the dry-run preview (gear icon → **Setup** tab → **Run dry-run
-  preview**). A healthy install settles to *Unchanged* for every object after one apply; if yours
+  preview**). A healthy install settles to *Unchanged* for every object after one apply (with a
+  `weather_entity` configured - without one, two pending creates are expected and documented); if yours
   doesn't, that list is the single most useful thing you can send.
 - **Any browser console errors**, copied as text.
 

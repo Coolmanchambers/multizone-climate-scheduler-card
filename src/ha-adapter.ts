@@ -272,17 +272,6 @@ export async function setZoneEnabled(
   });
 }
 
-export interface DailyRuntime {
-  /** local midnight epoch ms for the day */
-  day: number;
-  hours: number;
-}
-
-/**
- * Daily runtime totals from long-term statistics of the history_stats sensor
- * (resets at midnight → the day's max IS the day's total). Today's live value
- * comes from the sensor state instead; LTS lags by up to an hour.
- */
 /**
  * A recorder read that either succeeded (possibly with nothing in it) or did
  * not happen at all.
@@ -294,38 +283,7 @@ export interface DailyRuntime {
  */
 export type RecorderResult<T> = { ok: true; rows: T[] } | { ok: false; error: string };
 
-export async function fetchDailyRuntime(
-  hass: HassLike,
-  runtimeSensorId: string,
-  days: number,
-): Promise<RecorderResult<DailyRuntime>> {
-  if (!hass.callWS) {
-    return { ok: false, error: 'This Home Assistant connection cannot read history.' };
-  }
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  start.setDate(start.getDate() - (days - 1));
-  try {
-    const res = (await hass.callWS({
-      type: 'recorder/statistics_during_period',
-      start_time: start.toISOString(),
-      statistic_ids: [runtimeSensorId],
-      period: 'day',
-      types: ['max'],
-    })) as Record<string, Array<{ start: number; max?: number | null }>>;
-    const rows = res?.[runtimeSensorId] ?? [];
-    return {
-      ok: true,
-      rows: rows
-        .filter((r) => typeof r.max === 'number')
-        .map((r) => ({ day: r.start, hours: r.max as number })),
-    };
-  } catch (e) {
-    return { ok: false, error: errorText(e) };
-  }
-}
-
-import type { HistoryPoint } from './lib/segments';
+import { dailyRuntimeFromHistory, type DailyRuntimeDay, type HistoryPoint } from './lib/segments';
 
 interface WsHistoryRow {
   s?: string;
@@ -379,6 +337,46 @@ export async function fetchDayHistory(
       significant_changes_only: false,
     })) as Record<string, WsHistoryRow[]>;
     return { ok: true, rows: wsHistoryToPoints(res?.[entityId] ?? [], attribute) };
+  } catch (e) {
+    return { ok: false, error: errorText(e) };
+  }
+}
+
+/**
+ * Daily runtime for the last `days` days, summed from the running sensor's raw
+ * recorder history.
+ *
+ * This REPLACES a long-term-statistics query that could never return rows: the
+ * runtime sensors are created through HA's history_stats config flow, that flow
+ * exposes no `state_class` field, and HA only generates long-term statistics
+ * for sensors that declare one. The statistics existed on no install, ever, so
+ * the multi-day views sat on their empty state permanently - the live bug
+ * behind 0.7.2. Raw history is bounded by the recorder's purge window (10 days
+ * by default), which is why every returned day carries its coverage.
+ */
+export async function fetchDailyRuntimeFromHistory(
+  hass: HassLike,
+  runningSensorId: string,
+  days: number,
+): Promise<RecorderResult<DailyRuntimeDay>> {
+  if (!hass.callWS) {
+    return { ok: false, error: 'This Home Assistant connection cannot read history.' };
+  }
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - (days - 1));
+  try {
+    const res = (await hass.callWS({
+      type: 'history/history_during_period',
+      start_time: start.toISOString(),
+      end_time: new Date().toISOString(),
+      entity_ids: [runningSensorId],
+      minimal_response: true,
+      no_attributes: true,
+      significant_changes_only: false,
+    })) as Record<string, WsHistoryRow[]>;
+    const points = wsHistoryToPoints(res?.[runningSensorId] ?? []);
+    return { ok: true, rows: dailyRuntimeFromHistory(points, days, Date.now()) };
   } catch (e) {
     return { ok: false, error: errorText(e) };
   }

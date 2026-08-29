@@ -174,7 +174,8 @@ export function parseEntityId(
     if (domain === def.domain && rest === def.suffix) return { cls };
   }
 
-  // Zone-scoped: match longest zone slug first so "owners_office" beats "tims".
+  // Zone-scoped: match longest zone slug first, so a zone whose slug prefixes
+  // another ("office" vs "office_annex") cannot swallow the longer one's ids.
   const sortedZones = [...zones].sort((a, b) => b.length - a.length);
   for (const zone of sortedZones) {
     if (rest !== zone && !rest.startsWith(`${zone}_`)) continue;

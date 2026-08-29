@@ -156,7 +156,7 @@ describe('plan + idempotence', () => {
       {
         id: 'binary_sensor.climate_upstairs_running',
         kind: 'template_sensor',
-        spec: { name: 'whatever tim named it', source: 'hvac_action' },
+        spec: { name: 'whatever the user named it', source: 'hvac_action' },
         managed: false,
       },
     ];

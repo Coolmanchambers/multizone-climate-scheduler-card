@@ -1,0 +1,1843 @@
+[
+  {
+    "id": "binary_sensor.climate_zone_one_running",
+    "kind": "template_sensor",
+    "spec": {
+      "name": "Climate Zone One running"
+    },
+    "meta": {
+      "source": "hvac_action"
+    }
+  },
+  {
+    "id": "sensor.climate_zone_one_runtime_today",
+    "kind": "stats_sensor",
+    "spec": {
+      "name": "Climate Zone One runtime today"
+    },
+    "meta": {
+      "model": "history_stats"
+    }
+  },
+  {
+    "id": "sensor.climate_zone_one_expected_runtime",
+    "kind": "template_sensor",
+    "spec": {
+      "name": "Climate Zone One expected runtime"
+    },
+    "meta": {
+      "model": "k_x_cdd"
+    }
+  },
+  {
+    "id": "input_text.climate_zone_one_applied_block",
+    "kind": "helper",
+    "spec": {
+      "name": "Climate Zone One applied block"
+    }
+  },
+  {
+    "id": "input_boolean.climate_zone_one_enabled",
+    "kind": "helper",
+    "spec": {
+      "name": "Climate Zone One enabled"
+    }
+  },
+  {
+    "id": "input_number.climate_zone_one_k",
+    "kind": "helper",
+    "spec": {
+      "name": "Climate Zone One K",
+      "min": 0,
+      "max": 10,
+      "step": 0.01
+    }
+  },
+  {
+    "id": "schedule.climate_zone_one_summer",
+    "kind": "schedule",
+    "spec": {
+      "name": "Climate Zone One Summer"
+    },
+    "meta": {
+      "week": {
+        "monday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "12:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "cool",
+              "cool_temp": 70
+            }
+          },
+          {
+            "from": "12:00:00",
+            "to": "20:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          },
+          {
+            "from": "20:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          }
+        ],
+        "tuesday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "12:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "cool",
+              "cool_temp": 70
+            }
+          },
+          {
+            "from": "12:00:00",
+            "to": "20:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          },
+          {
+            "from": "20:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          }
+        ],
+        "wednesday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "12:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "cool",
+              "cool_temp": 70
+            }
+          },
+          {
+            "from": "12:00:00",
+            "to": "20:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          },
+          {
+            "from": "20:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          }
+        ],
+        "thursday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "12:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "cool",
+              "cool_temp": 70
+            }
+          },
+          {
+            "from": "12:00:00",
+            "to": "20:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          },
+          {
+            "from": "20:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          }
+        ],
+        "friday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "12:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "cool",
+              "cool_temp": 70
+            }
+          },
+          {
+            "from": "12:00:00",
+            "to": "20:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          },
+          {
+            "from": "20:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          }
+        ],
+        "saturday": [
+          {
+            "from": "00:00:00",
+            "to": "08:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          },
+          {
+            "from": "08:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "cool",
+              "cool_temp": 70
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          }
+        ],
+        "sunday": [
+          {
+            "from": "00:00:00",
+            "to": "08:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          },
+          {
+            "from": "08:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "cool",
+              "cool_temp": 70
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": "schedule.climate_zone_one_winter",
+    "kind": "schedule",
+    "spec": {
+      "name": "Climate Zone One Winter"
+    },
+    "meta": {
+      "week": {
+        "monday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "heat_cool",
+              "cool_temp": 80,
+              "heat_temp": 60
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          }
+        ],
+        "tuesday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "heat_cool",
+              "cool_temp": 80,
+              "heat_temp": 60
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          }
+        ],
+        "wednesday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "heat_cool",
+              "cool_temp": 80,
+              "heat_temp": 60
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          }
+        ],
+        "thursday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "heat_cool",
+              "cool_temp": 80,
+              "heat_temp": 60
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          }
+        ],
+        "friday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "heat_cool",
+              "cool_temp": 80,
+              "heat_temp": 60
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          }
+        ],
+        "saturday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "heat_cool",
+              "cool_temp": 80,
+              "heat_temp": 60
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          }
+        ],
+        "sunday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "heat_cool",
+              "cool_temp": 80,
+              "heat_temp": 60
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": "binary_sensor.climate_zone_two_running",
+    "kind": "template_sensor",
+    "spec": {
+      "name": "Climate Zone Two running"
+    },
+    "meta": {
+      "source": "hvac_action"
+    }
+  },
+  {
+    "id": "sensor.climate_zone_two_runtime_today",
+    "kind": "stats_sensor",
+    "spec": {
+      "name": "Climate Zone Two runtime today"
+    },
+    "meta": {
+      "model": "history_stats"
+    }
+  },
+  {
+    "id": "sensor.climate_zone_two_expected_runtime",
+    "kind": "template_sensor",
+    "spec": {
+      "name": "Climate Zone Two expected runtime"
+    },
+    "meta": {
+      "model": "k_x_cdd"
+    }
+  },
+  {
+    "id": "input_text.climate_zone_two_applied_block",
+    "kind": "helper",
+    "spec": {
+      "name": "Climate Zone Two applied block"
+    }
+  },
+  {
+    "id": "input_boolean.climate_zone_two_enabled",
+    "kind": "helper",
+    "spec": {
+      "name": "Climate Zone Two enabled"
+    }
+  },
+  {
+    "id": "input_number.climate_zone_two_k",
+    "kind": "helper",
+    "spec": {
+      "name": "Climate Zone Two K",
+      "min": 0,
+      "max": 10,
+      "step": 0.01
+    }
+  },
+  {
+    "id": "schedule.climate_zone_two_summer",
+    "kind": "schedule",
+    "spec": {
+      "name": "Climate Zone Two Summer"
+    },
+    "meta": {
+      "week": {
+        "monday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "12:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "cool",
+              "cool_temp": 70
+            }
+          },
+          {
+            "from": "12:00:00",
+            "to": "20:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          },
+          {
+            "from": "20:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          }
+        ],
+        "tuesday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "12:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "cool",
+              "cool_temp": 70
+            }
+          },
+          {
+            "from": "12:00:00",
+            "to": "20:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          },
+          {
+            "from": "20:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          }
+        ],
+        "wednesday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "12:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "cool",
+              "cool_temp": 70
+            }
+          },
+          {
+            "from": "12:00:00",
+            "to": "20:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          },
+          {
+            "from": "20:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          }
+        ],
+        "thursday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "12:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "cool",
+              "cool_temp": 70
+            }
+          },
+          {
+            "from": "12:00:00",
+            "to": "20:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          },
+          {
+            "from": "20:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          }
+        ],
+        "friday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "12:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "cool",
+              "cool_temp": 70
+            }
+          },
+          {
+            "from": "12:00:00",
+            "to": "20:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          },
+          {
+            "from": "20:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          }
+        ],
+        "saturday": [
+          {
+            "from": "00:00:00",
+            "to": "08:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          },
+          {
+            "from": "08:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "cool",
+              "cool_temp": 70
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          }
+        ],
+        "sunday": [
+          {
+            "from": "00:00:00",
+            "to": "08:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          },
+          {
+            "from": "08:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "cool",
+              "cool_temp": 70
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": "schedule.climate_zone_two_winter",
+    "kind": "schedule",
+    "spec": {
+      "name": "Climate Zone Two Winter"
+    },
+    "meta": {
+      "week": {
+        "monday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "heat_cool",
+              "cool_temp": 80,
+              "heat_temp": 60
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          }
+        ],
+        "tuesday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "heat_cool",
+              "cool_temp": 80,
+              "heat_temp": 60
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          }
+        ],
+        "wednesday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "heat_cool",
+              "cool_temp": 80,
+              "heat_temp": 60
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          }
+        ],
+        "thursday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "heat_cool",
+              "cool_temp": 80,
+              "heat_temp": 60
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          }
+        ],
+        "friday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "heat_cool",
+              "cool_temp": 80,
+              "heat_temp": 60
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          }
+        ],
+        "saturday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "heat_cool",
+              "cool_temp": 80,
+              "heat_temp": 60
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          }
+        ],
+        "sunday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "heat_cool",
+              "cool_temp": 80,
+              "heat_temp": 60
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": "binary_sensor.climate_zone_three_running",
+    "kind": "template_sensor",
+    "spec": {
+      "name": "Climate Zone Three running"
+    },
+    "meta": {
+      "source": "hvac_action"
+    }
+  },
+  {
+    "id": "sensor.climate_zone_three_runtime_today",
+    "kind": "stats_sensor",
+    "spec": {
+      "name": "Climate Zone Three runtime today"
+    },
+    "meta": {
+      "model": "history_stats"
+    }
+  },
+  {
+    "id": "sensor.climate_zone_three_expected_runtime",
+    "kind": "template_sensor",
+    "spec": {
+      "name": "Climate Zone Three expected runtime"
+    },
+    "meta": {
+      "model": "k_x_cdd"
+    }
+  },
+  {
+    "id": "input_text.climate_zone_three_applied_block",
+    "kind": "helper",
+    "spec": {
+      "name": "Climate Zone Three applied block"
+    }
+  },
+  {
+    "id": "input_boolean.climate_zone_three_enabled",
+    "kind": "helper",
+    "spec": {
+      "name": "Climate Zone Three enabled"
+    }
+  },
+  {
+    "id": "input_number.climate_zone_three_k",
+    "kind": "helper",
+    "spec": {
+      "name": "Climate Zone Three K",
+      "min": 0,
+      "max": 10,
+      "step": 0.01
+    }
+  },
+  {
+    "id": "schedule.climate_zone_three_summer",
+    "kind": "schedule",
+    "spec": {
+      "name": "Climate Zone Three Summer"
+    },
+    "meta": {
+      "week": {
+        "monday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "12:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "cool",
+              "cool_temp": 70
+            }
+          },
+          {
+            "from": "12:00:00",
+            "to": "20:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          },
+          {
+            "from": "20:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          }
+        ],
+        "tuesday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "12:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "cool",
+              "cool_temp": 70
+            }
+          },
+          {
+            "from": "12:00:00",
+            "to": "20:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          },
+          {
+            "from": "20:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          }
+        ],
+        "wednesday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "12:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "cool",
+              "cool_temp": 70
+            }
+          },
+          {
+            "from": "12:00:00",
+            "to": "20:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          },
+          {
+            "from": "20:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          }
+        ],
+        "thursday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "12:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "cool",
+              "cool_temp": 70
+            }
+          },
+          {
+            "from": "12:00:00",
+            "to": "20:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          },
+          {
+            "from": "20:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          }
+        ],
+        "friday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "12:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "cool",
+              "cool_temp": 70
+            }
+          },
+          {
+            "from": "12:00:00",
+            "to": "20:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          },
+          {
+            "from": "20:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block C",
+              "mode": "cool",
+              "cool_temp": 80
+            }
+          }
+        ],
+        "saturday": [
+          {
+            "from": "00:00:00",
+            "to": "08:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          },
+          {
+            "from": "08:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "cool",
+              "cool_temp": 70
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          }
+        ],
+        "sunday": [
+          {
+            "from": "00:00:00",
+            "to": "08:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          },
+          {
+            "from": "08:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "cool",
+              "cool_temp": 70
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "cool",
+              "cool_temp": 75
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": "schedule.climate_zone_three_winter",
+    "kind": "schedule",
+    "spec": {
+      "name": "Climate Zone Three Winter"
+    },
+    "meta": {
+      "week": {
+        "monday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "heat_cool",
+              "cool_temp": 80,
+              "heat_temp": 60
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          }
+        ],
+        "tuesday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "heat_cool",
+              "cool_temp": 80,
+              "heat_temp": 60
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          }
+        ],
+        "wednesday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "heat_cool",
+              "cool_temp": 80,
+              "heat_temp": 60
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          }
+        ],
+        "thursday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "heat_cool",
+              "cool_temp": 80,
+              "heat_temp": 60
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          }
+        ],
+        "friday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "heat_cool",
+              "cool_temp": 80,
+              "heat_temp": 60
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          }
+        ],
+        "saturday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "heat_cool",
+              "cool_temp": 80,
+              "heat_temp": 60
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          }
+        ],
+        "sunday": [
+          {
+            "from": "00:00:00",
+            "to": "04:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          },
+          {
+            "from": "04:00:00",
+            "to": "16:00:00",
+            "data": {
+              "block": "Block A",
+              "mode": "heat_cool",
+              "cool_temp": 80,
+              "heat_temp": 60
+            }
+          },
+          {
+            "from": "16:00:00",
+            "to": "24:00:00",
+            "data": {
+              "block": "Block B",
+              "mode": "heat_cool",
+              "cool_temp": 85,
+              "heat_temp": 65
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": "input_select.climate_season",
+    "kind": "helper",
+    "spec": {
+      "name": "Climate season",
+      "options": [
+        "Summer",
+        "Winter"
+      ]
+    }
+  },
+  {
+    "id": "input_select.climate_season_mode",
+    "kind": "helper",
+    "spec": {
+      "name": "Climate season mode",
+      "options": [
+        "Manual",
+        "Semi-auto",
+        "Full-auto"
+      ]
+    }
+  },
+  {
+    "id": "input_number.climate_season_confirm_days",
+    "kind": "helper",
+    "spec": {
+      "name": "Climate season confirm days",
+      "min": 1,
+      "max": 14,
+      "step": 1
+    },
+    "meta": {
+      "seed": 3
+    }
+  },
+  {
+    "id": "input_number.climate_season_dwell_days",
+    "kind": "helper",
+    "spec": {
+      "name": "Climate season dwell days",
+      "min": 1,
+      "max": 60,
+      "step": 1
+    },
+    "meta": {
+      "seed": 14
+    }
+  },
+  {
+    "id": "input_number.climate_dev_green_max",
+    "kind": "helper",
+    "spec": {
+      "name": "Climate dev green max",
+      "min": 1,
+      "max": 10,
+      "step": 1,
+      "unit": "°F"
+    },
+    "meta": {
+      "seed": 2
+    }
+  },
+  {
+    "id": "input_number.climate_dev_amber_max",
+    "kind": "helper",
+    "spec": {
+      "name": "Climate dev amber max",
+      "min": 1,
+      "max": 15,
+      "step": 1,
+      "unit": "°F"
+    },
+    "meta": {
+      "seed": 4
+    }
+  },
+  {
+    "id": "input_number.climate_runtime_alert_margin",
+    "kind": "helper",
+    "spec": {
+      "name": "Climate runtime alert margin",
+      "min": 5,
+      "max": 100,
+      "step": 5,
+      "unit": "%"
+    },
+    "meta": {
+      "seed": 35
+    }
+  },
+  {
+    "id": "input_number.climate_runtime_alert_days",
+    "kind": "helper",
+    "spec": {
+      "name": "Climate runtime alert days",
+      "min": 1,
+      "max": 7,
+      "step": 1
+    },
+    "meta": {
+      "seed": 3
+    }
+  },
+  {
+    "id": "input_number.climate_runtime_learn_days",
+    "kind": "helper",
+    "spec": {
+      "name": "Climate runtime learn days",
+      "min": 7,
+      "max": 60,
+      "step": 1
+    },
+    "meta": {
+      "seed": 30
+    }
+  },
+  {
+    "id": "input_number.climate_cdd_base",
+    "kind": "helper",
+    "spec": {
+      "name": "Climate cdd base",
+      "min": 60,
+      "max": 80,
+      "step": 1,
+      "unit": "°F"
+    },
+    "meta": {
+      "seed": 75
+    }
+  },
+  {
+    "id": "sensor.climate_next_block",
+    "kind": "template_sensor",
+    "spec": {
+      "name": "Climate next block"
+    }
+  },
+  {
+    "id": "sensor.climate_outdoor_temp",
+    "kind": "template_sensor",
+    "spec": {
+      "name": "Climate outdoor temp"
+    },
+    "meta": {
+      "source": "weather"
+    }
+  },
+  {
+    "id": "sensor.climate_outdoor_daily_mean",
+    "kind": "stats_sensor",
+    "spec": {
+      "name": "Climate outdoor daily mean"
+    },
+    "meta": {
+      "model": "statistics_mean"
+    }
+  },
+  {
+    "id": "input_text.climate_theme",
+    "kind": "helper",
+    "spec": {
+      "name": "Climate theme"
+    }
+  },
+  {
+    "id": "automation:climate_mzcs_engine",
+    "kind": "automation",
+    "spec": {
+      "alias": "Climate: schedule engine",
+      "sig": "6e68985e"
+    }
+  },
+  {
+    "id": "automation:climate_mzcs_watchdog",
+    "kind": "automation",
+    "spec": {
+      "alias": "Climate: engine watchdog",
+      "sig": "d6ad29bd"
+    }
+  },
+  {
+    "id": "automation:climate_mzcs_runtime_learning",
+    "kind": "automation",
+    "spec": {
+      "alias": "Climate: runtime learning",
+      "sig": "ab1675eb"
+    }
+  },
+  {
+    "id": "automation:climate_mzcs_runtime_alert",
+    "kind": "automation",
+    "spec": {
+      "alias": "Climate: runtime anomaly alert",
+      "sig": "34cfb90d"
+    }
+  }
+]

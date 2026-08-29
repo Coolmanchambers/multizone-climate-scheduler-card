@@ -66,3 +66,42 @@ export function resolveEcoPreset(features?: { eco_preset?: string | false }): st
   if (typeof v === 'string' && v.trim()) return v.trim();
   return 'eco';
 }
+
+/**
+ * Normalize a raw card config to the shape the rest of the card consumes.
+ *
+ * THE single normalization boundary (docs/config-compatibility.md, rule R1).
+ * Every historical config shape is accepted here and nowhere else; read sites
+ * consume the normalized result. Pure and Lit-free so it is directly testable -
+ * tests run in a node environment and cannot import the card element.
+ *
+ * Tolerant by design (QA-R C2-2/C2-3): an incomplete config - empty zones, a
+ * zone still being picked in the editor, a missing name, a scalar fan_timer -
+ * must render a helpful placeholder rather than brick the card or its preview.
+ * Only structurally hopeless configs throw.
+ */
+export function normalizeCardConfig(config: MzcsCardConfig): MzcsCardConfig {
+  if (!config || !Array.isArray(config.zones ?? [])) {
+    throw new Error('zones must be a list of { entity, name } items.');
+  }
+  const rawZones = config.zones ?? [];
+  if (rawZones.length > 4) throw new Error('A maximum of 4 zones is supported.');
+  const zones = rawZones.map((z) => ({
+    ...z,
+    name:
+      typeof z.name === 'string' && z.name.trim()
+        ? z.name
+        : z.entity
+          ? z.entity.split('.')[1]!.replace(/_/g, ' ')
+          : 'Zone',
+  }));
+  // fan_timer was a scalar minute count before it became a list of presets.
+  const ft = config.features?.fan_timer as unknown;
+  const features = config.features
+    ? {
+        ...config.features,
+        fan_timer: Array.isArray(ft) ? (ft as number[]) : typeof ft === 'number' ? [ft] : undefined,
+      }
+    : undefined;
+  return { ...config, zones, ...(features ? { features } : {}) };
+}
