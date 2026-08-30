@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-08-29
+
 ### Added
 - **Runtime history now accrues permanent long-term statistics.** Each zone gains a small
   `runtime mirror` sensor that carries the value of its runtime-today sensor with
