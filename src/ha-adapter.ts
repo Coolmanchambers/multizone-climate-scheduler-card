@@ -358,25 +358,31 @@ export async function fetchDailyRuntimeFromHistory(
   hass: HassLike,
   runningSensorId: string,
   days: number,
+  // Injectable for tests ONLY. The default is the real clock; the card never
+  // passes this. Without it, a test asserting today's sum depends on the
+  // wall-clock at run time - which failed the v0.7.3 release CI at 01:22 UTC,
+  // when "today so far" was genuinely 22 minutes long. The clamp itself is
+  // correct product behaviour; the test needed a fixed clock.
+  nowMs: number = Date.now(),
 ): Promise<RecorderResult<DailyRuntimeDay>> {
   if (!hass.callWS) {
     return { ok: false, error: 'This Home Assistant connection cannot read history.' };
   }
-  const start = new Date();
+  const start = new Date(nowMs);
   start.setHours(0, 0, 0, 0);
   start.setDate(start.getDate() - (days - 1));
   try {
     const res = (await hass.callWS({
       type: 'history/history_during_period',
       start_time: start.toISOString(),
-      end_time: new Date().toISOString(),
+      end_time: new Date(nowMs).toISOString(),
       entity_ids: [runningSensorId],
       minimal_response: true,
       no_attributes: true,
       significant_changes_only: false,
     })) as Record<string, WsHistoryRow[]>;
     const points = wsHistoryToPoints(res?.[runningSensorId] ?? []);
-    return { ok: true, rows: dailyRuntimeFromHistory(points, days, Date.now()) };
+    return { ok: true, rows: dailyRuntimeFromHistory(points, days, nowMs) };
   } catch (e) {
     return { ok: false, error: errorText(e) };
   }

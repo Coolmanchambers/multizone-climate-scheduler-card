@@ -50,7 +50,11 @@ describe('fetchDailyRuntimeFromHistory distinguishes empty from failed', () => {
         { s: 'off', lu: (t0 + 3 * 3_600_000) / 1000 },
       ],
     }));
-    const res = await fetchDailyRuntimeFromHistory(hass, 'binary_sensor.x_running', 10);
+    // FIXED clock (05:00 today). With the real clock this test failed the
+    // v0.7.3 release CI at 01:22 UTC: the on-interval is 01:00-03:00, today is
+    // clamped at "now", and at 01:22 today's sum genuinely IS 22 minutes. The
+    // clamp is correct behaviour; a test of a specific sum needs a fixed now.
+    const res = await fetchDailyRuntimeFromHistory(hass, 'binary_sensor.x_running', 10, t0 + 5 * 3_600_000);
     expect(res.ok).toBe(true);
     if (res.ok) {
       const today = res.rows[res.rows.length - 1]!;
