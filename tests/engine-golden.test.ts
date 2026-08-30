@@ -70,6 +70,10 @@ const PINNED_VARIANTS: Record<string, Record<string, string>> = {
   // signatures must equal the default's. Pinned anyway: a generator that started
   // varying on a feature flag would show up here first.
   'fan-timer-off': { engine: '6e68985e', runtime_learning: 'ab1675eb', runtime_alert: '34cfb90d' },
+  // Weather affects NO automation: its signatures must equal the default's
+  // (item 37 - the variant exists to pin the conditional outdoor pair's false
+  // branch). A weather-dependent generator change would show up here first.
+  'with-weather': { engine: '6e68985e', runtime_learning: 'ab1675eb', runtime_alert: '34cfb90d' },
   'anomaly-alerts-off': { engine: '6e68985e', runtime_learning: 'ab1675eb', fan_timer_zone_one: 'fac7b42f' },
   'single-zone': { engine: '08c752f4', runtime_learning: '9a20aee7', runtime_alert: '015c309b', fan_timer_zone_one: 'fac7b42f' },
   'four-zones': {
@@ -201,11 +205,11 @@ describe('golden snapshots (item 6 part 1)', () => {
     expect(inventoryFor(canonicalInput())).toEqual(golden('inventory.default.json'));
   });
 
-  it('the canonical fixture is a full 48-object install', () => {
+  it('the canonical fixture is a full 51-object install (48 + 3 runtime mirrors, item 42)', () => {
     const inv = inventoryFor(canonicalInput());
-    expect(inv).toHaveLength(48);
+    expect(inv).toHaveLength(51);
     const byKind = inv.reduce<Record<string, number>>((a, o) => ({ ...a, [o.kind]: (a[o.kind] ?? 0) + 1 }), {});
-    expect(byKind).toEqual({ helper: 23, template_sensor: 8, stats_sensor: 4, schedule: 6, automation: 7 });
+    expect(byKind).toEqual({ helper: 23, template_sensor: 11, stats_sensor: 4, schedule: 6, automation: 7 });
   });
 
   it('every inventory id is unique', () => {

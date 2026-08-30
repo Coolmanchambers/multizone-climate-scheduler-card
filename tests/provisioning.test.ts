@@ -56,12 +56,12 @@ describe('buildDesired inventory (CONTRACT §5)', () => {
     const d = buildDesired(baseInput());
     const byKind = (k: string) => d.filter((x) => x.kind === k).length;
     expect(byKind('helper')).toBe(23); // 3 fan timers + 3 markers + 3 enables + 3 k + 2 selects + 8 numbers + theme
-    expect(byKind('template_sensor')).toBe(8); // 3 running + 3 expected + next_block + outdoor_temp
+    expect(byKind('template_sensor')).toBe(11); // 3 running + 3 expected + 3 runtime mirrors (item 42) + next_block + outdoor_temp
     expect(byKind('stats_sensor')).toBe(4); // 3 runtime_today + outdoor_daily_mean
     expect(byKind('schedule')).toBe(6);
     expect(byKind('automation')).toBe(7); // engine, watchdog, learning, alert, 3 fan
-    expect(d).toHaveLength(48);
-    expect(new Set(d.map((x) => x.id)).size).toBe(48); // no id collisions
+    expect(d).toHaveLength(51);
+    expect(new Set(d.map((x) => x.id)).size).toBe(51); // no id collisions
   });
 
   it('number helper specs seed defaults without HA `initial` (restart-reset hazard, QA-R B1-5)', () => {
@@ -146,7 +146,11 @@ describe('plan + idempotence', () => {
   it('fresh install = all creates; apply → replan = zero actionable', () => {
     const desired = buildDesired(baseInput());
     const p1 = plan(desired, []);
-    expect(p1.create).toHaveLength(48);
+    // 51 desired minus the conditional outdoor pair (item 37): the canonical
+    // fixture has no weather entity, so a fresh weather-less install creates
+    // 49 and SETTLES - it no longer plans the 2 Creates the executor would
+    // only skip.
+    expect(p1.create).toHaveLength(49);
     expect(actionable(plan(desired, applyPlan(p1, [])))).toHaveLength(0);
   });
 
@@ -162,7 +166,7 @@ describe('plan + idempotence', () => {
     ];
     const p = plan(desired, existing);
     expect(p.adopt.map((a) => a.id)).toEqual(['binary_sensor.climate_upstairs_running']);
-    expect(p.create).toHaveLength(47);
+    expect(p.create).toHaveLength(48);
     // Adopt labels only (executor parity): the divergent display name shows
     // as exactly one rename Update on the next plan, and converges after it.
     const p2 = plan(desired, applyPlan(p, existing));
@@ -248,5 +252,43 @@ describe('extraction parity contract (every compared spec key is registry-readab
         expect(allowed, `${d.id} spec key "${k}" is not registry-readable - move it to meta`).toContain(k);
       }
     }
+  });
+});
+
+describe('conditional outdoor pair (item 37): weather-less installs settle', () => {
+  const OUTDOOR = ['sensor.climate_outdoor_temp', 'sensor.climate_outdoor_daily_mean'];
+
+  it('weather-less: the outdoor pair is desired but never planned as a Create', () => {
+    const d = buildDesired(baseInput());
+    const pair = d.filter((o) => OUTDOOR.includes(o.id));
+    expect(pair.map((o) => o.conditional)).toEqual([true, true]);
+    const p = plan(d, []);
+    expect(p.create.map((a) => a.id)).not.toContain(OUTDOOR[0]);
+    expect(p.create.map((a) => a.id)).not.toContain(OUTDOOR[1]);
+    // and the install SETTLES: replan after apply has zero actionable
+    expect(actionable(plan(d, applyPlan(p, [])))).toHaveLength(0);
+  });
+
+  it('with a weather entity the pair is unconditional and created', () => {
+    const d = buildDesired({ ...baseInput(), weather_entity: 'weather.forecast_home' });
+    const pair = d.filter((o) => OUTDOOR.includes(o.id));
+    expect(pair.every((o) => !o.conditional)).toBe(true);
+    const p = plan(d, []);
+    expect(p.create.map((a) => a.id)).toEqual(expect.arrayContaining(OUTDOOR));
+  });
+
+  it('removing the weather entity NEVER deletes an already-provisioned pair, and still compares it', () => {
+    // provision WITH weather, then replan WITHOUT it
+    const withWeather = plan(buildDesired({ ...baseInput(), weather_entity: 'weather.forecast_home' }), []);
+    const registry = applyPlan(withWeather, []);
+    const without = plan(buildDesired(baseInput()), registry);
+    expect(without.delete).toHaveLength(0);
+    expect(without.noop.map((a) => a.id)).toEqual(expect.arrayContaining(OUTDOOR));
+    // a renamed pair still shows as an Update - conditional means create-skip, not compare-skip
+    const renamed = registry.map((e) =>
+      e.id === OUTDOOR[0] ? { ...e, spec: { ...e.spec, name: 'user renamed it' } } : e,
+    );
+    const p2 = plan(buildDesired(baseInput()), renamed);
+    expect(p2.update.map((a) => a.id)).toContain(OUTDOOR[0]);
   });
 });

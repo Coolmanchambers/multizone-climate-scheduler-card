@@ -7,6 +7,7 @@ export type ZoneClass =
   | 'room_override_timer'
   | 'running_sensor'
   | 'runtime_today'
+  | 'runtime_mirror'
   | 'expected_runtime'
   | 'target_room_select'
   | 'sensor_schedule'
@@ -47,6 +48,7 @@ const ZONE_CLASS_DEFS: Record<ZoneClass, { domain: string; suffix: string }> = {
   room_override_timer: { domain: 'timer', suffix: 'room_override' },
   running_sensor: { domain: 'binary_sensor', suffix: 'running' },
   runtime_today: { domain: 'sensor', suffix: 'runtime_today' },
+  runtime_mirror: { domain: 'sensor', suffix: 'runtime_mirror' },
   expected_runtime: { domain: 'sensor', suffix: 'expected_runtime' },
   target_room_select: { domain: 'input_select', suffix: 'target_room' },
   sensor_schedule: { domain: 'schedule', suffix: 'sensor_schedule' },

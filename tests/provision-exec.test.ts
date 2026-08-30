@@ -734,3 +734,47 @@ describe('orphan season schedule discovery (QA-2 live finding, B1-6 season varia
     expect(existing2.some((e) => e.id === 'schedule.climate_upstairs_spring' && !e.managed)).toBe(true);
   });
 });
+
+describe('runtime mirror sensor (item 42)', () => {
+  /**
+   * The mirror exists for ONE reason: history_stats sensors expose no
+   * state_class, so HA accrues no long-term statistics for them (the live
+   * 0.7.2 bug). Every assertion here is the load-bearing property - a mirror
+   * created WITHOUT state_class: measurement is the original defect rebuilt.
+   */
+  it('creates a template sensor mirroring runtime_today WITH state_class: measurement', async () => {
+    const { hass, calls } = fakeHass();
+    const p = emptyPlan();
+    p.create.push(
+      create('sensor.climate_upstairs_runtime_mirror', 'template_sensor', {
+        name: 'Climate Upstairs runtime mirror',
+        model: 'runtime_mirror',
+      }),
+    );
+    const log: string[] = [];
+    const res = await executePlan(hass, p, ctx(log));
+    expect(res.ok).toBe(true);
+    expect(res.created).toBe(1);
+    // The finishing flow step carries the sensor's fields.
+    const flowSteps = calls.filter((c) => /^POST config\/config_entries\/flow\/f\d+$/.test(c.key));
+    const fields = Object.assign({}, ...flowSteps.map((c) => c.data ?? {}));
+    expect(fields.state).toBe("{{ states('sensor.climate_upstairs_runtime_today') | float(0) }}");
+    expect(fields.state_class).toBe('measurement');
+    expect(fields.unit_of_measurement).toBe('h');
+  });
+
+  it('skips with a log line, never throws, when the id matches no zone', async () => {
+    const { hass } = fakeHass();
+    const p = emptyPlan();
+    p.create.push(
+      create('sensor.climate_nowhere_runtime_mirror', 'template_sensor', {
+        name: 'X',
+        model: 'runtime_mirror',
+      }),
+    );
+    const log: string[] = [];
+    const res = await executePlan(hass, p, ctx(log));
+    expect(res.ok).toBe(true);
+    expect(log.some((l) => l.includes('SKIP'))).toBe(true);
+  });
+});

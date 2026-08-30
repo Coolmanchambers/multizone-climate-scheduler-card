@@ -182,12 +182,16 @@ export function allGeneratedPayloads(input: ProvisionInput): Record<string, Reco
  */
 export function inventoryFor(
   input: ProvisionInput,
-): Array<{ id: string; kind: string; spec: unknown; meta?: unknown }> {
+): Array<{ id: string; kind: string; spec: unknown; meta?: unknown; conditional?: boolean }> {
   return buildDesired(input).map((o) => ({
     id: o.id,
     kind: o.kind,
     spec: o.spec,
     ...(o.meta ? { meta: o.meta } : {}),
+    // Pinned in the goldens deliberately (item 37): a change that flips an
+    // object's conditionality changes what a fresh install creates, and an
+    // unprojected field is invisible to the net.
+    ...(o.conditional ? { conditional: true } : {}),
   }));
 }
 
@@ -259,6 +263,12 @@ export const VARIANTS: Array<{
     overrides: { seasons: [CANONICAL_SEASONS[0]!] },
     affects: ['climate_mzcs_engine'],
     note: 'Only the engine reads seasons.',
+  },
+  {
+    name: 'with-weather',
+    overrides: { weather_entity: 'weather.forecast_home' },
+    affects: [],
+    note: 'A weather entity flips the outdoor pair unconditional (item 37) and must change NO automation.',
   },
   {
     name: 'three-seasons',

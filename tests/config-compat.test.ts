@@ -446,3 +446,55 @@ describe('seasons[].key: refuse ONLY the genuinely broken case (item 9, option c
     expect(buildDesired(input()).length).toBeGreaterThan(0);
   });
 });
+
+describe('seasons[].name: refuse non-strings with a message, not a TypeError (item 41)', () => {
+  /**
+   * Measured twice against v0.7.2 before this guard existed: a season with no
+   * name (or a non-string one) died with a raw TypeError from deep inside a
+   * generator (`s.name.replace is not a function` / `Cannot read properties of
+   * undefined`), surfacing as a cryptic dry-run error. Every refused shape
+   * below already THREW at v0.7.2, so this guard is message-only: no working
+   * install changes behaviour. `name: ''` provisioned at v0.7.2 and MUST keep
+   * provisioning.
+   */
+  const seasonsOf = (seasons: unknown[]): ProvisionInput =>
+    ({
+      ...input(),
+      seasons: seasons as ProvisionInput['seasons'],
+      schedules: Object.fromEntries(
+        ZONES.map((z) => [
+          z.slug,
+          Object.fromEntries((seasons as Array<{ key?: unknown }>).map((x) => [String(x.key), set])),
+        ]),
+      ),
+    }) as ProvisionInput;
+
+  for (const [label, season] of [
+    ['no name at all', { key: 'summer', default_mode: 'cool' }],
+    ['name: null', { key: 'summer', name: null, default_mode: 'cool' }],
+    ['name: 123', { key: 'summer', name: 123, default_mode: 'cool' }],
+  ] as const) {
+    it(`${label} is refused with a message naming the season`, () => {
+      expect(() => buildDesired(seasonsOf([season]))).toThrow(/season 1 \(key: summer\).*name/i);
+    });
+  }
+
+  it('names WHICH season when only one of several is broken', () => {
+    expect(() =>
+      buildDesired(
+        seasonsOf([
+          { key: 'summer', name: 'Summer', default_mode: 'cool' },
+          { key: 'winter', default_mode: 'heat_cool' },
+        ]),
+      ),
+    ).toThrow(/season 2 \(key: winter\)/i);
+  });
+
+  it('name: "" still provisions - it worked at v0.7.2 and refusing it would break installs', () => {
+    expect(() => buildDesired(seasonsOf([{ key: 'summer', name: '', default_mode: 'cool' }]))).not.toThrow();
+  });
+
+  it('a nameless season without a key gets the name message, position-addressed', () => {
+    expect(() => buildDesired(seasonsOf([{ default_mode: 'cool' }]))).toThrow(/season 1.*name/i);
+  });
+});

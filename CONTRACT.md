@@ -89,6 +89,10 @@ never collide in HA's name→object_id slugification (S12c incident rule).
 - `sensor.climate_<zone>_runtime_today` (history_stats; feeds today's figure and the learning
   automation. The runtime drawer's PAST days come from the running sensor's raw recorder history
   - history_stats entries carry no state_class, so they have no long-term statistics to read)
+- `sensor.climate_<zone>_runtime_mirror` (template mirroring runtime_today's value with
+  `state_class: measurement`, added post-v0.7.2: it exists solely so long-term statistics accrue -
+  a day's runtime is that day's LTS max. Additive; the permanent 30-day/seasonal view reads it
+  once enough history exists)
 - `sensor.climate_<zone>_expected_runtime` (template: k x CDD)
 - `input_text.climate_<zone>_applied_block` (engine hold marker)
 - `input_number.climate_<zone>_k` (learned runtime per cooling-degree-day; written nightly)

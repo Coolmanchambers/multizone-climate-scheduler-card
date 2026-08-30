@@ -246,6 +246,23 @@ function templateFlowSpec(id: string, spec: Record<string, unknown>, ctx: ExecCo
       },
     };
   }
+  if (id.startsWith('sensor.') && spec.model === 'runtime_mirror') {
+    const zone = zoneFor(id, ctx);
+    if (!zone) return null;
+    // Mirrors runtime_today so long-term statistics accrue (item 42): the
+    // history_stats flow exposes no state_class, this template does. Daily
+    // runtime = the day's LTS max of this sensor.
+    return {
+      handler: 'template',
+      menu: 'sensor',
+      fields: {
+        name,
+        state: `{{ states('sensor.${p}_${zone.slug}_runtime_today') | float(0) }}`,
+        unit_of_measurement: 'h',
+        state_class: 'measurement',
+      },
+    };
+  }
   if (id.startsWith('sensor.') && spec.model === 'k_x_cdd') {
     const zone = zoneFor(id, ctx);
     if (!zone) return null;

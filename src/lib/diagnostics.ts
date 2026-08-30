@@ -228,13 +228,13 @@ export function buildDiagnostics(input: DiagnosticsInput): string {
           // A healthy install settles here; anything else is the first thing to
           // look at, so state it rather than making a reader do the arithmetic.
           settled: input.plan.create + input.plan.adopt + input.plan.update + input.plan.delete === 0,
-          // Without a weather entity the two outdoor sensors are always in the
-          // plan but never created, so such an install never reaches settled.
-          // Saying so here stops the artifact that exists to triage a report
-          // pointing at a non-bug (QA X2).
+          // Item 37 made weather-less installs settle (the outdoor pair is no
+          // longer planned as a Create the executor cannot honor), so the old
+          // "2 pending by design" note is gone. What remains diagnostic-worthy
+          // is the consequence: without outdoor data, CDD learning is off.
           ...(cfg.weather_entity
             ? {}
-            : { note: 'no weather entity: 2 outdoor sensors stay pending by design' }),
+            : { note: 'no weather entity: outdoor sensors not provisioned, CDD learning off' }),
         }
       : 'not run',
 

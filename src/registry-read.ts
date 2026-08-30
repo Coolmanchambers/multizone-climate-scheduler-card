@@ -40,6 +40,7 @@ const KIND_BY_CLASS: Record<string, ObjectKind> = {
   steer_max_setpoint: 'helper',
   steer_max_offset: 'helper',
   running_sensor: 'template_sensor',
+  runtime_mirror: 'template_sensor',
   expected_runtime: 'template_sensor',
   next_block_sensor: 'template_sensor',
   outdoor_temp_sensor: 'template_sensor',

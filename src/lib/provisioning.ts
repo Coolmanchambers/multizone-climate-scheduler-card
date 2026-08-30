@@ -69,6 +69,15 @@ export interface DesiredObject {
    * must be empty). Creation-only payloads live in `meta`.
    */
   spec: Record<string, unknown>;
+  /**
+   * True = "keep it if it exists, but do not create it" (item 37). The outdoor
+   * pair is desired unconditionally so an already-provisioned one is never
+   * planned for delete, but WITHOUT a weather entity the executor cannot
+   * create it - so planning a Create produced 2 permanent pending rows and a
+   * weather-less install could never settle to all-Unchanged, breaking the
+   * health canary for exactly the installs beta testers are likeliest to have.
+   */
+  conditional?: boolean;
   /** Creation-time payload (seed values, seeded week, template types). NEVER compared. */
   meta?: Record<string, unknown>;
 }
@@ -157,6 +166,29 @@ function weeklySpec(set: ScheduleSet): Record<DayKey, TimeRange[]> {
  * Every caller runs buildDesired inside try/catch that renders the message as
  * a panel error, so the card keeps rendering.
  */
+/**
+ * A season's name must be a string (item 41). Measured against v0.7.2 twice:
+ * a missing, null or numeric name died as a raw TypeError from inside the
+ * seasonMap template builders (automation-payloads and its executor twin) -
+ * "Cannot read properties of undefined (reading 'replace')" surfaced as the
+ * dry-run error. Every refused shape here already threw there, so this guard
+ * is message-only: no config that provisioned changes behaviour. The empty
+ * string is NOT refused - `name: ''` provisioned and converged at v0.7.2, and
+ * refusing a working install is the breaking change R3 forbids. Guarded once
+ * at the shared input rather than patched in two generators, because those two
+ * hand-built maps drifting apart is finding NEW-3's whole genre.
+ */
+function assertSeasonNames(seasons: ProvisionSeason[]): void {
+  seasons.forEach((s, i) => {
+    if (typeof s?.name === 'string') return;
+    const key = s?.key != null ? ` (key: ${String(s.key)})` : '';
+    throw new Error(
+      `Season ${i + 1}${key} has no name. Every season needs a display name - ` +
+        `add \`name: ...\` to it, or configure the card with the visual editor, which requires one.`,
+    );
+  });
+}
+
 function assertUniqueSeasonKeys(seasons: ProvisionSeason[], zoneCount: number): void {
   if (zoneCount === 0) return;
   const groups = new Map<string, Array<{ s: ProvisionSeason; i: number }>>();
@@ -193,6 +225,7 @@ function assertUniqueSeasonKeys(seasons: ProvisionSeason[], zoneCount: number): 
 }
 
 export function buildDesired(input: ProvisionInput): DesiredObject[] {
+  assertSeasonNames(input.seasons);
   assertUniqueSeasonKeys(input.seasons, input.zones.length);
   const out: DesiredObject[] = [];
   const p = input.prefix;
@@ -221,6 +254,19 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
       kind: 'stats_sensor',
       spec: { name: `${label} ${z.name} runtime today` },
       meta: { model: 'history_stats' },
+    });
+    // LTS mirror (backlog item 42). history_stats sensors expose no
+    // state_class, so HA generates no long-term statistics for them - the live
+    // 0.7.2 bug. This template sensor mirrors runtime_today's value WITH
+    // `state_class: measurement`, so hourly statistics accrue from the day it
+    // is created; a day's runtime is that day's LTS max (the sensor climbs
+    // 0 -> N and resets at midnight). The 30-day/seasonal card view reads it
+    // later (item 42b) at zero recorder cost.
+    out.push({
+      id: zoneEntityId('runtime_mirror', p, z.slug),
+      kind: 'template_sensor',
+      spec: { name: `${label} ${z.name} runtime mirror` },
+      meta: { model: 'runtime_mirror' },
     });
     out.push({
       id: zoneEntityId('expected_runtime', p, z.slug),
@@ -317,20 +363,26 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
     kind: 'template_sensor',
     spec: { name: `${label} next block` },
   });
-  // Outdoor temperature chain feeding CDD learning (QA-R gap G1). The daily
-  // mean is ALWAYS desired so an already-provisioned one is never planned for
-  // delete; creation is skipped with a note when no weather entity is set.
+  // Outdoor temperature chain feeding CDD learning (QA-R gap G1). The pair is
+  // ALWAYS desired so an already-provisioned one is never planned for delete;
+  // without a weather entity it is marked conditional (item 37): kept and
+  // compared when present, but never planned as a Create the executor would
+  // only skip - that mismatch left weather-less installs permanently short of
+  // all-Unchanged.
+  const outdoorConditional = input.weather_entity ? {} : { conditional: true };
   out.push({
     id: globalEntityId('outdoor_temp_sensor', p),
     kind: 'template_sensor',
     spec: { name: `${label} outdoor temp` },
     meta: { source: 'weather' },
+    ...outdoorConditional,
   });
   out.push({
     id: globalEntityId('outdoor_daily_mean', p),
     kind: 'stats_sensor',
     spec: { name: `${label} outdoor daily mean` },
     meta: { model: 'statistics_mean' },
+    ...outdoorConditional,
   });
   out.push({
     id: globalEntityId('theme', p),
@@ -401,6 +453,11 @@ export function plan(desired: DesiredObject[], existing: ExistingObject[]): Plan
   for (const d of desired) {
     const e = byId.get(d.id);
     if (!e) {
+      // Conditional objects (item 37) are keep-if-present only: absent means
+      // nothing to do, never a Create the executor cannot honor. Present ones
+      // fall through to the normal adopt/update/noop comparison below, and the
+      // delete sweep still never touches them because they stay in desiredIds.
+      if (d.conditional) continue;
       out.create.push({ op: 'create', id: d.id, kind: d.kind, spec: d.spec, ...(d.meta ? { meta: d.meta } : {}) });
     } else if (!e.managed) {
       out.adopt.push({ op: 'adopt', id: d.id, kind: d.kind, spec: d.spec });

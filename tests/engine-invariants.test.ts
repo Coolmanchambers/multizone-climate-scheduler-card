@@ -46,12 +46,21 @@ function actionOf(node: Node): string | undefined {
  */
 function targetsOf(node: Node): string[] {
   const out: string[] = [];
-  for (const holder of [node.target, node.data]) {
-    const e = (holder as Node | undefined)?.entity_id;
-    if (typeof e === 'string') out.push(e);
-    else if (Array.isArray(e)) out.push(...e.filter((x): x is string => typeof x === 'string'));
+  // Item 38 structural fix: read the TOP-LEVEL spelling too (bare
+  // `entity_id:` beside the action, the oldest form core still accepts) and
+  // the area/device/label selectors. A guard that reads only entity ids under
+  // target/data would pass a payload that suddenly targeted a whole area.
+  for (const holder of [node.target, node.data, node]) {
+    const h = holder as Node | undefined;
+    if (!h || typeof h !== 'object') continue;
+    for (const key of ['entity_id', 'area_id', 'device_id', 'label_id'] as const) {
+      const e = h[key];
+      const tag = key === 'entity_id' ? '' : `${key}:`;
+      if (typeof e === 'string') out.push(tag + e);
+      else if (Array.isArray(e)) out.push(...e.filter((x): x is string => typeof x === 'string').map((x) => tag + x));
+    }
   }
-  return out;
+  return [...new Set(out)];
 }
 
 /** Every service call in a payload, in document order, as `action -> targets`. */
@@ -545,4 +554,66 @@ describe('staleness detection cannot be silently removed (QA NEW-6)', () => {
       }
     }
   });
+});
+
+/**
+ * Item 38 structural fixes (round-3 repair list). Two whole-class closures:
+ *
+ * 1. The safety-critical skip gate is pinned as an EXACT string across EVERY
+ *    variant, not just the default fixture - QA H4/NEW-4 proved the kill
+ *    switch could be bypassed at >=4 zones behind one re-pinned literal when
+ *    only the default shape was checked.
+ * 2. Every automation in every variant has a full ORDERED call list - QA
+ *    NEW-5's find()-hides-the-second-call hole, closed for the engine only
+ *    until now. Expectations below were DUMPED from the generators and
+ *    hand-reviewed, not written from memory; per family they are derived from
+ *    the variant's config so a new variant is covered automatically.
+ */
+describe('item 38: exact gate + ordered calls across the WHOLE matrix', () => {
+  const gateFor = (eco: string | false | undefined): string => {
+    const base =
+      "{{ is_state(repeat.item.enabled, 'on') and blk is not none and blk != states(repeat.item.marker)";
+    if (eco === false) return `${base} }}`;
+    const preset = (typeof eco === 'string' ? eco : 'eco').replace(/['\\]/g, '');
+    return `${base} and state_attr(repeat.item.climate, 'preset_mode') != '${preset}' }}`;
+  };
+
+  const rows = [{ name: 'default', overrides: {} as Record<string, unknown> }, ...VARIANTS];
+  for (const v of rows) {
+    const input = canonicalInput(v.overrides as Parameters<typeof canonicalInput>[0]);
+    const payloads = allPayloads(input) as Record<string, Node>;
+    const eco = (v.overrides as { features?: { eco_preset?: string | false } }).features?.eco_preset;
+
+    const pfx = input.prefix;
+
+    it(`${v.name}: the skip gate is EXACTLY its expected string`, () => {
+      const gate = zoneStep(payloads[`${pfx}_mzcs_engine`] as Node, 'Skip when zone disabled');
+      expect(gate, 'engine payload must exist').toBeDefined();
+      expect(gate!.value_template).toBe(gateFor(eco));
+    });
+
+    it(`${v.name}: every automation performs EXACTLY its expected calls, in order`, () => {
+      const expected: Record<string, string[]> = {
+        [`${pfx}_mzcs_engine`]: [
+          'climate.set_temperature -> {{ repeat.item.climate }}',
+          'climate.set_hvac_mode -> {{ repeat.item.climate }}',
+          'climate.set_temperature -> {{ repeat.item.climate }}',
+          'input_text.set_value -> {{ repeat.item.marker }}',
+        ],
+        [`${pfx}_mzcs_watchdog`]: ['persistent_notification.create -> (none)'],
+        [`${pfx}_mzcs_runtime_learning`]: ['input_number.set_value -> {{ repeat.item.k }}'],
+      };
+      if (input.features.anomaly_alerts) {
+        expected[`${pfx}_mzcs_runtime_alert`] = ['persistent_notification.create -> (none)'];
+      }
+      if (input.features.fan_timer) {
+        for (const z of input.zones) {
+          // Zone climate ENTITIES are prefix-independent - only the uid carries the prefix.
+          expected[`${pfx}_mzcs_fan_timer_${z.slug}`] = [`climate.set_fan_mode -> ${z.climate}`];
+        }
+      }
+      const actual = Object.fromEntries(Object.entries(payloads).map(([uid, p]) => [uid, callsOf(p as Node)]));
+      expect(actual).toEqual(expected);
+    });
+  }
 });

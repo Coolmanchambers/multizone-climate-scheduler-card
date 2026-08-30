@@ -28,6 +28,16 @@
     }
   },
   {
+    "id": "sensor.climate_zone_one_runtime_mirror",
+    "kind": "template_sensor",
+    "spec": {
+      "name": "Climate Zone One runtime mirror"
+    },
+    "meta": {
+      "model": "runtime_mirror"
+    }
+  },
+  {
     "id": "sensor.climate_zone_one_expected_runtime",
     "kind": "template_sensor",
     "spec": {
@@ -584,6 +594,16 @@
     }
   },
   {
+    "id": "sensor.climate_zone_two_runtime_mirror",
+    "kind": "template_sensor",
+    "spec": {
+      "name": "Climate Zone Two runtime mirror"
+    },
+    "meta": {
+      "model": "runtime_mirror"
+    }
+  },
+  {
     "id": "sensor.climate_zone_two_expected_runtime",
     "kind": "template_sensor",
     "spec": {
@@ -1137,6 +1157,16 @@
     },
     "meta": {
       "model": "history_stats"
+    }
+  },
+  {
+    "id": "sensor.climate_zone_three_runtime_mirror",
+    "kind": "template_sensor",
+    "spec": {
+      "name": "Climate Zone Three runtime mirror"
+    },
+    "meta": {
+      "model": "runtime_mirror"
     }
   },
   {
@@ -1813,7 +1843,8 @@
     },
     "meta": {
       "source": "weather"
-    }
+    },
+    "conditional": true
   },
   {
     "id": "sensor.climate_outdoor_daily_mean",
@@ -1823,7 +1854,8 @@
     },
     "meta": {
       "model": "statistics_mean"
-    }
+    },
+    "conditional": true
   },
   {
     "id": "input_text.climate_theme",

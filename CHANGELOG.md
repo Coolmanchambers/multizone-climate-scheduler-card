@@ -7,6 +7,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 ## [Unreleased]
 
 ### Added
+- **Runtime history now accrues permanent long-term statistics.** Each zone gains a small
+  `runtime mirror` sensor that carries the value of its runtime-today sensor with
+  `state_class: measurement` - the field the history_stats sensors cannot have, which is why past
+  runtime was limited to the recorder window. Statistics accrue from the day the mirror is
+  created; a future release adds the 30-day/seasonal view that reads them. Existing installs will
+  see exactly one Create per zone on their next dry-run, and the settled all-Unchanged count grows
+  by one per zone after Apply.
 - **The dry-run now checks for other automations that control your thermostats.** Two schedulers
   fighting over one thermostat is this card's most common failure mode, and until now the card
   could only warn about it in prose. Running a dry-run preview also sweeps your automations and
@@ -26,6 +33,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
   all-clear line only renders when the whole sweep actually completed; partial coverage says so.
 
 ### Fixed
+- **Installs without a weather entity now settle to all-Unchanged.** The two outdoor sensors
+  (which need a weather entity to exist) were always planned as Creates that the apply step could
+  only skip, so a weather-less install showed two pending rows forever and could never reach the
+  healthy all-Unchanged state. They are now planned only when they can actually be created - and
+  an already-provisioned pair is still kept, compared and never deleted if you later remove the
+  weather entity.
+- **A season without a name is refused with an explanation instead of a crash.** A hand-written
+  season missing its `name` (or carrying a non-string one) failed deep inside the engine with a
+  raw "Cannot read properties of undefined" error. It is now refused up front with a message
+  naming which season and what to add. Nothing that provisioned before is affected - every shape
+  this refuses already crashed.
 - **The visual editor no longer overwrites a single fan-timer preset with three.** If your config
   used the older scalar form (`features: { fan_timer: 20 }`), the editor showed the fan-timer
   checkbox as OFF even though the card was running it, and one click replaced your 20 with
