@@ -306,6 +306,15 @@ These are the things most likely to surprise you. Please read them before enabli
 > themselves" at odd times. Turn off the schedule — and any learning or auto-schedule feature —
 > in the vendor app for every zone you enable here.
 
+The card cannot see inside your thermostat's app, but it can see most of Home Assistant.
+**Running a dry-run preview also scans your automations and scripts (up to 500) for anything else
+that writes to a scheduled zone** - service calls, UI-built climate device actions, and blueprint
+automations whose inputs name a zone - matching by entity, area, device and label. It is advisory
+and never blocks Apply. What it cannot see is stated in the panel: automations and scripts defined
+in YAML are not readable through Home Assistant's config API, blueprint automations are checked by
+their configured inputs only, scenes are not scanned, and anything outside Home Assistant
+automations entirely (Node-RED, vendor apps, HomeKit/Alexa routines) is invisible to it.
+
 ### Every zone ships switched off, and only you can turn it on
 
 Zones are created with scheduling **Off**. No reconfiguration, rename, or re-apply can ever flip

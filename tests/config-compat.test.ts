@@ -295,6 +295,41 @@ describe('normalization boundary (policy R1)', () => {
     expect(src).not.toContain('A maximum of 4 zones is supported.');
     expect(src).not.toContain('zones must be a list of');
   });
+
+  /**
+   * Item 40. A SOURCE SCAN, not a behavioural test, and it is second-class
+   * evidence: `src/editor.ts` defines a custom element and cannot be imported
+   * in a node environment, so the fix itself was proven by driving the real
+   * editor in a browser. This only stops the boundary being quietly removed
+   * again. Verified non-vacuous: run against the v0.7.2 blobs, every assertion
+   * below fails.
+   */
+  it('the editor and diagnostics go through the boundary too (item 40)', () => {
+    const editor = readFileSync(new URL('../src/editor.ts', import.meta.url), 'utf8');
+    const diag = readFileSync(new URL('../src/lib/diagnostics.ts', import.meta.url), 'utf8');
+
+    expect(editor).toContain('normalizeCardConfig(config)');
+    expect(diag).toContain('normalizeCardConfig(input.config)');
+
+    // The editor rebuilt the config field by field, so any top-level key it has
+    // no UI for was dropped on the first edit. The spread is the fix.
+    expect(editor).toContain('...base,');
+
+    // One set of season defaults, in provisioning.ts. The editor and
+    // diagnostics each kept their own copy, which is how they drifted.
+    for (const src of [editor, diag]) {
+      expect(src).not.toContain("name: 'Summer'");
+      expect(src).not.toContain("name: 'Winter'");
+      expect(src).toContain('defaultSeasons()');
+    }
+
+    // Neither may re-implement the refusals; both must survive them, because
+    // both exist to be used ON a config the boundary rejects.
+    for (const src of [editor, diag]) {
+      expect(src).not.toContain('A maximum of 4 zones is supported.');
+      expect(src).not.toContain('zones must be a list of');
+    }
+  });
 });
 
 describe('seasons[].key: refuse ONLY the genuinely broken case (item 9, option c)', () => {

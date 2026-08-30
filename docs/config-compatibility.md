@@ -25,22 +25,33 @@ That boundary is a pure function on purpose. Tests run in a node environment and
 card element, so normalization living inline in a Lit component is unreachable by any test that is
 not a source scan. If it cannot be tested directly, it is in the wrong place.
 
-**Known gap, recorded rather than papered over:** `src/editor.ts` does NOT yet go through this
-boundary. It re-reads raw config fields with its own defaults, so for an old-shape config the
-editor's controls can disagree with what the card renders and the differ provisions - a scalar
-`features.fan_timer: 15` shows the editor's fan-timer checkbox as OFF while the card shows the chip
-and the differ provisions the timers. Clicking it then writes `[15, 30, 60]`, silently replacing the
-user's single 15-minute preset with three. (An earlier draft of this note claimed it wrote `[]` and
-dropped three automations - measured, it does not; writing `[]` needs the box to be ON at click
-time, which this config never renders.)
+**Closed 2026-08-29 (backlog item 40): the editor and the diagnostics report now go through the
+boundary too.** Until then both re-read raw config fields with their own defaults, and both
+disagreed with the install they described. What was measured against released v0.7.2 before the fix:
 
-`src/editor.ts` also rebuilds the config from a fixed key list on save, so any top-level key it has
-no field for - `view_layout`, `grid_options`, `visibility` - is dropped on the first save.
+| Config | Editor / report said | The card actually did |
+|---|---|---|
+| `features.fan_timer: 20` (scalar) | checkbox OFF; one click wrote `[15, 30, 60]`, replacing the user's single preset with three | ran `[20]` |
+| `view_layout`, `grid_options`, `visibility` | dropped on the first save - the editor rebuilt the config from a fixed key list | untouched |
+| `seasons: []` | report listed two seasons | provisions **none** |
+| `features.fan_timer: 20` (scalar) | report said `null`, i.e. feature off | ran `[20]` |
+| zone with no `name` | report said `undefined` | used the name derived from the entity id |
 
-**`src/lib/diagnostics.ts` bypasses the boundary too**, re-reading `prefix`, `seasons`, `features`,
-`season_switch`, `fan_timer` and `anomaly_alerts` with its own defaults, and keeping a third copy of
-the default season list. Routing both files through the boundary is tracked as its own backlog item;
-until it lands, this rule describes the card and the differ, not the editor or the report.
+(An earlier draft of this note claimed the editor wrote `[]` and dropped three automations. Measured,
+it does not: writing `[]` needs the box to be ON at click time, which that config never renders.)
+
+Both callers now normalize first and **catch the refusal rather than propagating it**, because both
+exist to be used ON a config the boundary rejects: an editor that throws instead of opening leaves
+the user no way to fix the config, and a report that throws is the "Build report does nothing"
+defect. The report states the refusal reason in a `config_rejected` field, which on a rejected
+config is the most useful line in it.
+
+The default season list now has ONE copy, `defaultSeasons()` in `src/lib/provisioning.ts`. The
+editor and the report each kept their own, which is how they drifted.
+
+One deliberate non-change: `normalizeCardConfig()` itself was NOT touched. It feeds
+`buildDesired()`, so widening it - defaulting `prefix` or `seasons` there - would change engine
+input. This item routed the two callers to it; it did not change what it does.
 
 ### R2. Read before you write, by a release
 
@@ -105,10 +116,14 @@ real version numbers.
 (b) and (c) are the engine-safety half, and they are the reason this file exists. (a) alone only
 proves the card did not crash.
 
-The file also pins the boundary: a scan asserting the card calls `normalizeCardConfig` and no
-longer contains either of its error literals. Note the limit - it checks one file for one call and
-two strings, so a re-implemented zone-name fallback or `fan_timer` coercion elsewhere would pass it.
-It catches the regression it was written for, not the whole class.
+The file also pins the boundary: scans asserting that the card, the editor and the diagnostics
+report each call `normalizeCardConfig`, that the editor spreads the incoming config rather than
+rebuilding it from a key list, that neither keeps its own copy of the season defaults, and that none
+of the three contains the boundary's error literals. Note the limit - these are source scans, so a
+re-implemented zone-name fallback or `fan_timer` coercion under a different spelling would pass
+them. They catch the regressions they were written for, not the whole class. The editor's fix itself
+was proven by driving the real editor in a browser, because a custom element cannot be imported in a
+node environment; the scan only stops it being quietly removed again.
 
 ### Colliding keys are refused, not guessed around
 

@@ -6,7 +6,8 @@ import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { HassLike } from './ha-types';
 import type { MzcsCardConfig, ZoneConfig, SeasonConfig, BlockMode } from './types';
-import { normalizeRoomSensors } from './types';
+import { normalizeCardConfig, normalizeRoomSensors } from './types';
+import { defaultSeasons } from './lib/provisioning';
 import { slugify } from './lib/naming';
 import { EDITOR_TYPE } from './const';
 
@@ -38,11 +39,6 @@ function ensureSelectors(): Promise<void> {
   return selectorsReady;
 }
 
-const DEFAULT_SEASONS: SeasonConfig[] = [
-  { key: 'summer', name: 'Summer', default_mode: 'cool' },
-  { key: 'winter', name: 'Winter', default_mode: 'heat_cool' },
-];
-
 @customElement(EDITOR_TYPE)
 export class MzcsCardEditor extends LitElement {
   @property({ attribute: false }) public hass?: HassLike;
@@ -50,19 +46,38 @@ export class MzcsCardEditor extends LitElement {
   @state() private _ready = false;
 
   public setConfig(config: MzcsCardConfig): void {
+    // Read what the CARD reads (item 40, docs/config-compatibility.md R1).
+    // Measured against v0.7.2: a legacy scalar `fan_timer: 20` reached the
+    // checkbox as a number, `(20).length` is undefined so the box rendered OFF,
+    // and one click wrote [15, 30, 60] over the user's 20. Normalizing first
+    // turns it into [20], so the box reads ON and the value survives.
+    //
+    // The refusal is CAUGHT, not propagated: an over-limit or malformed config
+    // is exactly when a user needs the editor to OPEN so they can fix it, and a
+    // throw out of setConfig replaces the form with an error.
+    let base: MzcsCardConfig;
+    try {
+      base = normalizeCardConfig(config);
+    } catch {
+      base = config;
+    }
     this._config = {
+      // Spread the whole config first: top-level keys this editor has no UI for
+      // - `view_layout` and anything Lovelace adds later - were silently dropped
+      // on the first edit, because the old shape listed fields one by one
+      // (measured against v0.7.2). `features` had this fix already (QA-R C2-8);
+      // the level above it did not.
+      ...base,
       type: config.type,
-      prefix: config.prefix ?? 'climate',
-      zones: config.zones ?? [],
-      seasons: config.seasons ?? DEFAULT_SEASONS.map((s) => ({ ...s })),
-      season_switch: config.season_switch ?? 'manual',
-      weather_entity: config.weather_entity,
-      // Spread first: fields this editor has no UI for (e.g. fan_guard) must
-      // round-trip untouched, never be silently dropped (QA-R C2-8).
+      prefix: base.prefix ?? 'climate',
+      zones: base.zones ?? [],
+      seasons: base.seasons ?? defaultSeasons(),
+      season_switch: base.season_switch ?? 'manual',
+      weather_entity: base.weather_entity,
       features: {
-        ...config.features,
-        fan_timer: config.features?.fan_timer ?? [15, 30, 60],
-        anomaly_alerts: config.features?.anomaly_alerts ?? true,
+        ...base.features,
+        fan_timer: base.features?.fan_timer ?? [15, 30, 60],
+        anomaly_alerts: base.features?.anomaly_alerts ?? true,
       },
     };
   }

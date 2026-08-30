@@ -228,6 +228,16 @@ explicit confirm → freshness gate (replan against the live registry; refuse on
 ordered apply with rollback list → verify replan. No silent writes, ever. Adopt labels only;
 a divergent display name then converges via an explicit Edit on the following apply.
 
+## 8b. Competing-writer scan (advisory, added post-v0.7.2)
+
+The card's dry-run also runs an advisory read-only sweep of `automation.*` and `script.*` for
+anything else writing to a managed zone. It reads: stored configs via
+`GET config/automation/config/<id>` and `GET config/script/config/<object_id>`, entity registry
+entries via `config/entity_registry/get_entries`, and (only when a zone's area must be inherited
+from its device) `config/device_registry/list`. It writes nothing, provisions nothing, and its
+result never gates Apply or alters the plan. It is not part of the provisioned inventory or the
+change-set rule above.
+
 ## 9. Non-goals (v1)
 
 Card never executes schedules (backend automations do). No vendor temp-sensor access (API

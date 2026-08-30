@@ -17,6 +17,92 @@ export class MockHass implements HassLike {
       const e = v as { state: string; attributes: Record<string, unknown> };
       this.states[id] = { state: e.state, attributes: { ...e.attributes } };
     }
+    this.seedCompetingWriters();
+  }
+
+  /**
+   * Foreign writers for the competing-writer scan (item 33). Each one is a
+   * shape the scan MUST catch, written the way real configs are written rather
+   * than the way the scanner reads them: the modern `action:` spelling, the
+   * legacy `service:` + `data.entity_id` pair, a preset writer, a script, and
+   * a control that must NOT be reported.
+   */
+  private seedCompetingWriters(): void {
+    const automation = (
+      objectId: string,
+      alias: string,
+      config: Record<string, unknown>,
+    ): void => {
+      this.autoConfigs.set(objectId, { id: objectId, alias, ...config });
+      this.states[`automation.${objectId}`] = {
+        state: 'on',
+        attributes: { id: objectId, friendly_name: alias },
+      };
+    };
+    // This card's own engine automation carries the mzcs label in a real
+    // install, which is what excludes it from its own scan.
+    this.entityLabels.set('automation.climate_schedule_engine', ['mzcs']);
+
+    automation('evening_cooldown', 'Evening cooldown', {
+      action: [
+        {
+          action: 'climate.set_temperature',
+          target: { entity_id: 'climate.downstairs_thermostat' },
+          data: { temperature: 74 },
+        },
+      ],
+    });
+    automation('legacy_away_mode', 'Legacy away mode', {
+      action: [{ service: 'homeassistant.turn_off', data: { entity_id: 'climate.studio_mini_split' } }],
+    });
+    automation('night_preset', 'Night preset', {
+      action: [
+        {
+          choose: [
+            {
+              conditions: [],
+              sequence: [
+                {
+                  action: 'climate.set_preset_mode',
+                  target: { entity_id: 'climate.upstairs_thermostat' },
+                  data: { preset_mode: 'eco' },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    automation('porch_light', 'Porch light', {
+      action: [{ action: 'light.turn_on', target: { entity_id: 'light.porch' } }],
+    });
+
+    // QA-sweep shapes: a device action (S1), a blueprint (S2), and an OFF
+    // automation (P3) - each must render in the panel, not scan clean.
+    automation('bedtime_device_action', 'Bedtime device action', {
+      action: [
+        { device_id: 'dev_up', domain: 'climate', type: 'set_hvac_mode', entity_id: 'climate.upstairs_thermostat', hvac_mode: 'off' },
+      ],
+    });
+    automation('blueprint_scheduler', 'Blueprint scheduler', {
+      use_blueprint: { path: 'community/climate_schedule.yaml', input: { thermostat: 'climate.downstairs_thermostat', temp: 74 } },
+    });
+    this.states['automation.legacy_away_mode'] = {
+      state: 'off',
+      attributes: { id: 'legacy_away_mode', friendly_name: 'Legacy away mode' },
+    };
+
+    this.scriptConfigs.set('guest_mode', {
+      alias: 'Guest mode',
+      sequence: [
+        {
+          action: 'climate.set_hvac_mode',
+          target: { entity_id: 'climate.upstairs_thermostat' },
+          data: { hvac_mode: 'cool' },
+        },
+      ],
+    });
+    this.states['script.guest_mode'] = { state: 'off', attributes: { friendly_name: 'Guest mode' } };
   }
 
   public onChange(fn: Listener): void {
@@ -117,7 +203,11 @@ export class MockHass implements HassLike {
       return { id: objectId, ...msg };
     }
     if (t === 'config/label_registry/create') return { label_id: 'mzcs' };
-    if (t === 'config/entity_registry/update') return {};
+    if (t === 'config/entity_registry/update' && Array.isArray(msg.labels)) {
+      this.entityLabels.set(String(msg.entity_id), msg.labels as string[]);
+      return {};
+    }
+    if (t === 'config/entity_registry/update' && !msg.new_entity_id) return {};
     if (t === 'timer/list') {
       return Object.keys(this.states)
         .filter((id) => id.startsWith('timer.'))
@@ -142,12 +232,21 @@ export class MockHass implements HassLike {
     if (t === 'config/entity_registry/get_entries') {
       const ids = (msg.entity_ids as string[]) ?? [];
       return Object.fromEntries(
-        ids.map((id) => [
-          id,
-          this.flowReg.has(id) ? { config_entry_id: this.flowReg.get(id), labels: [] } : null,
-        ]),
+        ids.map((id) => {
+          const labels = this.entityLabels.get(id);
+          if (this.flowReg.has(id)) {
+            return [id, { config_entry_id: this.flowReg.get(id), labels: labels ?? [] }];
+          }
+          // A registry row exists for anything with a label or any real entity;
+          // returning null for a live entity would hide its area/device/labels.
+          if (labels || this.states[id]) {
+            return [id, { area_id: null, device_id: null, labels: labels ?? [] }];
+          }
+          return [id, null];
+        }),
       );
     }
+    if (t === 'config/device_registry/list') return [];
     if (t === 'config/entity_registry/update' && msg.new_entity_id) {
       const from = String(msg.entity_id);
       const to = String(msg.new_entity_id);
@@ -234,6 +333,15 @@ export class MockHass implements HassLike {
   private flowData = new Map<string, Record<string, unknown>>();
   private flowCount = 0;
   public autoConfigs = new Map<string, Record<string, unknown>>();
+  /**
+   * Entity labels, as applied by provision-exec's labelEntity(). Real HA
+   * persists these; the mock used to drop them, which made every MZCS
+   * automation look UNMANAGED to the competing-writer scan and to any other
+   * label-gated read.
+   */
+  public entityLabels = new Map<string, string[]>();
+  /** Stored script configs, keyed by object id, for `config/script/config/<id>`. */
+  public scriptConfigs = new Map<string, Record<string, unknown>>();
   /** entity_id -> owning config_entry_id for flow-created entities */
   public flowReg = new Map<string, string>();
   public async callApi(method: string, path: string, data?: Record<string, unknown>): Promise<unknown> {
@@ -292,6 +400,12 @@ export class MockHass implements HassLike {
         step_id: 'options',
         data_schema: [{ name: 'state' }, { name: 'start' }, { name: 'end' }],
       };
+    }
+    const scriptMatch = path.match(/^config\/script\/config\/(.+)$/);
+    if (scriptMatch && method === 'GET') {
+      const cfg = this.scriptConfigs.get(scriptMatch[1]!);
+      if (!cfg) throw new Error(`script ${scriptMatch[1]} not found`);
+      return cfg;
     }
     const autoMatch = path.match(/^config\/automation\/config\/(.+)$/);
     if (autoMatch) {

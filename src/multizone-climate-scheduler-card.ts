@@ -30,7 +30,9 @@ import {
   setZoneEnabled,
   fetchDailyRuntimeFromHistory,
   fetchDayHistory,
+  scanCompetingWriters,
 } from './ha-adapter';
+import type { Finding, ScanResult } from './lib/competing-writers';
 import {
   formatHoursQuarter,
   extractRunSegments,
@@ -156,7 +158,7 @@ const SET_LABELS: Record<string, string> = {
   wd: 'Weekdays',
   we: 'Weekend',
 };
-import { slugify, zoneEntityId, globalEntityId, zoneScheduleId, automationEntityId } from './lib/naming';
+import { slugify, zoneEntityId, globalEntityId, zoneScheduleId, automationEntityId, resolveSeasonKey } from './lib/naming';
 import { deviationColor, formatDelta, formatRoomTemp, sanitizeThresholds } from './lib/deviation';
 import {
   buildDesired,
@@ -164,6 +166,7 @@ import {
   actionable,
   provisionInputFromConfig,
   defaultSeasons,
+  MZCS_LABEL,
   type Plan,
   type ProvisionInput,
 } from './lib/provisioning';
@@ -224,6 +227,15 @@ export class MzcsCard extends LitElement {
   private _dryRunKind?: 'setup' | 'teardown';
   @state() private _dryRunError?: string;
   @state() private _dryRunning = false;
+  /**
+   * Competing-writer scan (item 33). Deliberately its OWN state, never folded
+   * into the dry-run result: this check must not be able to fail the plan, and
+   * the plan's counts are the install's health canary.
+   */
+  @state() private _cwScan?: ScanResult;
+  @state() private _cwScanning = false;
+  @state() private _cwError?: string;
+  private _cwScannedFor?: string;
   @state() private _execConfirm = false;
   @state() private _execRunning = false;
   @state() private _execLog: string[] = [];
@@ -261,6 +273,11 @@ export class MzcsCard extends LitElement {
     this._diagText = undefined;
     this._diagTextHasIds = false;
     this._dryRunKind = undefined;
+    // A scan describes one set of zones; keeping it after an edit would report
+    // conflicts against thermostats the card no longer manages.
+    this._cwScan = undefined;
+    this._cwError = undefined;
+    this._cwScannedFor = undefined;
     this._execConfirm = false;
     this._execResult = undefined;
     this._execLog = [];
@@ -348,6 +365,65 @@ export class MzcsCard extends LitElement {
     } finally {
       this._dryRunning = false;
     }
+    // Detached on purpose: the plan renders immediately and the conflict panel
+    // fills in when the sweep finishes. Its own try/catch means a scan failure
+    // can never fail the dry-run or move the plan counts.
+    void this._runCompetingScan();
+  }
+
+  /**
+   * Sweep every automation and script for anything else that writes to a
+   * managed zone (item 33). Runs alongside the dry-run because that is the one
+   * control every user provably presses during setup - a standalone button
+   * would be seen by nobody, and this is the failure mode the README shouts
+   * about. Advisory only: it never blocks Apply.
+   */
+  /** The scan cache key for the CURRENT config, or null when nothing to scan. */
+  private _cwKey(): string | null {
+    const zones = (this._config?.zones ?? []).filter((z) => z.entity);
+    if (zones.length === 0) return null;
+    return `${this._prefix}|${zones.map((z) => z.entity).join(',')}`;
+  }
+
+  private async _runCompetingScan(force = false): Promise<void> {
+    if (!this.hass || !this._config || this._cwScanning) return;
+    const zones = this._config.zones.filter((z) => z.entity);
+    const key = this._cwKey();
+    if (!key) return;
+    if (!force && this._cwScannedFor === key && this._cwScan) return;
+    this._cwScanning = true;
+    this._cwError = undefined;
+    let discarded = false;
+    try {
+      const result = await scanCompetingWriters(this.hass, this._prefix, MZCS_LABEL, zones);
+      // Token guard (QA P1, same race as QA-R C1-7's _schedLoadedFor): the
+      // config may have changed while the sweep ran. A late result for the OLD
+      // config must never re-populate state setConfig just cleared - it would
+      // name thermostats the card no longer manages, or show an all-clear the
+      // new config never earned.
+      if (this._cwKey() === key) {
+        this._cwScan = result;
+        this._cwScannedFor = key;
+      } else {
+        discarded = true;
+      }
+    } catch (e) {
+      // A failed scan must read as "could not look", never as "nothing found"
+      // (the same distinction backlog item 27 fixed for the runtime drawer).
+      this._cwScan = undefined;
+      this._cwScannedFor = undefined;
+      if (this._cwKey() === key) this._cwError = e instanceof Error ? e.message : String(e);
+      // Same token guard as the success branch (re-verification F6): a stale
+      // scan that FAILED must also re-trigger for the live config, or the
+      // panel goes blank until the next dry-run press.
+      else discarded = true;
+    } finally {
+      this._cwScanning = false;
+    }
+    // A dry-run pressed for the NEW config during the old scan was dropped by
+    // the _cwScanning early-return; the discard re-triggers so that press is
+    // honored rather than silently lost.
+    if (discarded) void this._runCompetingScan();
   }
 
   /** Teardown preview: everything managed under this prefix becomes a delete. */
@@ -644,6 +720,7 @@ export class MzcsCard extends LitElement {
           ${this._dryRunning ? 'Reading registry…' : 'Run dry-run preview'}
         </button>
         ${this._dryRunError ? html`<p class="setup-err">${this._dryRunError}</p>` : nothing}
+        ${this._renderCompetingWriters()}
         ${p
           ? html`
               <div class="planwrap">
@@ -669,6 +746,132 @@ export class MzcsCard extends LitElement {
               ${this._renderApply(p)}
             `
           : nothing}
+      </div>
+    `;
+  }
+
+  /** One conflict row: who writes, what they call, and how they reach the zone. */
+  private _cwRow(f: Finding) {
+    const zone = f.zoneName ?? 'a scheduled zone';
+    const how =
+      f.via === 'area'
+        ? ` on ${zone} (targets its area)`
+        : f.via === 'device'
+          ? ` on ${zone} (targets its device)`
+          : f.via === 'label'
+            ? ` on ${zone} (targets a label it carries)`
+            : f.via === 'all'
+              ? ` on every entity, including ${zone}`
+              : f.via === 'template'
+                ? ' on a templated target that may be a scheduled zone'
+                : f.via === 'floor'
+                  ? ' on a floor target that may include a scheduled zone'
+                  : f.via === 'group'
+                    ? ' on a group that may contain a scheduled zone'
+                    : f.via === 'blueprint'
+                      ? ` - ${zone} is one of its configured inputs`
+                      : ` on ${zone}`;
+    const svc =
+      f.service === '(templated service)'
+        ? 'a templated service'
+        : f.service === '(blueprint)'
+          ? 'a blueprint automation'
+          : f.service;
+    // Off automations stay listed - one toggle re-arms them - but the row says
+    // so, because "turn it off" advice plus a row that never clears otherwise
+    // reads as the scan being broken (QA P3).
+    const off = f.sourceEnabled === false ? ' - currently off' : '';
+    return html`
+      <li>
+        <span class="cw-src">${f.sourceName}</span>
+        <span class="cw-det">${svc}${how}${off}</span>
+      </li>
+    `;
+  }
+
+  /**
+   * Competing-writer panel (item 33). Three states that must stay distinct:
+   * scanning, could-not-look, and looked-and-found-nothing. Collapsing the last
+   * two is the defect item 27 fixed for the runtime drawer, and it would be
+   * worse here - a false all-clear on the failure mode this exists to catch.
+   */
+  private _renderCompetingWriters() {
+    if (this._cwScanning) {
+      return html`<p class="setup-sub">Checking for other automations that control these thermostats…</p>`;
+    }
+    if (this._cwError) {
+      return html`
+        <p class="setup-err">
+          Could not check for competing automations: ${this._cwError} Apply is not blocked by this
+          check.
+        </p>
+      `;
+    }
+    const scan = this._cwScan;
+    if (!scan) return nothing;
+    const rescan = html`
+      <button class="chip" .disabled=${this._cwScanning} @click=${() => void this._runCompetingScan(true)}>
+        Re-scan
+      </button>
+    `;
+    const foot = [
+      `Scanned ${scan.scanned} automation${scan.scanned === 1 ? '' : 's'} and scripts`,
+      scan.skippedOwn > 0 ? `, excluding ${scan.skippedOwn} of this card's own` : '',
+      scan.blueprints > 0
+        ? `. ${scan.blueprints} blueprint automation${scan.blueprints === 1 ? ' was' : 's were'} checked by ${scan.blueprints === 1 ? 'its' : 'their'} configured inputs only`
+        : '',
+      scan.unreadable > 0
+        ? `. ${scan.unreadable} could not be read (automations and scripts defined in YAML are not readable here)`
+        : '',
+      scan.capped ? '. Coverage was capped, so some were not scanned' : '',
+      scan.degraded ? '. Area matching was reduced for this scan (a registry read failed)' : '',
+      '. Scenes and systems outside Home Assistant automations (Node-RED, vendor apps) are not scanned.',
+    ].join('');
+    // The green universal negative renders ONLY when it was earned: something
+    // was actually scanned and nothing reduced coverage. A capped, degraded or
+    // unreadable-heavy scan gets the hedged line instead - "scanned 0, found
+    // nothing" rendering as an all-clear was QA P2, confirmed by 3 reviewers.
+    const clean = scan.conflicts.length === 0 && scan.notes.length === 0;
+    // scanned === 0 is fine ONLY when nothing was skipped over to get there:
+    // an instance with no other automations earns the all-clear trivially; one
+    // where everything was unreadable does not (QA P2's exact scenario).
+    const earned =
+      clean && !scan.capped && scan.unreadable === 0 && !scan.degraded && scan.blueprints === 0;
+    return html`
+      <div class="cwwrap">
+        ${earned
+          ? html`<p class="cw-h ok">No automation or script writes to these thermostats.</p>`
+          : nothing}
+        ${clean && !earned
+          ? html`<p class="cw-h ok">
+              No conflicts found among what could be checked - but coverage was partial, see below.
+            </p>`
+          : nothing}
+        ${scan.conflicts.length > 0
+          ? html`
+              <p class="cw-h bad">Something else also writes to these thermostats (${scan.conflicts.length})</p>
+              <p class="setup-sub">
+                These will fight the schedule engine. The symptom is setpoints that appear to change
+                themselves at odd times. Turn them off, delete them, or narrow them so they no
+                longer target a scheduled zone. Rows stay listed while the automation exists - a
+                disabled one is marked "currently off", because one toggle re-arms it.
+              </p>
+              <ul class="cw-list">${scan.conflicts.map((f) => this._cwRow(f))}</ul>
+            `
+          : nothing}
+        ${scan.notes.length > 0
+          ? html`
+              <p class="cw-h warn">Also worth knowing (${scan.notes.length})</p>
+              <p class="setup-sub">
+                These do not fight the setpoint, but they change how the engine behaves. Something
+                else writing the standby preset can make the schedule quietly stop applying, because
+                the engine stands down while that preset is on.
+              </p>
+              <ul class="cw-list">${scan.notes.map((f) => this._cwRow(f))}</ul>
+            `
+          : nothing}
+        <p class="cw-foot">${foot} This check is advisory and never blocks Apply.</p>
+        ${rescan}
       </div>
     `;
   }
@@ -1589,10 +1792,12 @@ export class MzcsCard extends LitElement {
   private _activeSeasonKey(): string | null {
     const sel = this.hass?.states[globalEntityId('season_select', this._prefix)];
     if (!sel || sel.state === 'unknown') return null;
-    // Season keys are stable across display renames - resolve name -> key
-    // through the config; lowercase fallback covers key == lower(name) installs.
-    const match = this._config?.seasons?.find((s) => s.name === sel.state);
-    return match?.key ?? slugify(sel.state);
+    // Season keys are stable across display renames, so resolve name -> key
+    // through the config. `?? slugify(name)` used to stand in for a missing
+    // key, which named an entity that does not exist: the engine's id template
+    // embeds String(key), so a keyless season provisioned `..._undefined` and
+    // the drawer looked for `..._summer` (item 39, measured).
+    return resolveSeasonKey(this._config?.seasons, sel.state);
   }
 
   private _scheduleEntityId(zone: ZoneConfig): string | null {
@@ -2443,6 +2648,57 @@ export class MzcsCard extends LitElement {
     }
     .plan-list.del li {
       color: var(--mzcs-bad);
+    }
+    .cwwrap {
+      width: 100%;
+      border: 0.5px solid var(--mzcs-border);
+      border-radius: 10px;
+      padding: 8px 10px;
+      margin-top: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      align-items: flex-start;
+    }
+    .cw-h {
+      margin: 2px 0 0;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .cw-h.bad {
+      color: var(--mzcs-bad);
+    }
+    .cw-h.warn {
+      color: var(--mzcs-warn);
+    }
+    .cw-h.ok {
+      color: var(--mzcs-text-dim);
+      font-weight: 400;
+    }
+    .cw-list {
+      margin: 0;
+      padding-left: 18px;
+      font-size: 11px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .cw-list li {
+      margin-bottom: 3px;
+    }
+    .cw-src {
+      display: block;
+      color: var(--mzcs-text);
+      word-break: break-word;
+    }
+    .cw-det {
+      display: block;
+      color: var(--mzcs-text-dim);
+      word-break: break-word;
+    }
+    .cw-foot {
+      margin: 2px 0 0;
+      font-size: 11px;
+      color: var(--mzcs-text-dim);
     }
     .applyrow {
       display: flex;

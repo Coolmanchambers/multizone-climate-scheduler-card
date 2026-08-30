@@ -100,6 +100,33 @@ export function zoneScheduleId(prefix: string, zone: string, season: string): st
   return `schedule.${prefix}_${zone}_${season}`;
 }
 
+/**
+ * Which season key the schedule drawer should look under, given the display
+ * name the season selector is currently holding.
+ *
+ * The selector's options are season NAMES; every provisioned schedule id
+ * carries the season KEY. Resolving one to the other has to reproduce what the
+ * id template did, and the template embeds `String(key)` - so a season with a
+ * missing key provisioned `..._undefined` and one with a null key provisioned
+ * `..._null`. Those installs are ones this card deliberately keeps provisioning
+ * (round 3, option c), so their schedule row has to find them.
+ *
+ * Measured before this existed: a single keyless season named "Summer"
+ * provisioned `schedule.<prefix>_<zone>_undefined` while the card looked for
+ * `..._summer`, leaving the row permanently dead on an install that otherwise
+ * converges to all-Unchanged.
+ *
+ * The name-slug fallback is kept for the case it was actually written for: a
+ * selector holding a name that matches no configured season.
+ */
+export function resolveSeasonKey(
+  seasons: ReadonlyArray<{ name?: unknown; key?: unknown }> | undefined,
+  selectState: string,
+): string {
+  const match = seasons?.find((s) => s?.name === selectState);
+  return match ? String(match.key) : slugify(selectState);
+}
+
 export function globalEntityId(cls: GlobalClass, prefix: string): string {
   const def = GLOBAL_CLASS_DEFS[cls];
   return `${def.domain}.${prefix}_${def.suffix}`;

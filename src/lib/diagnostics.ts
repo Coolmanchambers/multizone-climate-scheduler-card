@@ -1,5 +1,6 @@
 import type { MzcsCardConfig } from '../types';
-import { normalizeRoomSensors, resolveEcoPreset } from '../types';
+import { normalizeCardConfig, normalizeRoomSensors, resolveEcoPreset } from '../types';
+import { defaultSeasons } from './provisioning';
 
 /**
  * The diagnostics blob users paste into a public GitHub issue.
@@ -47,12 +48,6 @@ export interface DiagnosticsInput {
 }
 
 const DEFAULT_PREFIX = 'climate';
-
-/** Mirrors `_provisionInput` in the card: a config with no `seasons` key still provisions these. */
-const DEFAULT_SEASONS = [
-  { key: 'summer', name: 'Summer', default_mode: 'cool' },
-  { key: 'winter', name: 'Winter', default_mode: 'heat_cool' },
-] as const;
 
 const BLOCK_MODES = ['cool', 'heat', 'heat_cool', 'off'];
 const SWITCH_MODES = ['manual', 'semi', 'full'];
@@ -125,12 +120,37 @@ function describeEcoPreset(features: { eco_preset?: string | false }, ids: boole
 
 export function buildDiagnostics(input: DiagnosticsInput): string {
   const ids = input.identifiers === true;
-  const cfg = input.config;
-  // Both are hand-editable YAML; a non-string prefix or a season with no name
-  // used to throw, and the throw happens inside a click handler with no catch,
-  // so "Build report" silently did nothing (QA D5).
+  // Read the config the CARD reads, not a second interpretation of the raw
+  // YAML (item 40). Measured against v0.7.2, the private reading disagreed with
+  // the install three ways: `seasons: []` was reported as two seasons while the
+  // engine provisioned none, a legacy scalar `fan_timer: 20` was reported as
+  // null (feature off) while the card ran [20], and a zone with no name was
+  // reported as `undefined` while the card used the name it derives. A report
+  // that describes a different install than the one filing it sends every
+  // triage down the wrong path.
+  //
+  // The refusal is CAUGHT rather than propagated: this artifact exists to be
+  // filed about a broken config, and a throw here happens inside a click
+  // handler with no catch, so "Build report" would silently do nothing (QA D5).
+  // The refusal reason is reported instead - on a rejected config that is the
+  // single most useful line in the file.
+  let cfg = input.config;
+  let rejected: string | undefined;
+  try {
+    cfg = normalizeCardConfig(input.config);
+  } catch (e) {
+    rejected = e instanceof Error ? e.message : String(e);
+  }
+  // A non-string prefix is hand-editable YAML the boundary does not police.
   const prefix = (typeof cfg.prefix === 'string' && cfg.prefix.trim()) || DEFAULT_PREFIX;
-  const seasons = cfg.seasons?.length ? cfg.seasons : DEFAULT_SEASONS;
+  // `Array.isArray`, then nullish: this MUST mirror `_provisionInput`, which
+  // applies the defaults only when the key is absent - an explicit empty list
+  // provisions no seasons and the report has to say so. The non-array arm is
+  // QA-sweep finding D1: `seasons: {}` (and '', 0, false) passed the boundary
+  // untouched (it only polices zones) and `seasons.filter` threw inside the
+  // catch-less click handler - the QA-D5 defect reintroduced, in the artifact
+  // meant for broken configs. v0.7.2 built a report for those shapes; so do we.
+  const seasons = Array.isArray(cfg.seasons) ? cfg.seasons : cfg.seasons == null ? defaultSeasons() : [];
   const features = cfg.features ?? {};
 
   const zones = (cfg.zones ?? []).map((z, i) => {
@@ -162,11 +182,13 @@ export function buildDiagnostics(input: DiagnosticsInput): string {
     identifiers_included: ids,
     user_agent: coarsenUserAgent(input.userAgent),
 
+    ...(rejected ? { config_rejected: rejected } : {}),
+
     config: {
       prefix: describePrefix(prefix, ids),
       zone_count: zones.length,
       zones,
-      seasons_defaulted: !cfg.seasons?.length,
+      seasons_defaulted: cfg.seasons == null,
       seasons: seasons.filter((s) => s != null).map((s, i) => {
         const name = typeof s.name === 'string' ? s.name : '';
         return {

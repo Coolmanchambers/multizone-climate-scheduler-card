@@ -273,3 +273,97 @@ describe('Fable pass: residual no-throw holes', () => {
     expect(() => buildDiagnostics({ cardVersion: 'v', config: cfg })).not.toThrow();
   });
 });
+
+/**
+ * Item 40. Every case here was MEASURED against released v0.7.2 before it was
+ * written - `src/lib/diagnostics.ts` was byte-identical to the tag at the time,
+ * so the "before" column is the shipped behaviour, not a reconstruction:
+ *
+ *   seasons: []       report said 2 seasons   engine provisions 0
+ *   fan_timer: 20     report said null (off)  card runs [20]
+ *   zone, no name     report said undefined   card uses "spare room"
+ *
+ * A diagnostics report that disagrees with the install it describes sends every
+ * triage down the wrong path, which is the opposite of the artifact's purpose.
+ */
+describe('item 40: diagnostics reads the SAME config the card runs', () => {
+  const base = (over: Record<string, unknown> = {}): any => ({
+    type: 'custom:multizone-climate-scheduler-card',
+    prefix: 'climate',
+    zones: [{ entity: 'climate.a', name: 'Zone A' }],
+    ...over,
+  });
+
+  it('reports ZERO seasons for `seasons: []`, matching what the engine provisions', () => {
+    const r = parse(buildDiagnostics({ cardVersion: 'v', config: base({ seasons: [] }) }));
+    expect(r.config.seasons).toEqual([]);
+    // `?? default` is what the card applies, so an explicit [] is NOT a default.
+    expect(r.config.seasons_defaulted).toBe(false);
+  });
+
+  it('still reports the two defaults when seasons is ABSENT', () => {
+    const r = parse(buildDiagnostics({ cardVersion: 'v', config: base(), identifiers: true }));
+    expect(r.config.seasons.map((s: any) => s.name)).toEqual(['Summer', 'Winter']);
+    expect(r.config.seasons_defaulted).toBe(true);
+  });
+
+  it('reports a legacy scalar fan_timer as the list the card actually runs', () => {
+    const r = parse(buildDiagnostics({ cardVersion: 'v', config: base({ features: { fan_timer: 20 } }) }));
+    expect(r.config.features.fan_timer).toEqual([20]);
+  });
+
+  it('reports the zone name the card derives when the config omits one', () => {
+    const r = parse(
+      buildDiagnostics({
+        cardVersion: 'v',
+        config: base({ zones: [{ entity: 'climate.spare_room' }] }),
+        identifiers: true,
+      }),
+    );
+    expect(r.config.zones[0].name).toBe('spare room');
+  });
+
+  it('still reports on a config the boundary REFUSES, and says why', () => {
+    const tooMany = base({
+      zones: [1, 2, 3, 4, 5].map((n) => ({ entity: `climate.z${n}`, name: `Z${n}` })),
+    });
+    let out = '';
+    expect(() => (out = buildDiagnostics({ cardVersion: 'v', config: tooMany }))).not.toThrow();
+    const r = parse(out);
+    // The report is the artifact a user files WITH a broken config; refusing to
+    // build one is the D5 defect ("Build report" silently doing nothing).
+    expect(r.config.zone_count).toBe(5);
+    expect(String(r.config_rejected)).toContain('4 zones');
+  });
+});
+
+/**
+ * QA-sweep finding D1 (2026-08-29): routing through normalizeCardConfig
+ * reintroduced the QA-D5 failure for NON-ARRAY seasons - the boundary only
+ * polices zones, so `seasons: {}` passed through and `seasons.filter` threw
+ * inside the catch-less click handler. v0.7.2 built a report for all four
+ * shapes below (executed by the refutation reviewer); so must we.
+ */
+describe('D1: non-array seasons must not crash the report', () => {
+  const base = (seasons: unknown): any => ({
+    type: 'custom:multizone-climate-scheduler-card',
+    prefix: 'climate',
+    zones: [{ entity: 'climate.a', name: 'Zone A' }],
+    seasons,
+  });
+
+  for (const [label, val] of [
+    ['mapping', {}],
+    ['empty string', ''],
+    ['zero', 0],
+    ['false', false],
+  ] as const) {
+    it(`seasons: ${label} builds a report with zero seasons`, () => {
+      let out = '';
+      expect(() => (out = buildDiagnostics({ cardVersion: 'v', config: base(val) }))).not.toThrow();
+      const r = parse(out);
+      expect(r.config.seasons).toEqual([]);
+      expect(r.config.seasons_defaulted).toBe(false);
+    });
+  }
+});

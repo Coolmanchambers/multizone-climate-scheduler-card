@@ -6,6 +6,46 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 
 ## [Unreleased]
 
+### Added
+- **The dry-run now checks for other automations that control your thermostats.** Two schedulers
+  fighting over one thermostat is this card's most common failure mode, and until now the card
+  could only warn about it in prose. Running a dry-run preview also sweeps your automations and
+  scripts (up to 500) for anything else that writes to a scheduled zone: service calls to
+  `climate.set_temperature`, `set_hvac_mode`, `climate.turn_on/off/toggle` and
+  `homeassistant.turn_on/off/toggle`, UI-built climate **device actions**, and **blueprint
+  automations** whose configured inputs name a scheduled zone. Writers of the standby preset and
+  the fan mode are reported separately, because they do not fight the setpoint - they change how
+  the engine behaves. Targets are matched by entity, area, device and label; floor and group
+  targets, and templated targets, are reported as "possible" rather than resolved. A `Re-scan`
+  button re-runs the sweep. Disabled automations stay listed - one toggle re-arms them - marked
+  "currently off". The check is advisory and never blocks Apply.
+- The scan states what it could NOT check rather than counting it as clean: automations and
+  scripts defined in YAML are not readable through Home Assistant's config API, blueprint
+  automations are checked by their inputs only, scenes are not scanned, and anything outside Home
+  Assistant automations (Node-RED, vendor apps, HomeKit routines) is invisible to it. The
+  all-clear line only renders when the whole sweep actually completed; partial coverage says so.
+
+### Fixed
+- **The visual editor no longer overwrites a single fan-timer preset with three.** If your config
+  used the older scalar form (`features: { fan_timer: 20 }`), the editor showed the fan-timer
+  checkbox as OFF even though the card was running it, and one click replaced your 20 with
+  `[15, 30, 60]`. The editor now reads the config the same way the card does, so the box reads ON
+  and your value survives.
+- **The visual editor no longer drops dashboard layout keys.** `view_layout`, `grid_options`,
+  `visibility` and anything else the editor has no field for were removed from your config the
+  first time you saved from it. They now round-trip untouched.
+- **A season configured with a name but no `key` had a dead schedule row.** The card looked for a
+  schedule named after the season, but the one it provisioned is named after the key, so on that
+  install the drawer found nothing and the row never opened - even though the install is otherwise
+  healthy and settles to an all-Unchanged dry-run. The card now resolves the schedule the same way
+  the provisioner named it.
+- **The diagnostics report described a different install than the one filing it.** `seasons: []`
+  was reported as two seasons when the card provisions none; a scalar `fan_timer` was reported as
+  "off" when it was running; a zone with no `name` was reported as `undefined` instead of the name
+  the card derives. All three sent triage down the wrong path. The report now reads the config
+  through the same boundary the card uses, and a config the card would reject is still reported on,
+  with the reason included rather than the report silently failing to build.
+
 ## [0.7.2] - 2026-08-29
 
 ### Fixed

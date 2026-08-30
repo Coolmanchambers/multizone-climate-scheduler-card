@@ -454,3 +454,243 @@ export function setTemperature(
     temperature: temp,
   });
 }
+
+/* ------------------------------------------------------------------ *
+ * Competing-writer scan (backlog item 33)
+ * ------------------------------------------------------------------ */
+
+import {
+  isOwnAutomation,
+  summarizeScan,
+  type ScanResult,
+  type WriterSource,
+  type ZoneRef,
+} from './lib/competing-writers';
+
+/**
+ * Upper bound on configs fetched in one scan. Not a performance tuning knob: a
+ * pathological instance must degrade honestly (the result says coverage was
+ * capped) rather than hang the browser mid-setup.
+ */
+export const WRITER_SCAN_CAP = 500;
+
+/** Parallel REST reads. High enough to stay quick, low enough not to flood the session. */
+const WRITER_SCAN_CONCURRENCY = 6;
+
+interface RegistryEntry {
+  /** the registry uuid - modern device actions target entities BY this (QA S1) */
+  id?: string;
+  area_id?: string | null;
+  device_id?: string | null;
+  labels?: string[];
+}
+
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      out[i] = await fn(items[i]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
+/**
+ * Registry rows for specific entities: the area, device and labels the card
+ * needs to answer "does this target reach a managed zone?".
+ *
+ * Unlike the label read in registry-read.ts, a failure here is FATAL to its
+ * caller and must not be swallowed. Without labels the scan cannot recognise
+ * this card's own automations, and it would then report the engine's own
+ * setpoint writes as conflicts - a scan that cries wolf about itself.
+ */
+async function fetchRegistryEntries(
+  hass: HassLike,
+  entityIds: string[],
+): Promise<Map<string, RegistryEntry>> {
+  const out = new Map<string, RegistryEntry>();
+  if (entityIds.length === 0) return out;
+  if (!hass.callWS) {
+    // Returning an empty map here contradicted this function's own contract
+    // and made the scan accuse the card's OWN engine (QA P4): with no labels,
+    // isOwnAutomation fails for every own automation and their setpoint writes
+    // are reported as conflicts the user is told to turn off.
+    throw new Error(
+      'This Home Assistant connection cannot read the entity registry, so the conflict check could not run.',
+    );
+  }
+  const res = (await hass.callWS({
+    type: 'config/entity_registry/get_entries',
+    entity_ids: entityIds,
+  })) as Record<string, RegistryEntry | null>;
+  for (const [id, entry] of Object.entries(res ?? {})) if (entry) out.set(id, entry);
+  return out;
+}
+
+/**
+ * Zone rows for the matcher. An entity's effective area is its own when it has
+ * one and its device's otherwise - the same rule the Home Assistant frontend
+ * applies. Without the device fallback, an automation targeting the area a
+ * thermostat sits in would not match, and the user would be told they are clear.
+ */
+async function fetchZoneRefs(
+  hass: HassLike,
+  zones: Array<{ entity: string; name: string }>,
+  entries: Map<string, RegistryEntry>,
+): Promise<{ refs: ZoneRef[]; degraded: boolean }> {
+  const needDeviceArea = zones.some((z) => {
+    const e = entries.get(z.entity);
+    return !!e && !e.area_id && !!e.device_id;
+  });
+  let degraded = false;
+  let deviceAreas = new Map<string, string | null>();
+  if (needDeviceArea && hass.callWS) {
+    try {
+      const devices = (await hass.callWS({ type: 'config/device_registry/list' })) as Array<{
+        id?: string;
+        area_id?: string | null;
+      }>;
+      for (const d of devices ?? []) if (d?.id) deviceAreas.set(d.id, d.area_id ?? null);
+    } catch {
+      // Area inheritance is a widening of the match, so losing it cannot create
+      // a false alarm - but lost coverage IS the false-all-clear direction, so
+      // it is DISCLOSED via the degraded flag, never silent (QA P5).
+      deviceAreas = new Map();
+      degraded = true;
+    }
+  }
+  const refs = zones.map((z) => {
+    const e = entries.get(z.entity);
+    const areaId = e?.area_id ?? (e?.device_id ? deviceAreas.get(e.device_id) ?? null : null);
+    return {
+      entityId: z.entity,
+      name: z.name,
+      areaId,
+      deviceId: e?.device_id ?? null,
+      registryId: e?.id ?? null,
+      labels: e?.labels ?? [],
+    };
+  });
+  return { refs, degraded };
+}
+
+interface Candidate {
+  entityId: string;
+  name: string;
+  kind: 'automation' | 'script';
+  /** REST path for the stored config, or null when there is nothing to fetch */
+  path: string | null;
+}
+
+/**
+ * Scan every automation and script in the instance for anything that writes to
+ * a managed zone's thermostat.
+ *
+ * A full sweep, deliberately, rather than a `search/related` prefilter. The
+ * prefilter is faster but its failure mode is a FALSE ALL-CLEAR - it is
+ * unverified on this project, and whether it expands area targets in the needed
+ * direction is unknown. A slow correct answer beats a fast one that might tell a
+ * user their thermostats are uncontested when they are not.
+ *
+ * Read-only. Never called from the render path.
+ */
+export async function scanCompetingWriters(
+  hass: HassLike,
+  prefix: string,
+  ownLabel: string,
+  zones: Array<{ entity: string; name: string }>,
+): Promise<ScanResult> {
+  if (!hass.callApi) {
+    throw new Error(
+      'This Home Assistant connection cannot read automation configurations, so the conflict check could not run.',
+    );
+  }
+  const candidates: Candidate[] = [];
+  const automationConfigIds = new Map<string, unknown>();
+  for (const entityId in hass.states) {
+    const st = hass.states[entityId];
+    if (!st) continue;
+    const name = String(st.attributes.friendly_name ?? entityId);
+    if (entityId.startsWith('automation.')) {
+      const cfgId = st.attributes.id;
+      automationConfigIds.set(entityId, cfgId);
+      candidates.push({
+        entityId,
+        name,
+        kind: 'automation',
+        // A YAML automation with no id has no config API entry at all. It is
+        // counted as unreadable rather than quietly treated as clean.
+        path: typeof cfgId === 'string' && cfgId ? `config/automation/config/${cfgId}` : null,
+      });
+    } else if (entityId.startsWith('script.')) {
+      const objectId = entityId.slice('script.'.length);
+      candidates.push({
+        entityId,
+        name,
+        kind: 'script',
+        path: objectId ? `config/script/config/${objectId}` : null,
+      });
+    }
+  }
+
+  const entries = await fetchRegistryEntries(hass, [
+    ...zones.map((z) => z.entity),
+    ...candidates.filter((c) => c.kind === 'automation').map((c) => c.entityId),
+  ]);
+  const { refs: zoneRefs, degraded } = await fetchZoneRefs(hass, zones, entries);
+
+  let skippedOwn = 0;
+  const mine: Candidate[] = [];
+  for (const c of candidates) {
+    if (
+      c.kind === 'automation' &&
+      isOwnAutomation(
+        automationConfigIds.get(c.entityId),
+        entries.get(c.entityId)?.labels ?? [],
+        prefix,
+        ownLabel,
+      )
+    ) {
+      skippedOwn++;
+      continue;
+    }
+    mine.push(c);
+  }
+
+  const capped = mine.length > WRITER_SCAN_CAP;
+  const scanning = capped ? mine.slice(0, WRITER_SCAN_CAP) : mine;
+
+  let unreadable = 0;
+  const fetched = await mapLimit(scanning, WRITER_SCAN_CONCURRENCY, async (c) => {
+    if (!c.path) return null;
+    try {
+      const config = await hass.callApi!('GET', c.path);
+      const state = hass.states[c.entityId]?.state;
+      // Off AUTOMATIONS stay findings - one toggle re-arms them - but the row
+      // says "currently off" so the disable-then-rescan workflow is honest
+      // about why the row is still there (QA P3). Scripts are exempt: a
+      // script's state is 'off' whenever it is merely idle, not disabled, so
+      // deriving enabled from it would mark every script "currently off".
+      const enabled =
+        c.kind === 'automation' ? (state === 'on' ? true : state === 'off' ? false : undefined) : undefined;
+      return { id: c.entityId, name: c.name, kind: c.kind, enabled, config } as WriterSource;
+    } catch {
+      return null;
+    }
+  });
+  const sources: WriterSource[] = [];
+  for (const f of fetched) {
+    if (f) sources.push(f);
+    else unreadable++;
+  }
+
+  return summarizeScan(sources, zoneRefs, { unreadable, skippedOwn, capped, degraded });
+}

@@ -6,6 +6,7 @@ import {
   globalEntityId,
   parseEntityId,
   automationUniqueId,
+  resolveSeasonKey,
   automationAlias,
   RESERVED_SLUGS,
   type ZoneClass,
@@ -153,5 +154,54 @@ describe('automationEntityId', () => {
 
   it('is prefix-scoped so a second instance targets its own engine', () => {
     expect(automationEntityId('mzcsqa', 'engine')).toBe('automation.mzcsqa_schedule_engine');
+  });
+});
+
+/**
+ * Item 39. MEASURED against the current tree before this was written (the file
+ * was byte-identical to v0.7.2 at the time):
+ *
+ *   one keyless season, name "Summer"
+ *     input_select.climate_season options : ["Summer"]
+ *     schedule the engine provisions      : schedule.climate_zone_a_undefined
+ *     what the card looked for            : schedule.climate_zone_a_summer
+ *
+ * So the drawer row on a converging single-keyless install was dead. That
+ * install is one this project deliberately keeps provisioning (round 3,
+ * option c), so the schedule row has to find it.
+ *
+ * The engine's id template embeds `String(key)`. This resolver reproduces that
+ * exactly, and only falls back to the name slug when NO season matches - which
+ * is the pre-existing behaviour for a select holding a stale display name.
+ */
+describe('resolveSeasonKey (item 39)', () => {
+  const s = (name: string, key?: unknown) => ({ name, key }) as { name: string; key?: unknown };
+
+  it('returns the key of the season whose NAME the select is holding', () => {
+    expect(resolveSeasonKey([s('Summer', 'summer'), s('Winter', 'winter')], 'Winter')).toBe('winter');
+  });
+
+  it('reproduces the id the engine actually built for a KEYLESS season', () => {
+    expect(resolveSeasonKey([{ name: 'Summer' }], 'Summer')).toBe('undefined');
+  });
+
+  it('reproduces `_null` for an explicit null key, matching String(key)', () => {
+    expect(resolveSeasonKey([s('Summer', null)], 'Summer')).toBe('null');
+  });
+
+  it('keeps non-string keys behaving exactly as the template coerces them', () => {
+    expect(resolveSeasonKey([s('Summer', 1)], 'Summer')).toBe('1');
+    expect(resolveSeasonKey([s('Summer', false)], 'Summer')).toBe('false');
+  });
+
+  it('falls back to the name slug ONLY when no season matches', () => {
+    expect(resolveSeasonKey([s('Summer', 'summer')], 'Shoulder')).toBe('shoulder');
+    expect(resolveSeasonKey([], 'Summer')).toBe('summer');
+    expect(resolveSeasonKey(undefined, 'Summer')).toBe('summer');
+  });
+
+  it('the resolved key builds the id that exists, not one that does not', () => {
+    const key = resolveSeasonKey([{ name: 'Summer' }], 'Summer');
+    expect(zoneScheduleId('climate', 'zone_a', key)).toBe('schedule.climate_zone_a_undefined');
   });
 });
