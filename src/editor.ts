@@ -5,8 +5,9 @@
 import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { HassLike } from './ha-types';
-import type { MzcsCardConfig, ZoneConfig, SeasonConfig, BlockMode } from './types';
-import { normalizeCardConfig, normalizeRoomSensors } from './types';
+import type { MzcsCardConfig, ZoneConfig, SeasonConfig, BlockMode, LastSeenMode } from './types';
+import { normalizeCardConfig, normalizeRoomSensors, tidyRoomSensorRow, resolveDisplay, DEFAULT_AGEING_MINUTES, DEFAULT_STALE_HOURS } from './types';
+import { lastSeenSuggestion, planBulkLastSeen, applyBulkLastSeen, withLastSeen, type BulkLastSeenRow } from './lib/last-seen';
 import { defaultSeasons } from './lib/provisioning';
 import { slugify } from './lib/naming';
 import { EDITOR_TYPE } from './const';
@@ -44,6 +45,14 @@ export class MzcsCardEditor extends LitElement {
   @property({ attribute: false }) public hass?: HassLike;
   @state() private _config?: MzcsCardConfig;
   @state() private _ready = false;
+  /** Bulk "find last-seen entities" preview; null = not open (item 36). */
+  @state() private _bulkLastSeen: BulkLastSeenRow[] | null = null;
+  /**
+   * Companions the user cleared THIS editor session. The bulk action skips
+   * them so "no" sticks (item 36 non-negotiable 5); the single-row suggestion
+   * may still show, because it never writes without a click.
+   */
+  private _clearedLastSeen = new Set<string>();
 
   public setConfig(config: MzcsCardConfig): void {
     // Read what the CARD reads (item 40, docs/config-compatibility.md R1).
@@ -61,6 +70,9 @@ export class MzcsCardEditor extends LitElement {
     } catch {
       base = config;
     }
+    // A new config invalidates any open bulk preview: its zone indexes and
+    // skip decisions were computed against the old one (QA finding, 2026-08-30).
+    this._bulkLastSeen = null;
     this._config = {
       // Spread the whole config first: top-level keys this editor has no UI for
       // - `view_layout` and anything Lovelace adds later - were silently dropped
@@ -138,6 +150,92 @@ export class MzcsCardEditor extends LitElement {
     ></ha-selector>`;
   }
 
+  private _applyLastSeen(zoneIndex: number, sensorEntity: string, value: string | null): void {
+    const zone = this._config?.zones?.[zoneIndex];
+    if (!zone) return;
+    if (value) this._clearedLastSeen.delete(sensorEntity);
+    else this._clearedLastSeen.add(sensorEntity);
+    this._setZone(zoneIndex, { room_sensors: withLastSeen(zone.room_sensors, sensorEntity, value) });
+  }
+
+  /**
+   * Item 36: explicit optional companion per room sensor. The convention match
+   * is offered as an ACTION, never a pre-filled value - a pre-filled field
+   * becomes a write the moment the user saves, whether or not they noticed it.
+   * The field accepts ANY timestamp entity; the sibling only drives the offer.
+   */
+  private _renderLastSeenField(zoneIndex: number, sensorEntity: string, current?: string) {
+    const suggestion =
+      !current && this.hass ? lastSeenSuggestion(this.hass, sensorEntity) : null;
+    return html`
+      <div class="lastseenrow">
+        ${this._selector(
+          { entity: { domain: 'sensor', device_class: 'timestamp' } },
+          current ?? '',
+          (v) => this._applyLastSeen(zoneIndex, sensorEntity, String(v ?? '').trim() || null),
+          'Last-seen entity (optional)',
+        )}
+        ${suggestion
+          ? html`<button
+              class="link suggest"
+              title="Fills the field with this entity. Nothing is written until you save."
+              @click=${() => this._applyLastSeen(zoneIndex, sensorEntity, suggestion)}
+            >
+              Use ${suggestion}
+            </button>`
+          : nothing}
+      </div>
+    `;
+  }
+
+  /** Bulk companion discovery: preview everything it would write, then apply. */
+  private _renderBulkLastSeen(zones: ZoneConfig[]) {
+    const hass = this.hass;
+    if (!hass || zones.every((z) => normalizeRoomSensors(z.room_sensors).length === 0)) {
+      return nothing;
+    }
+    if (this._bulkLastSeen === null) {
+      return html`<button
+        class="link"
+        @click=${() => {
+          this._bulkLastSeen = planBulkLastSeen(zones, hass, this._clearedLastSeen);
+        }}
+      >
+        Find last-seen entities
+      </button>`;
+    }
+    if (this._bulkLastSeen.length === 0) {
+      return html`<p class="muted">
+        No matching last-seen entities for the unassigned room sensors.
+        <button class="link" @click=${() => (this._bulkLastSeen = null)}>Close</button>
+      </p>`;
+    }
+    return html`
+      <div class="bulkpreview">
+        <p class="muted">Applying will set:</p>
+        ${this._bulkLastSeen.map(
+          (r) => html`<p class="bulkrow">${r.sensorEntity} &rarr; ${r.lastSeen}</p>`,
+        )}
+        <span>
+          <button class="link" @click=${() => this._applyBulkLastSeen()}>Apply</button>
+          <button class="link danger" @click=${() => (this._bulkLastSeen = null)}>Cancel</button>
+        </span>
+      </div>
+    `;
+  }
+
+  private _applyBulkLastSeen(): void {
+    const rows = this._bulkLastSeen ?? [];
+    const hass = this.hass;
+    this._bulkLastSeen = null;
+    if (!hass || rows.length === 0) return;
+    // Re-planned at apply time against the CURRENT config - the stored preview
+    // is only ever an upper bound on what gets written (see applyBulkLastSeen).
+    this._emit({
+      zones: applyBulkLastSeen(this._config?.zones ?? [], rows, hass, this._clearedLastSeen),
+    });
+  }
+
   protected render() {
     const c = this._config;
     if (!c) return nothing;
@@ -175,17 +273,17 @@ export class MzcsCardEditor extends LitElement {
                 { entity: { domain: 'sensor', device_class: 'temperature', multiple: true } },
                 normalizeRoomSensors(z.room_sensors).map((rs) => rs.entity),
                 (v) => {
-                  // Keep any labels the user already set as the selection changes.
+                  // Keep every field the user already set (label, last_seen) as
+                  // the selection changes - rebuilding rows from the id alone
+                  // silently drops them (the item-36 trap).
                   const ids = ((v as string[]) ?? []).filter(Boolean);
                   const byId = new Map(
                     normalizeRoomSensors(z.room_sensors).map((rs) => [rs.entity, rs]),
                   );
                   this._setZone(i, {
-                    room_sensors: ids.map((id) => {
-                      const kept = byId.get(id);
-                      // Bare id unless a label exists, so configs stay tidy.
-                      return kept?.name ? { entity: id, name: kept.name } : id;
-                    }),
+                    room_sensors: ids.map((id) =>
+                      tidyRoomSensorRow(byId.get(id) ?? { entity: id }),
+                    ),
                   });
                 },
                 'Room sensors',
@@ -203,18 +301,15 @@ export class MzcsCardEditor extends LitElement {
                         const label = (e.target as HTMLInputElement).value.trim();
                         this._setZone(i, {
                           room_sensors: normalizeRoomSensors(z.room_sensors).map((x) =>
-                            x.entity === rs.entity
-                              ? label
-                                ? { entity: x.entity, name: label }
-                                : x.entity
-                              : x.name
-                                ? { entity: x.entity, name: x.name }
-                                : x.entity,
+                            tidyRoomSensorRow(
+                              x.entity === rs.entity ? { ...x, name: label || undefined } : x,
+                            ),
                           ),
                         });
                       }}
                     />
                   </label>
+                  ${this._renderLastSeenField(i, rs.entity, rs.last_seen)}
                 `,
               )}
             </div>
@@ -228,6 +323,7 @@ export class MzcsCardEditor extends LitElement {
               + Add zone
             </button>`
           : nothing}
+        ${this._renderBulkLastSeen(zones)}
 
         <h4>Seasons (1-4)</h4>
         ${seasons.map(
@@ -381,6 +477,65 @@ export class MzcsCardEditor extends LitElement {
               </p>
             `}
 
+        <h4>Display</h4>
+        <label class="fieldrow">
+          Last-seen age on room rows
+          <select
+            .value=${resolveDisplay(c.display).lastSeen}
+            @change=${(e: Event) =>
+              // this._config, not the render-scope config: change events can
+              // land faster than Lit re-renders, and a stale spread here would
+              // silently drop the edit before it (browser-measured).
+              this._emit({
+                display: {
+                  ...this._config?.display,
+                  last_seen: (e.target as HTMLSelectElement).value as LastSeenMode,
+                },
+              })}
+          >
+            <option value="always">Always</option>
+            <option value="ageing">Only when ageing</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
+        <p class="muted">
+          Shows how long since a room sensor's device actually reported, on rows whose
+          last-seen entity is set and reporting. Rows without one are unaffected.
+        </p>
+        <label class="fieldrow">
+          Ageing threshold (minutes)
+          <input
+            type="number"
+            min="1"
+            .value=${String(resolveDisplay(c.display).ageingMs / 60_000)}
+            @change=${(e: Event) => {
+              const v = Number((e.target as HTMLInputElement).value);
+              const display = { ...this._config?.display } as NonNullable<MzcsCardConfig['display']>;
+              if (Number.isFinite(v) && v > 0) display.ageing_minutes = v;
+              else delete display.ageing_minutes;
+              this._emit({ display });
+            }}
+          />
+        </label>
+        <label class="fieldrow">
+          Stale after (hours)
+          <input
+            type="number"
+            min="1"
+            .value=${String(resolveDisplay(c.display).staleMs / 3_600_000)}
+            @change=${(e: Event) => {
+              const v = Number((e.target as HTMLInputElement).value);
+              const display = { ...this._config?.display } as NonNullable<MzcsCardConfig['display']>;
+              if (Number.isFinite(v) && v > 0) display.stale_hours = v;
+              else delete display.stale_hours;
+              this._emit({ display });
+            }}
+          />
+        </label>
+        <p class="muted">
+          A reading older than this is greyed out and marked stale instead of trusted.
+        </p>
+
         <h4>Advanced</h4>
         <label class="fieldrow">
           Entity prefix
@@ -399,6 +554,26 @@ export class MzcsCardEditor extends LitElement {
   }
 
   static styles = css`
+    .lastseenrow {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin: 0 0 6px 12px;
+    }
+    .lastseenrow .suggest {
+      align-self: flex-start;
+      font-size: 12px;
+    }
+    .bulkpreview {
+      border: 1px dashed var(--divider-color, #444);
+      border-radius: 8px;
+      padding: 8px;
+    }
+    .bulkpreview .bulkrow {
+      margin: 2px 0;
+      font-size: 12px;
+      font-family: monospace;
+    }
     .roomlabel {
       display: flex;
       align-items: center;

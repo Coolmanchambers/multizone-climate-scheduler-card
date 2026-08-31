@@ -4,6 +4,10 @@ import {
   normalizeCardConfig,
   normalizeRoomSensors,
   resolveEcoPreset,
+  resolveDisplay,
+  DEFAULT_STALE_HOURS,
+  DEFAULT_AGEING_MINUTES,
+  type DisplayConfig,
   type MzcsCardConfig,
 } from '../src/types';
 import {
@@ -127,6 +131,103 @@ describe('registry row: zones[].room_sensors (string[] -> Array<string | {entity
       ],
     };
     expectSameProvisioning(viaConfig(oldShape), viaConfig(modern));
+  });
+});
+
+describe('registry row: zones[].room_sensors[].last_seen (absent -> optional timestamp entity, item 36)', () => {
+  it('(a) a valid companion id is kept', () => {
+    expect(
+      normalizeRoomSensors([{ entity: 'sensor.bedroom_1_temperature', last_seen: 'sensor.bedroom_1_last_seen' }]),
+    ).toEqual([{ entity: 'sensor.bedroom_1_temperature', last_seen: 'sensor.bedroom_1_last_seen' }]);
+  });
+
+  it('(a) rows without the field stay byte-identical to today - no key materializes', () => {
+    const out = normalizeRoomSensors(['sensor.bedroom_1_temperature', { entity: 'sensor.studio_temperature', name: 'Studio' }]);
+    for (const row of out) expect('last_seen' in row).toBe(false);
+  });
+
+  it('(a) junk shapes are stripped silently, never propagated and never thrown on', () => {
+    for (const junk of ['', '   ', null, 123, false, {}, ['sensor.x'], 'x'.repeat(300)] as unknown[]) {
+      const rows = normalizeRoomSensors([
+        { entity: 'sensor.bedroom_1_temperature', last_seen: junk as string },
+      ]);
+      expect(rows, JSON.stringify(junk).slice(0, 40)).toEqual([{ entity: 'sensor.bedroom_1_temperature' }]);
+      expect('last_seen' in rows[0]!, JSON.stringify(junk).slice(0, 40)).toBe(false);
+    }
+  });
+
+  it('(a) an untidy but real id is trimmed at the boundary (QA claim-3 refutation, 2026-08-30)', () => {
+    expect(
+      normalizeRoomSensors([{ entity: 'sensor.bedroom_1_temperature', last_seen: '  sensor.bedroom_1_last_seen ' }]),
+    ).toEqual([{ entity: 'sensor.bedroom_1_temperature', last_seen: 'sensor.bedroom_1_last_seen' }]);
+  });
+
+  it('(b)(c) a companion changes NOTHING the engine sees, through the real config path', () => {
+    const without = {
+      ...baseConfig(),
+      zones: [{ entity: 'climate.zone_a', name: 'Zone A', room_sensors: [{ entity: 'sensor.bedroom_1_temperature', name: 'Bedroom 1' }] }],
+    };
+    const withCompanion = {
+      ...baseConfig(),
+      zones: [
+        {
+          entity: 'climate.zone_a',
+          name: 'Zone A',
+          room_sensors: [
+            { entity: 'sensor.bedroom_1_temperature', name: 'Bedroom 1', last_seen: 'sensor.bedroom_1_last_seen' },
+          ],
+        },
+      ],
+    };
+    expectSameProvisioning(viaConfig(without), viaConfig(withCompanion));
+  });
+});
+
+describe('registry row: display (absent -> presentation block, items 36 + 12)', () => {
+  it('(a) absent resolves to the previous behaviour exactly', () => {
+    for (const d of [undefined, {}, null as unknown as DisplayConfig]) {
+      expect(resolveDisplay(d ?? undefined)).toEqual({
+        lastSeen: 'always',
+        ageingMs: DEFAULT_AGEING_MINUTES * 60_000,
+        staleMs: DEFAULT_STALE_HOURS * 3_600_000,
+      });
+    }
+  });
+
+  it('(a) explicit values are honoured', () => {
+    expect(resolveDisplay({ last_seen: 'ageing', ageing_minutes: 10, stale_hours: 6 })).toEqual({
+      lastSeen: 'ageing',
+      ageingMs: 600_000,
+      staleMs: 6 * 3_600_000,
+    });
+    expect(resolveDisplay({ last_seen: 'off' }).lastSeen).toBe('off');
+  });
+
+  it('(a) junk degrades to the defaults rather than throwing', () => {
+    for (const d of [
+      { last_seen: 'sometimes', ageing_minutes: 'soon', stale_hours: -2 },
+      { last_seen: 42, ageing_minutes: 0, stale_hours: NaN },
+      'nonsense',
+    ] as unknown[]) {
+      expect(resolveDisplay(d as DisplayConfig), JSON.stringify(d)).toEqual({
+        lastSeen: 'always',
+        ageingMs: DEFAULT_AGEING_MINUTES * 60_000,
+        staleMs: DEFAULT_STALE_HOURS * 3_600_000,
+      });
+    }
+  });
+
+  it('(a) survives the normalization boundary untouched - it is presentation, not engine input', () => {
+    const cfg = { ...baseConfig(), display: { last_seen: 'ageing' as const, ageing_minutes: 10 } };
+    expect(normalizeCardConfig(cfg).display).toEqual({ last_seen: 'ageing', ageing_minutes: 10 });
+  });
+
+  it('(b)(c) a display block changes NOTHING the engine sees, through the real config path', () => {
+    const withDisplay = {
+      ...baseConfig(),
+      display: { last_seen: 'off' as const, ageing_minutes: 5, stale_hours: 12 },
+    };
+    expectSameProvisioning(viaConfig(baseConfig()), viaConfig(withDisplay));
   });
 });
 

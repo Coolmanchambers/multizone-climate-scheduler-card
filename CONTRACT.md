@@ -145,6 +145,8 @@ zones:
   - entity: climate.upstairs_thermostat
     name: Upstairs
     room_sensors: [sensor.bedroom_3_temperature, ...]
+    # room_sensors rows also accept {entity, name, last_seen} - last_seen names an
+    # optional timestamp companion that joins that row's stale check and shows an age
   - entity: climate.downstairs_thermostat
     name: Downstairs
 seasons:
@@ -155,6 +157,8 @@ weather_entity: weather.forecast_home   # optional; enables the CDD learning cha
 features: { fan_timer: [15, 30, 60], anomaly_alerts: true, fan_guard: input_boolean.hvac_fan_guard }
 # features.eco_preset: 'away'   # optional: standby preset the engine respects ('eco' default;
 #                               # false disables the stand-down gate)
+# display: { last_seen: always, ageing_minutes: 45, stale_hours: 3 }   # optional, presentation
+#                               # only - never reaches the engine or any provisioned object
 ```
 `fan_guard` is optional. `room_sensors` per zone drives the read-only deviation chips.
 

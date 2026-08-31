@@ -25,11 +25,13 @@ const config: MzcsCardConfig = {
       entity: 'climate.upstairs_thermostat',
       name: 'Upstairs',
       room_sensors: [
-        { entity: 'sensor.bedroom_3_temperature', name: 'Bedroom 3' },
-        { entity: 'sensor.bedroom_1_temperature', name: 'Bedroom 1' },
-        'sensor.bedroom_2_temperature',
-        'sensor.landing_temperature',
-        'sensor.dead_sensor_temperature',
+        // Item 36: the full age range - "now", minutes, tens of minutes, amber
+        // hours, and a device dead for a day.
+        { entity: 'sensor.bedroom_3_temperature', name: 'Bedroom 3', last_seen: 'sensor.bedroom_3_last_seen' },
+        { entity: 'sensor.bedroom_1_temperature', name: 'Bedroom 1', last_seen: 'sensor.bedroom_1_last_seen' },
+        { entity: 'sensor.bedroom_2_temperature', last_seen: 'sensor.bedroom_2_last_seen' },
+        { entity: 'sensor.landing_temperature', last_seen: 'sensor.landing_last_seen' },
+        { entity: 'sensor.dead_sensor_temperature', last_seen: 'sensor.dead_sensor_last_seen' },
       ],
     },
     { entity: 'climate.studio_mini_split', name: 'Studio' },
@@ -37,6 +39,22 @@ const config: MzcsCardConfig = {
 };
 
 const hass = new MockHass();
+// Item 36 companions, seeded relative to the real clock so the harness shows
+// stable ages: fresh (3m), ageing (2h), and a device dead for a day whose temp
+// entity still holds a value - the exact blind spot the feature closes.
+const seenAgo = (ms: number) => new Date(Date.now() - ms).toISOString();
+for (const [id, ms] of [
+  ['sensor.bedroom_3_last_seen', 30 * 1000],
+  ['sensor.bedroom_1_last_seen', 3 * 60_000],
+  ['sensor.bedroom_2_last_seen', 20 * 60_000],
+  ['sensor.landing_last_seen', 2 * 3_600_000],
+  ['sensor.dead_sensor_last_seen', 26 * 3_600_000],
+] as const) {
+  hass.set(id, {
+    state: seenAgo(ms),
+    attributes: { device_class: 'timestamp', friendly_name: id },
+  });
+}
 const card = document.createElement('multizone-climate-scheduler-card') as HTMLElement & {
   hass: import('../src/ha-types').HassLike;
   setConfig(c: MzcsCardConfig): void;

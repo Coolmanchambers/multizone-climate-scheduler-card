@@ -6,6 +6,14 @@ export interface RoomSensorConfig {
   entity: string;
   /** label shown on the card; falls back to the entity's friendly name */
   name?: string;
+  /**
+   * Optional timestamp entity carrying when the device last actually spoke
+   * (item 36) - e.g. a Zigbee2MQTT `_last_seen` sibling. When configured it
+   * takes precedence over `last_reported` for the stale gate and is the ONLY
+   * source the age label will state as a time. Absent means exactly today's
+   * behaviour: gate from `last_reported`, no age shown, nothing to configure.
+   */
+  last_seen?: string;
 }
 
 /** Normalize the mixed shorthand/object form to objects. */
@@ -14,7 +22,23 @@ export function normalizeRoomSensors(
 ): RoomSensorConfig[] {
   return (list ?? [])
     .map((s) => (typeof s === 'string' ? { entity: s } : s))
-    .filter((s): s is RoomSensorConfig => !!s && typeof s.entity === 'string' && s.entity !== '');
+    .filter((s): s is RoomSensorConfig => !!s && typeof s.entity === 'string' && s.entity !== '')
+    .map((s) => {
+      // last_seen degrades SILENTLY (item 36 non-negotiable 6). The boundary
+      // strips non-string shapes, blanks, and absurd lengths (a real entity id
+      // is well under 256 chars; an unbounded string would ride the render
+      // gate's hottest memo path), and trims the rest. A trimmed string that
+      // names no real entity still passes - it degrades at read time, where
+      // the adapter falls back exactly as for a dead companion.
+      const raw = s.last_seen;
+      if (!('last_seen' in s)) return s;
+      if (typeof raw === 'string' && raw.trim() && raw.length <= 255) {
+        const trimmed = raw.trim();
+        return trimmed === raw ? s : { ...s, last_seen: trimmed };
+      }
+      const { last_seen: _drop, ...rest } = s;
+      return rest;
+    });
 }
 
 export interface ZoneConfig {
@@ -34,6 +58,70 @@ export interface SeasonConfig {
   default_mode: BlockMode;
 }
 
+/**
+ * The tidiest storable form of a room-sensor row: a bare string when only the
+ * entity is set, an object carrying EVERY optional field otherwise. The editor
+ * rebuilds rows in two places; both must go through this or a field silently
+ * vanishes on the next unrelated edit (the item-36 `last_seen` trap).
+ */
+export function tidyRoomSensorRow(rs: RoomSensorConfig): string | RoomSensorConfig {
+  const out: RoomSensorConfig = { entity: rs.entity };
+  if (rs.name?.trim()) out.name = rs.name;
+  if (typeof rs.last_seen === 'string' && rs.last_seen.trim()) out.last_seen = rs.last_seen;
+  return out.name || out.last_seen ? out : rs.entity;
+}
+
+/** How the room rows show a configured last-seen companion's age (item 36). */
+export type LastSeenMode = 'off' | 'always' | 'ageing';
+
+/**
+ * Presentation-only settings (items 36 + 12). Deliberately a separate top-level
+ * block, NOT under `features`: `features` keys feed the provisioning engine and
+ * its variant matrix, and nothing in here may ever reach a generator. The
+ * compat tests pin that with a buildDesired/signature equality case.
+ */
+export interface DisplayConfig {
+  /**
+   * Age label on room rows that have a `last_seen` companion. 'always' shows it
+   * on every such row, 'ageing' only past the ageing threshold, 'off' never.
+   * Default: 'always' (maintainer decision, 2026-08-30). Rows without a
+   * companion never show an age regardless of this setting.
+   */
+  last_seen?: LastSeenMode;
+  /** Minutes before an age counts as ageing (drives 'ageing' mode). Default: 45. */
+  ageing_minutes?: number;
+  /**
+   * Hours without a report before a reading is treated as stale (item 12 -
+   * previously the hard-coded 3h ROOM_STALE_MS). Default: 3.
+   */
+  stale_hours?: number;
+}
+
+export interface ResolvedDisplay {
+  lastSeen: LastSeenMode;
+  ageingMs: number;
+  staleMs: number;
+}
+
+/** The stale gate's original hard-coded threshold; still the default (item 12). */
+export const DEFAULT_STALE_HOURS = 3;
+export const DEFAULT_AGEING_MINUTES = 45;
+
+/**
+ * Resolve the display block to what read sites consume. Absent, partial and
+ * junk shapes all resolve to the previous behaviour exactly (policy R1).
+ */
+export function resolveDisplay(display?: DisplayConfig): ResolvedDisplay {
+  const mode = display?.last_seen;
+  const ageing = Number(display?.ageing_minutes);
+  const stale = Number(display?.stale_hours);
+  return {
+    lastSeen: mode === 'off' || mode === 'ageing' || mode === 'always' ? mode : 'always',
+    ageingMs: Number.isFinite(ageing) && ageing > 0 ? ageing * 60_000 : DEFAULT_AGEING_MINUTES * 60_000,
+    staleMs: Number.isFinite(stale) && stale > 0 ? stale * 3_600_000 : DEFAULT_STALE_HOURS * 3_600_000,
+  };
+}
+
 export interface MzcsCardConfig {
   type: string;
   prefix?: string;
@@ -41,6 +129,7 @@ export interface MzcsCardConfig {
   seasons?: SeasonConfig[];
   season_switch?: SeasonSwitchMode;
   weather_entity?: string;
+  display?: DisplayConfig;
   features?: {
     fan_timer?: number[];
     anomaly_alerts?: boolean;

@@ -1,5 +1,6 @@
 // The ONLY module allowed to interpret HA entity shapes (CONTRACT / plan risk #1).
 import type { HassLike } from './ha-types';
+import { DEFAULT_STALE_HOURS } from './types';
 
 export interface ClimateSummary {
   available: boolean;
@@ -75,6 +76,15 @@ export interface RoomReading {
   temp: number | null;
   /** sensor has not reported recently - show the reading as untrustworthy */
   stale?: boolean;
+  /**
+   * ms since the device last actually spoke - present ONLY when a `last_seen`
+   * companion is configured and usable (item 36). `last_reported` is never
+   * surfaced here: it is trustworthy enough to WITHHOLD a reading, not to
+   * ASSERT a time (a restart replays retained MQTT and refreshes it for a
+   * dead device). A gate that fails to flag is a lesser sin than a label
+   * that lies.
+   */
+  ageMs?: number;
 }
 
 /**
@@ -90,7 +100,7 @@ export interface RoomReading {
  * over-report staleness on coarse sensors, so it is only used when the better
  * field is missing.
  */
-export const ROOM_STALE_MS = 3 * 60 * 60 * 1000;
+export const ROOM_STALE_MS = DEFAULT_STALE_HOURS * 60 * 60 * 1000;
 
 /**
  * A server-side "now" for staleness: the newest report timestamp across the
@@ -110,18 +120,83 @@ export function reportReference(hass: HassLike, entityIds: string[]): number {
   return newest > 0 ? newest : Date.now();
 }
 
-export function roomReading(hass: HassLike, entityId: string, now = Date.now()): RoomReading {
+export interface RoomReadingOptions {
+  /** stale threshold override, ms (item 12); defaults to ROOM_STALE_MS */
+  staleMs?: number;
+  /**
+   * timestamp companion entity (item 36). When usable it is ADDITIONAL
+   * evidence for the stale gate, not a substitute: a stale companion marks the
+   * row stale even when a restart's retained-MQTT replay refreshed
+   * `last_reported` (the blind spot this closes), and a stale `last_reported`
+   * still marks it stale even when the companion is fresh - the radio link
+   * being alive does not prove the temperature feed is (QA finding, 2026-08-30:
+   * a renamed topic or disabled entity freezes the value while the device keeps
+   * answering). Missing/unavailable/unparseable falls back silently.
+   */
+  lastSeenEntity?: string;
+}
+
+/**
+ * Only an ISO-8601 timestamp WITH an explicit offset is trusted from a
+ * companion. `Date.parse` is far too permissive for a safety gate: "45" parses
+ * as the year 2045, "72.5" as May 1972, and an offset-less string parses in
+ * the BROWSER's timezone - the exact drift-dependence `reportReference` exists
+ * to remove. Real HA timestamp entities always carry the offset; anything else
+ * degrades silently (item 36 rule 6). QA-confirmed 3x, 2026-08-30.
+ */
+const ISO_WITH_OFFSET = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?([Zz]|[+-]\d{2}:?\d{2})$/;
+
+/**
+ * A companion claiming to have reported further than this into the future is a
+ * broken source (wrong clock, wrong entity), not a fresh device: fall back
+ * rather than clamp it into a permanent "now" label. Small skews inside the
+ * slack still clamp to 0 - a device can legitimately outrun the reference by
+ * one report.
+ */
+const FUTURE_SLACK_MS = 5 * 60 * 1000;
+
+export function roomReading(
+  hass: HassLike,
+  entityId: string,
+  now = Date.now(),
+  opts?: RoomReadingOptions,
+): RoomReading {
   const e = hass.states[entityId];
   const name =
     typeof e?.attributes.friendly_name === 'string'
       ? e.attributes.friendly_name.replace(/ (Temperature|temperature)$/, '')
       : entityId.split('.')[1] ?? entityId;
   const v = e ? Number(e.state) : NaN;
+  const staleMs = opts?.staleMs ?? ROOM_STALE_MS;
+  const companion = opts?.lastSeenEntity ? hass.states[opts.lastSeenEntity] : undefined;
+  // Shape-validated BEFORE parsing (see ISO_WITH_OFFSET above): every unusable
+  // companion shape lands in the same silent fallback (item 36 rule 6).
+  const rawCompanionTs =
+    companion?.state && ISO_WITH_OFFSET.test(companion.state) ? Date.parse(companion.state) : NaN;
+  const companionTs =
+    Number.isFinite(rawCompanionTs) && rawCompanionTs - now <= FUTURE_SLACK_MS
+      ? rawCompanionTs
+      : NaN;
+  let ageMs: number | undefined;
+  if (Number.isFinite(companionTs)) {
+    // Clamped: the companion's own report can outrun the server-now reference
+    // by a beat; "just now" is truthful, a negative age is nonsense.
+    ageMs = Math.max(0, now - companionTs);
+  }
   const reported = e?.last_reported ?? e?.last_updated;
-  const ts = reported ? Date.parse(reported) : NaN;
-  // A future timestamp means clock disagreement, never staleness.
-  const stale = Number.isFinite(ts) && now - ts > ROOM_STALE_MS;
-  return { entityId, name, temp: Number.isFinite(v) ? v : null, stale };
+  const reportedTs = reported ? Date.parse(reported) : NaN;
+  // A future timestamp means clock disagreement, never staleness. The two
+  // sources are OR'd, never substituted - see RoomReadingOptions.
+  const stale =
+    (Number.isFinite(companionTs) && now - companionTs > staleMs) ||
+    (Number.isFinite(reportedTs) && now - reportedTs > staleMs);
+  return {
+    entityId,
+    name,
+    temp: Number.isFinite(v) ? v : null,
+    stale,
+    ...(ageMs !== undefined ? { ageMs } : {}),
+  };
 }
 
 export function setHvacMode(hass: HassLike, entityId: string, mode: string): Promise<unknown> {

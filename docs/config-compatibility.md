@@ -94,6 +94,19 @@ One row per config shape that has ever changed. Add a row and a compat test in t
 | `seasons[].key` | may be absent or collide | unique per season | colliding keys refused, see below |
 | `prefix` | may be absent | present | `provisionInputFromConfig` |
 | `features` | may be absent | present | `normalizeCardConfig` + `resolve*` |
+| `zones[].room_sensors[].last_seen` | absent (pre-0.7.4) | optional timestamp entity id | `normalizeRoomSensors` (junk stripped silently) |
+| `display` | absent (pre-0.7.4) | `{ last_seen, ageing_minutes, stale_hours }` | `resolveDisplay` |
+
+R2 note for the two rows above: both ship reader and writer in the same release, which R2's
+letter forbids. The exemption is deliberate and verified, not an oversight: both are ADDITIVE
+keys that the previous bundle provably ignores - 0.7.3's `normalizeCardConfig` spreads unknown
+top-level keys through untouched, and its `normalizeRoomSensors` passes object rows with unknown
+keys as-is - so a cached old bundle reading a new-shape config degrades to exactly its old
+behavior instead of crashing. R2's full ordering applies whenever the old bundle would CHANGE
+behavior on the new shape (the `room_sensors` string-to-object lesson); an additive key an old
+bundle demonstrably ignores may ship read-and-write together. An old bundle's EDITOR will drop
+`last_seen` from a row on that row's next edit (it rebuilds rows from the fields it knows) -
+accepted, documented here.
 
 An absent `seasons` block silently means Summer and Winter, and provisions identically to writing
 those two out - verified by a compat test, not assumed. `season_switch` is written by the editor on every save

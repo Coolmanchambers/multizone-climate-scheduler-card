@@ -7,6 +7,11 @@ export default defineConfig(({ mode }) => ({
   define: {
     __MZCS_DEV__: JSON.stringify(mode === 'dev'),
   },
+  // LAN-visible dev harness, so a phone or the wall panel can open it for
+  // narrow-width validation (items 31/35). Dev server only; no effect on build.
+  server: {
+    host: true,
+  },
   build: {
     target: 'es2022',
     // Lib-mode ES output skips minification by default; forcing it cuts the

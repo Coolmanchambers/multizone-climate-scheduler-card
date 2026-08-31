@@ -6,6 +6,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 
 ## [Unreleased]
 
+### Added
+- **Room sensor "last seen" ages.** Each room sensor can optionally name a companion timestamp
+  entity (e.g. a Zigbee2MQTT `_last_seen` entity) carrying when the device last actually
+  reported. When set and reporting, it joins that row's stale check as additional evidence - a
+  stale companion greys the row even when a restart's retained-MQTT replay made the reading look
+  freshly reported, and a stalled temperature feed still greys it even while the device's radio
+  stays alive - and the row shows a compact age label that turns amber past an ageing threshold.
+  A companion that is missing, unavailable, or not a real timestamp falls back silently to
+  today's behavior. Rows without a companion look and behave exactly as before. The editor
+  suggests a matching `_last_seen` entity as a one-click action (never pre-filled), and a "Find
+  last-seen entities" action previews every match before writing anything; the preview is
+  re-checked at apply time, so values you set or cleared in the meantime are never overwritten.
+  New `display` settings: `last_seen` (`always` default / `ageing` / `off`) and `ageing_minutes`
+  (45 default). The diagnostics export now includes the resolved display settings and which
+  rooms have a companion.
+- **The stale threshold is now configurable.** `display.stale_hours` (default 3, the previous
+  hard-coded value) sets how long without a report before a reading is greyed out and marked
+  stale.
+- **Narrow-width hardening for the room rows.** At wall-panel widths a long room name now
+  truncates with an ellipsis instead of pushing the row wide or wrapping the temperature under
+  its badge.
+- **Vendor HVAC modes get readable chip labels.** A mode outside the standard set (e.g. a brand's
+  `energy_saver`) now renders as "Energy saver" instead of the raw id; the service call still
+  sends the mode exactly as the device exposes it.
+
 ## [0.7.3] - 2026-08-29
 
 ### Added

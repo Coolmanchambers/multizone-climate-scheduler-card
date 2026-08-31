@@ -76,6 +76,16 @@ describe('render gate watch list', () => {
     expect(SRC).toContain('if (active) ids.push(zoneScheduleId(p, slug, active));');
   });
 
+  it('watches the last_seen companions the room rows read (item 36)', () => {
+    // Companion ids come from config, not a naming generator, so the class
+    // scans above cannot see them. A source scan is second-class evidence, but
+    // it stops the watch push being quietly removed: without it a companion
+    // update would not break through the gate and the age label would freeze.
+    expect(SRC).toContain('if (rs.last_seen) ids.push(rs.last_seen);');
+    // And the renderer actually consumes the companion via the adapter opts.
+    expect(SRC).toContain('lastSeenEntity: rs.last_seen');
+  });
+
   it('backs the wall-clock fallback with a real timer', () => {
     // Both QA reviewers flagged that the minute branch only ran when hass
     // traffic happened to arrive. A frozen sensor generates no traffic.

@@ -3,7 +3,8 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { CARD_TYPE, CARD_NAME, CARD_VERSION, EDITOR_TYPE } from './const';
 import { buildDiagnostics } from './lib/diagnostics';
 import type { MzcsCardConfig, ZoneConfig } from './types';
-import { resolveEcoPreset, normalizeRoomSensors, normalizeCardConfig } from './types';
+import { resolveEcoPreset, normalizeRoomSensors, normalizeCardConfig, resolveDisplay } from './types';
+import { formatAge, ageVisible, ageing } from './lib/last-seen';
 import type { HassLike } from './ha-types';
 import {
   climateSummary,
@@ -183,6 +184,19 @@ const MODE_LABELS: Record<string, string> = {
   dry: 'Dry',
   fan_only: 'Fan only',
 };
+
+/**
+ * Chip label for a mode outside MODE_LABELS. Brands expose vendor modes
+ * (`energy_saver`, `whole_home_dehumidify`); the raw id rendered as-is reads
+ * as a bug (item 35, measured in the harness). The SERVICE CALL always sends
+ * the raw mode - this only shapes the label.
+ */
+function modeLabel(m: string): string {
+  const known = MODE_LABELS[m];
+  if (known) return known;
+  const words = m.replace(/_/g, ' ').trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : m;
+}
 
 /* eslint-disable no-console */
 console.info(`%c ${CARD_NAME} %c v${CARD_VERSION}`, 'background:var(--mzcs-accent);color:#fff;padding:2px 6px;border-radius:4px 0 0 4px;', 'background:#243039;color:#fff;padding:2px 6px;border-radius:0 4px 4px 0;');
@@ -1417,7 +1431,12 @@ export class MzcsCard extends LitElement {
     const ids: string[] = [];
     for (const z of cfg.zones ?? []) {
       if (z.entity) ids.push(z.entity);
-      for (const rs of normalizeRoomSensors(z.room_sensors)) ids.push(rs.entity);
+      for (const rs of normalizeRoomSensors(z.room_sensors)) {
+        ids.push(rs.entity);
+        // Item 36: the age label and the stale gate read the companion, so its
+        // updates must break through the render gate like any other read.
+        if (rs.last_seen) ids.push(rs.last_seen);
+      }
       if (!z.name) continue;
       const slug = slugify(z.name);
       for (const cls of ZONE_WATCH) ids.push(zoneEntityId(cls, p, slug));
@@ -2317,7 +2336,7 @@ export class MzcsCard extends LitElement {
                       class=${cur === m ? 'chip mode-on' : 'chip'}
                       @click=${() => void setHvacMode(hass, entity, m)}
                     >
-                      ${MODE_LABELS[m] ?? m}
+                      ${modeLabel(m)}
                     </button>
                   `,
                 )}
@@ -2363,20 +2382,43 @@ export class MzcsCard extends LitElement {
       numberHelperValue(hass, globalEntityId('dev_amber_max', this._prefix)),
     );
     const sensors = normalizeRoomSensors(zone.room_sensors);
+    const display = resolveDisplay(this._config?.display);
     // Reference "now" from HA's own freshest report among this zone's entities,
     // so a wall tablet with a drifted clock cannot fake staleness (live QA).
-    const ref = reportReference(hass, [zone.entity, ...sensors.map((x) => x.entity)]);
+    // Configured last_seen companions join the set: drift-immunity applies to
+    // the age label as much as to the stale gate (item 36).
+    const ref = reportReference(hass, [
+      zone.entity,
+      ...sensors.map((x) => x.entity),
+      ...sensors.flatMap((x) => (x.last_seen ? [x.last_seen] : [])),
+    ]);
     return html`
       <div class="rooms">
         ${sensors.map((rs) => {
-          const reading = roomReading(hass, rs.entity, ref);
+          const reading = roomReading(hass, rs.entity, ref, {
+            staleMs: display.staleMs,
+            lastSeenEntity: rs.last_seen,
+          });
           const r = { ...reading, name: rs.name?.trim() || reading.name };
+          // Age label only when a companion is usable (ageMs present) and the
+          // display setting says so. The 30s heartbeat re-renders it, but the
+          // age is measured against the zone's server-derived reference, so it
+          // ADVANCES only as some watched entity reports - the same
+          // drift-immunity trade the stale gate has always made. A zone frozen
+          // wholesale freezes its ages along with everything else on the card.
+          const age = ageVisible(display.lastSeen, r.ageMs, display.ageingMs)
+            ? html`<span
+                class="agechip ${ageing(r.ageMs, display.ageingMs) ? 'ageing' : ''}"
+                title="Last seen ${formatAge(r.ageMs!)}${formatAge(r.ageMs!) === 'now' ? '' : ' ago'} - the device's own last report time."
+                >${formatAge(r.ageMs!)}</span
+              >`
+            : nothing;
           if (r.temp == null || setpoint == null || r.stale) {
             return html`
-              <div class="room" title=${r.stale ? 'This sensor has not reported for hours - the reading below may be out of date.' : nothing}>
+              <div class="room" title=${r.stale ? 'This sensor has not reported recently - the reading below may be out of date.' : nothing}>
                 <span class="rname">${r.name}</span>
                 <span class="rtemp muted">
-                  ${r.temp == null
+                  ${age}${r.temp == null
                     ? '—'
                     : r.stale
                       ? html`<span class="stalechip">stale</span>${formatRoomTemp(r.temp)}°`
@@ -2392,7 +2434,7 @@ export class MzcsCard extends LitElement {
             <div class="room">
               <span class="rname">${r.name}</span>
               <span>
-                <span class="badge ${deviationColor(delta, greenMax, amberMax)}"
+                ${age}<span class="badge ${deviationColor(delta, greenMax, amberMax)}"
                   >${formatDelta(delta)}</span
                 >
                 <span class="rtemp">${formatRoomTemp(r.temp)}°</span>
@@ -2567,9 +2609,26 @@ export class MzcsCard extends LitElement {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      gap: 8px;
       padding: 8px 2px;
       border-bottom: 0.5px solid var(--mzcs-border);
       font-size: 13px;
+    }
+    /* 300px discipline (items 36/31): the room NAME is what gives - it
+       truncates - while the age chip + badge + reading stay on one line.
+       Without min-width:0 a long single-word name refuses to shrink and
+       pushes the row wider than the card; without nowrap the temperature
+       wraps under its badge. */
+    .room .rname {
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .room > span:last-child {
+      flex: 0 0 auto;
+      white-space: nowrap;
     }
     .room:last-child {
       border-bottom: none;
@@ -3237,6 +3296,23 @@ export class MzcsCard extends LitElement {
       border: 0.5px solid var(--mzcs-border);
       text-transform: uppercase;
       letter-spacing: 0.03em;
+    }
+    /* Item 36: last-seen age. Muted so a healthy row stays quiet; amber once
+       past the ageing threshold. Sized like the stale chip so the two never
+       fight for the row's height. */
+    .agechip {
+      font-size: 10px;
+      border-radius: 999px;
+      padding: 1px 6px;
+      margin-right: 6px;
+      color: var(--mzcs-text-dim);
+      background: var(--mzcs-track);
+      border: 0.5px solid var(--mzcs-border);
+      letter-spacing: 0.03em;
+    }
+    .agechip.ageing {
+      color: var(--mzcs-warn);
+      border-color: var(--mzcs-warn);
     }
     .managerow input,
     .managerow select {

@@ -1,5 +1,5 @@
 import type { MzcsCardConfig } from '../types';
-import { normalizeCardConfig, normalizeRoomSensors, resolveEcoPreset } from '../types';
+import { normalizeCardConfig, normalizeRoomSensors, resolveEcoPreset, resolveDisplay } from '../types';
 import { defaultSeasons } from './provisioning';
 
 /**
@@ -159,11 +159,20 @@ export function buildDiagnostics(input: DiagnosticsInput): string {
       name: ids ? z.name : `Zone ${i + 1}`,
       climate: ids ? z.entity : `climate.<zone_${i + 1}>`,
       room_sensors: ids
-        ? rooms.map((r) => (r.name ? { entity: r.entity, name: r.name } : { entity: r.entity }))
-        : rooms.map((_, j) => ({ entity: `sensor.<zone_${i + 1}_room_${j + 1}>` })),
+        ? rooms.map((r) => ({
+            entity: r.entity,
+            ...(r.name ? { name: r.name } : {}),
+            ...(r.last_seen ? { last_seen: r.last_seen } : {}),
+          }))
+        : rooms.map((r, j) => ({
+            entity: `sensor.<zone_${i + 1}_room_${j + 1}>`,
+            ...(r.last_seen ? { last_seen: `sensor.<zone_${i + 1}_room_${j + 1}_last_seen>` } : {}),
+          })),
       room_sensor_count: rooms.length,
       /** How many rooms carry an explicit label - a labelling bug shows up here. */
       room_sensors_labelled: rooms.filter((r) => !!r.name?.trim()).length,
+      /** Item 36: a "weird stale/age" report is unreadable without this. */
+      room_sensors_with_last_seen: rooms.filter((r) => !!r.last_seen).length,
     };
   });
 
@@ -212,6 +221,13 @@ export function buildDiagnostics(input: DiagnosticsInput): string {
         // shape of the answer - default, disabled, or customised - is what a
         // maintainer diagnoses with (QA P1).
         eco_preset: describeEcoPreset(features, ids),
+      },
+      // Item 36/12: RESOLVED values, not the raw block - what the card actually
+      // uses is what a stale/age report needs, and resolved values carry no
+      // identifiers so both redaction modes get them.
+      display: {
+        configured: cfg.display != null,
+        ...resolveDisplay(cfg.display),
       },
     },
 

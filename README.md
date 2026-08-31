@@ -483,6 +483,7 @@ zones:
       - sensor.bedroom_3_temperature           # uses the entity's own name
       - entity: sensor.zb_landing_temp_sensor      # or label it yourself
         name: Landing
+        last_seen: sensor.zb_landing_temp_sensor_last_seen  # optional, see below
 seasons:
   - key: summer                       # REQUIRED - fixed id used in entity names
     name: Summer                      # display name; rename freely, key stays
@@ -498,6 +499,10 @@ features:
                                       # down while this helper is on
   eco_preset: away                    # optional: standby preset the engine
                                       # respects ('eco' default; false disables)
+display:                              # optional, presentation only
+  last_seen: always                   # always | ageing | off
+  ageing_minutes: 45
+  stale_hours: 3
 ```
 
 | Key | Type | Default | Notes |
@@ -505,7 +510,8 @@ features:
 | `prefix` | string | `climate` | Lowercase letters, digits and underscores. The visual editor slugifies what you type; hand-written YAML is used as-is, so keep to that shape. |
 | `zones[].name` | string | — | Display name; also determines the zone's entity ids. |
 | `zones[].entity` | string | — | Any `climate.*` entity. |
-| `zones[].room_sensors` | list | — | Temperature sensors shown as deviation chips. Each item is either an entity id or `{entity, name}` when you want a different label than the entity's friendly name. |
+| `zones[].room_sensors` | list | — | Temperature sensors shown as deviation chips. Each item is either an entity id or `{entity, name, last_seen}` when you want a different label than the entity's friendly name, or a last-seen companion. |
+| `zones[].room_sensors[].last_seen` | string | — | Optional timestamp entity carrying when the sensor's device last actually reported (e.g. a Zigbee2MQTT `_last_seen` entity). When set and reporting, it joins the stale check for that row and shows an age label; if it goes missing or unavailable the row quietly falls back to the standard check, with no age shown. The editor can suggest matches. Without it the row behaves exactly as before. |
 | `seasons[].key` | string | — | **Required.** Fixed id used in this season's entity names. Choose it once and leave it — changing it renames every object for that season. |
 | `seasons[].name` | string | — | Display name. Safe to rename at any time; the `key` is what entity ids use. |
 | `seasons[].default_mode` | enum | — | `cool`, `heat`, `heat_cool`, or `off`. |
@@ -514,6 +520,9 @@ features:
 | `features.anomaly_alerts` | bool | `true` | Creates the evening runtime alert automation. |
 | `features.fan_guard` | string | — | A helper that suppresses fan-off while it is on. |
 | `features.eco_preset` | string \| `false` | `eco` | Standby preset the engine stands down for; `false` disables the gate. |
+| `display.last_seen` | enum | `always` | Age label on room rows that have a `last_seen` companion: `always`, `ageing` (only past the ageing threshold), or `off`. Rows without a companion never show one. |
+| `display.ageing_minutes` | number | `45` | Age at which the label turns amber (and appears, in `ageing` mode). |
+| `display.stale_hours` | number | `3` | Hours without a report before a reading is greyed out and marked stale. |
 
 ---
 
