@@ -4,7 +4,7 @@ All notable changes to the Multi-Zone Climate Scheduler Card are documented here
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.7.6] - 2026-08-31
 
 ### Added
 - **A read-only Config tab in the settings panel.** Everything that lives in the card's
