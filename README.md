@@ -360,7 +360,7 @@ On days that cost less to run - typically weekends, plus utility holidays - you 
 comfort over economy without touching your schedule. Point `features.off_peak_entity` (editor:
 **Off-peak comfort**) at a switch or binary sensor that is **ON when today is off-peak**. While
 it is on, the engine applies each block moved toward comfort by the offset: cooling setpoints
-lower, heating setpoints higher, `heat_cool` bands widened, `off` blocks untouched. The card
+lower, heating setpoints higher, `heat_cool` moved on both sides (capped so a 2° gap survives), `off` blocks untouched. The card
 shows an **Off-peak** chip next to the next-block line and the next-block temperature reflects
 the adjusted target. If the flag is wrong for a day (a holiday your utility does not observe),
 tap the chip to **pause off-peak for today** - it resumes by itself at midnight.

@@ -4,13 +4,13 @@ All notable changes to the Multi-Zone Climate Scheduler Card are documented here
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.7.5] - 2026-08-31
 
 ### Added
 - **Off-peak comfort.** Point `features.off_peak_entity` at a switch or binary sensor that is
   ON when today is off-peak (weekends, utility holidays - a two-helper recipe is in the
   README), and the engine applies each schedule block moved toward comfort by a tunable
-  offset: cooling lower, heating higher, `heat_cool` bands widened, `off` blocks untouched.
+  offset: cooling lower, heating higher, `heat_cool` moved on both sides, `off` blocks untouched.
   The offset lives in a provisioned helper (default 2°, range 0-10) on the Tuning tab, so
   tuning it never re-provisions. The card shows an Off-peak chip by the next-block line, the
   next-block temperature reflects the adjusted target, and tapping the chip pauses off-peak
