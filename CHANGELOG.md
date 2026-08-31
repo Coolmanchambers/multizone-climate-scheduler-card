@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-08-30
+
 ### Added
 - **Room sensor "last seen" ages.** Each room sensor can optionally name a companion timestamp
   entity (e.g. a Zigbee2MQTT `_last_seen` entity) carrying when the device last actually
