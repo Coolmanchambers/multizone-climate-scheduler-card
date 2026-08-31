@@ -208,3 +208,7 @@ blocks. The guard therefore tests for emptiness, never for type.
 4. If the option reaches a generator, confirm the default path is **byte-identical**: the pinned
    default signatures must not move. See the engine-safety notes in `CLAUDE.md`.
 5. Only once the reading bundle is released, let the editor write the field (R2).
+6. Add the option's row to the settings panel's read-only **Config tab**
+   (`src/lib/config-summary.ts`). Standing rule (maintainer, 2026-08-31): everything the card
+   editor writes is visible there, with its resolved value. `tests/config-summary.test.ts`
+   fails when an editor-written key stops influencing the summary.

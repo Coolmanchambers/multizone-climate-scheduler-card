@@ -87,7 +87,7 @@ import type { GlobalClass, ZoneClass } from './lib/naming';
 // alert-days and season confirm/dwell helpers are reserved for the post-v1
 // consecutive-days alert and season recommender - dead controls would imply
 // behavior that does not exist yet (scan S13-conformance 1/2).
-type SetupTab = 'zones' | 'tuning' | 'objects' | 'setup' | 'appearance' | 'danger';
+type SetupTab = 'zones' | 'tuning' | 'objects' | 'setup' | 'config' | 'appearance' | 'danger';
 type DayDetail = { segs: Segment[]; bubs: SetpointChange[]; start: number; end: number };
 type ObjectStatus = 'managed' | 'missing' | 'customized' | 'unmanaged' | 'extra';
 interface ObjectRow {
@@ -192,6 +192,7 @@ import {
   type ProvisionInput,
 } from './lib/provisioning';
 import { defaultSchedules } from './lib/default-schedules';
+import { configSummary, type SummaryGroup } from './lib/config-summary';
 import { fetchExisting } from './registry-read';
 import { executePlan, type ExecResult } from './provision-exec';
 
@@ -713,6 +714,7 @@ export class MzcsCard extends LitElement {
       { key: 'tuning', label: 'Tuning' },
       { key: 'objects', label: 'Objects' },
       { key: 'setup', label: 'Setup' },
+      { key: 'config', label: 'Config' },
       { key: 'appearance', label: 'Theme' },
       { key: 'danger', label: 'Danger' },
     ];
@@ -745,8 +747,52 @@ export class MzcsCard extends LitElement {
         ${tab === 'tuning' ? this._renderTuningTab() : nothing}
         ${tab === 'objects' ? this._renderObjectsTab() : nothing}
         ${tab === 'setup' ? this._renderSetupTab() : nothing}
+        ${tab === 'config' ? this._renderConfigTab() : nothing}
         ${tab === 'appearance' ? this._renderThemePicker() : nothing}
         ${tab === 'danger' ? this._renderTeardown() : nothing}
+      </div>
+    `;
+  }
+
+  // ---- Config tab (backlog item 48): read-only mirror of the card editor ----
+  // STANDING RULE: every editor-written setting appears here; add the row in
+  // the same change that adds the option (see src/lib/config-summary.ts).
+
+  @state() private _configTab: SummaryGroup['key'] = 'zones';
+
+  private _renderConfigTab() {
+    if (!this._config) return nothing;
+    const groups = configSummary(this._config);
+    const active = groups.find((g) => g.key === this._configTab) ?? groups[0]!;
+    return html`
+      <div>
+        <p class="cfgcallout">
+          These settings are <b>read-only here</b>. To change any of them, edit the dashboard,
+          then use the edit wizard on this card (the pencil icon on the card itself).
+        </p>
+        <div class="cfgtabs">
+          ${groups.map(
+            (g) => html`
+              <button
+                class=${g.key === active.key ? 'cfgtab on' : 'cfgtab'}
+                @click=${() => (this._configTab = g.key)}
+              >
+                ${g.label}
+              </button>
+            `,
+          )}
+        </div>
+        ${active.rows.map(
+          (r) => html`
+            <div class="cfgrow">
+              <div class="cfgmain">
+                <span class="cfglabel">${r.label}</span>
+                <span class="cfgvalue">${r.value}</span>
+              </div>
+              ${r.detail ? html`<p class="cfgdetail">${r.detail}</p>` : nothing}
+            </div>
+          `,
+        )}
       </div>
     `;
   }
@@ -1357,6 +1403,10 @@ export class MzcsCard extends LitElement {
           </div>
         `,
       )}
+      <p class="muted" style="font-size:10px;margin:6px 0 0;">
+        These are the LIVE values, stored in Home Assistant helpers. Their defaults and
+        starting seeds come from the card's configuration - see the Config tab.
+      </p>
     `;
   }
 
@@ -3906,6 +3956,61 @@ export class MzcsCard extends LitElement {
       border: 1px solid var(--mzcs-border);
       border-radius: 6px;
       padding: 4px 6px;
+    }
+    .cfgcallout {
+      background: var(--mzcs-surface);
+      border: 1px solid var(--mzcs-accent);
+      border-radius: 10px;
+      padding: 8px 10px;
+      font-size: 12px;
+      color: var(--mzcs-text);
+      margin: 0 0 8px;
+    }
+    .cfgtabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 0 0 8px;
+    }
+    .cfgtab {
+      background: var(--mzcs-chip);
+      color: var(--mzcs-text-dim);
+      border: 1px solid var(--mzcs-border);
+      border-radius: 999px;
+      padding: 3px 10px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .cfgtab.on {
+      background: var(--mzcs-accent);
+      color: #16202a;
+      border-color: var(--mzcs-accent);
+    }
+    .cfgrow {
+      padding: 6px 2px;
+      border-bottom: 1px solid var(--mzcs-track);
+    }
+    .cfgmain {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: baseline;
+    }
+    .cfglabel {
+      color: var(--mzcs-text);
+      font-size: 13px;
+    }
+    .cfgvalue {
+      color: var(--mzcs-text-dim);
+      font-size: 12px;
+      text-align: right;
+      overflow-wrap: anywhere;
+    }
+    .cfgdetail {
+      margin: 2px 0 0;
+      font-size: 11px;
+      color: var(--mzcs-text-dim);
+      overflow-wrap: anywhere;
     }
     .unsavedhint {
       font-size: 11px;

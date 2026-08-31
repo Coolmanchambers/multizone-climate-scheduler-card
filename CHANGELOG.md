@@ -4,6 +4,17 @@ All notable changes to the Multi-Zone Climate Scheduler Card are documented here
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **A read-only Config tab in the settings panel.** Everything that lives in the card's
+  dashboard configuration - zones and room sensors, seasons, every feature toggle, display
+  settings, prefix and weather entity - is now visible from the gear icon with its current
+  resolved value, organized into sub-tabs, with a callout explaining that changing any of it
+  happens in the card editor (the pencil). Defaults are labeled as defaults, and the Tuning tab
+  now says where its live values' seeds come from. Ends the "which menu was that setting in"
+  hunt; editing deliberately stays in the one place that owns the stored configuration.
+
 ## [0.7.5] - 2026-08-31
 
 ### Added
