@@ -123,15 +123,24 @@ describe('buildDesired inventory (CONTRACT §5)', () => {
     expect(p.delete.map((a) => a.id)).toContain('input_boolean.climate_owners_office_enabled');
   });
 
-  it('steering feature adds its helpers but NOT the ungenerated automation (QA-R A2-5)', () => {
+  it('steering feature adds its helpers AND the steering automation (generator landed in 0.7.5)', () => {
     const input = baseInput();
     input.features.steering = true;
     const d = buildDesired(input);
     expect(d.some((x) => x.id === 'input_select.climate_upstairs_target_room')).toBe(true);
     expect(d.some((x) => x.id === 'schedule.climate_upstairs_sensor_schedule')).toBe(true);
+    expect(d.some((x) => x.id === 'input_number.climate_upstairs_steer_target')).toBe(true);
     expect(d.some((x) => x.id === 'input_number.climate_override_minutes')).toBe(true);
-    // No generator exists yet - desiring it would be a perpetual phantom Create.
-    expect(d.some((x) => x.id === 'automation:climate_mzcs_steering')).toBe(false);
+    // The A2-5 rule still holds in its real form: desiring an automation
+    // requires a generator that signs it. One exists now, so it is desired -
+    // WITH a real signature, never the revision fallback.
+    const auto = d.find((x) => x.id === 'automation:climate_mzcs_steering');
+    expect(auto).toBeDefined();
+    expect(String((auto!.spec as Record<string, unknown>).sig)).toMatch(/^[0-9a-f]{8}$/);
+  });
+
+  it('steering stays out of the desired set when the feature is off (A2-5, the half that protects everyone)', () => {
+    expect(buildDesired(baseInput()).some((x) => x.id === 'automation:climate_mzcs_steering')).toBe(false);
   });
 
   it('recommender deferred; learning automation always present', () => {

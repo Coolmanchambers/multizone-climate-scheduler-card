@@ -494,7 +494,12 @@ describe('the safety-critical invariants hold across EVERY variant (QA NEW-4)', 
       const gate = zoneStep(eng, 'Skip when zone disabled');
       const t = String(gate!.value_template);
       expect(t).toContain("is_state(repeat.item.enabled, 'on')");
-      expect(t).toContain('blk != states(repeat.item.marker)');
+      // Off-peak re-keys the marker comparison to the composed `mark` variable
+      // (item 7); every other config compares the bare block name.
+      const markerTerm = input.features.off_peak_entity
+        ? 'mark != states(repeat.item.marker)'
+        : 'blk != states(repeat.item.marker)';
+      expect(t).toContain(markerTerm);
       expect(t).not.toMatch(/\bor\b/);
     });
 
@@ -570,12 +575,19 @@ describe('staleness detection cannot be silently removed (QA NEW-6)', () => {
  *    the variant's config so a new variant is covered automatically.
  */
 describe('item 38: exact gate + ordered calls across the WHOLE matrix', () => {
-  const gateFor = (eco: string | false | undefined): string => {
-    const base =
-      "{{ is_state(repeat.item.enabled, 'on') and blk is not none and blk != states(repeat.item.marker)";
-    if (eco === false) return `${base} }}`;
+  const gateFor = (eco: string | false | undefined, offPeak: boolean, steering: boolean): string => {
+    // Off-peak (item 7) compares the composed `mark` variable so a flip or an
+    // offset tune re-applies; steering (item 8) appends the override-timer
+    // stand-down term; everything else in the gate is unchanged.
+    const marker = offPeak ? 'mark' : 'blk';
+    const base = `{{ is_state(repeat.item.enabled, 'on') and blk is not none and ${marker} != states(repeat.item.marker)`;
+    // Compound steering term (QA finding M5): the engine stands down only
+    // while an override runs ON A COOLING BLOCK - a scheduled transition to
+    // off/heat/heat_cool mid-override is reclaimed immediately.
+    const steer = steering ? " and not (is_state(repeat.item.override_timer, 'active') and blk_mode == 'cool')" : '';
+    if (eco === false) return `${base}${steer} }}`;
     const preset = (typeof eco === 'string' ? eco : 'eco').replace(/['\\]/g, '');
-    return `${base} and state_attr(repeat.item.climate, 'preset_mode') != '${preset}' }}`;
+    return `${base} and state_attr(repeat.item.climate, 'preset_mode') != '${preset}'${steer} }}`;
   };
 
   const rows = [{ name: 'default', overrides: {} as Record<string, unknown> }, ...VARIANTS];
@@ -583,13 +595,16 @@ describe('item 38: exact gate + ordered calls across the WHOLE matrix', () => {
     const input = canonicalInput(v.overrides as Parameters<typeof canonicalInput>[0]);
     const payloads = allPayloads(input) as Record<string, Node>;
     const eco = (v.overrides as { features?: { eco_preset?: string | false } }).features?.eco_preset;
+    const offPeak = Boolean(
+      (v.overrides as { features?: { off_peak_entity?: string } }).features?.off_peak_entity,
+    );
 
     const pfx = input.prefix;
 
     it(`${v.name}: the skip gate is EXACTLY its expected string`, () => {
       const gate = zoneStep(payloads[`${pfx}_mzcs_engine`] as Node, 'Skip when zone disabled');
       expect(gate, 'engine payload must exist').toBeDefined();
-      expect(gate!.value_template).toBe(gateFor(eco));
+      expect(gate!.value_template).toBe(gateFor(eco, offPeak, input.features.steering));
     });
 
     it(`${v.name}: every automation performs EXACTLY its expected calls, in order`, () => {
@@ -605,6 +620,19 @@ describe('item 38: exact gate + ordered calls across the WHOLE matrix', () => {
       };
       if (input.features.anomaly_alerts) {
         expected[`${pfx}_mzcs_runtime_alert`] = ['persistent_notification.create -> (none)'];
+      }
+      if (input.features.steering) {
+        // Document order: the revert branch's marker clear, then per zone the
+        // daypart pilot's three writes, the kill-switch cancel, and the
+        // steering write.
+        expected[`${pfx}_mzcs_steering`] = [
+          'input_text.set_value -> {{ marker }}',
+          'input_select.select_option -> {{ repeat.item.select }}',
+          'input_number.set_value -> {{ repeat.item.target }}',
+          'timer.start -> {{ repeat.item.timer }}',
+          'timer.cancel -> {{ repeat.item.timer }}',
+          'climate.set_temperature -> {{ repeat.item.climate }}',
+        ];
       }
       if (input.features.fan_timer) {
         for (const z of input.zones) {

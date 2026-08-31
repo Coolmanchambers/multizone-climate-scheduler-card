@@ -31,8 +31,9 @@ import {
   learningAutomation,
   watchdogAutomation,
   runtimeAlertAutomation,
+  steeringAutomation,
 } from '../../src/lib/automation-payloads';
-import { resolveEcoPreset } from '../../src/types';
+import { resolveEcoPreset, resolveOffPeak } from '../../src/types';
 import type { ScheduleBlock } from '../../src/lib/schedule-ranges';
 
 const cool = (time: string, name: string, t: number): ScheduleBlock => ({
@@ -72,7 +73,7 @@ export const CANONICAL_ZONES = [
 
 export interface FixtureOverrides {
   prefix?: string;
-  zones?: Array<{ entity: string; name: string }>;
+  zones?: Array<{ entity: string; name: string; room_sensors?: unknown }>;
   seasons?: ProvisionSeason[];
   weather_entity?: string;
   features?: {
@@ -80,8 +81,30 @@ export interface FixtureOverrides {
     anomaly_alerts?: boolean;
     fan_guard?: string;
     eco_preset?: string | false;
+    off_peak_entity?: string;
+    off_peak_offset?: number;
+    steering?: boolean;
   };
 }
+
+/** The steering variant's zones: two zones with room sensors (object and bare
+ * string forms), one deliberately without - it must provision the steering
+ * objects but stay out of the steer loop. Names are fixture-neutral. */
+export const STEERING_ZONES = [
+  {
+    entity: 'climate.zone_one',
+    name: 'Zone One',
+    room_sensors: [
+      // Room A carries a last_seen companion so the automation's freshness
+      // gate exercises the seens map (QA finding E5).
+      { entity: 'sensor.room_a_temperature', name: 'Room A', last_seen: 'sensor.room_a_last_seen' },
+      { entity: 'sensor.room_b_temperature', name: 'Room B' },
+    ],
+  },
+  // Bare-string form: its label must fall back to the entity id.
+  { entity: 'climate.zone_two', name: 'Zone Two', room_sensors: ['sensor.room_c_temperature'] },
+  { entity: 'climate.zone_three', name: 'Zone Three' },
+];
 
 /**
  * The canonical ProvisionInput, built through `provisionInputFromConfig` - the
@@ -125,6 +148,8 @@ export function signaturesFor(input: ProvisionInput): Record<string, string> {
     input.seasons,
     input.features.fan_guard,
     resolveEcoPreset(input.features),
+    resolveOffPeak(input.features)?.entity ?? null,
+    input.features.steering,
   );
 }
 
@@ -132,12 +157,25 @@ export function signaturesFor(input: ProvisionInput): Record<string, string> {
 function generatedPayloads(input: ProvisionInput): Record<string, Record<string, unknown>> {
   const refs = zoneRefs(input);
   const preset = resolveEcoPreset(input.features);
+  const offPeak = resolveOffPeak(input.features)?.entity ?? null;
   const out: Record<string, Record<string, unknown>> = {
-    [`${input.prefix}_mzcs_engine`]: engineAutomation(input.prefix, refs, input.seasons, preset),
+    [`${input.prefix}_mzcs_engine`]: engineAutomation(
+      input.prefix,
+      refs,
+      input.seasons,
+      preset,
+      offPeak,
+      input.features.steering,
+    ),
     [`${input.prefix}_mzcs_watchdog`]: watchdogAutomation(input.prefix),
     [`${input.prefix}_mzcs_runtime_learning`]: learningAutomation(input.prefix, refs),
     [`${input.prefix}_mzcs_runtime_alert`]: runtimeAlertAutomation(input.prefix, refs),
   };
+  // Mirrors automationSignatures: the steering generator exists in the map
+  // exactly when the feature is on.
+  if (input.features.steering) {
+    out[`${input.prefix}_mzcs_steering`] = steeringAutomation(input.prefix, refs, input.seasons, preset);
+  }
   for (const z of refs) {
     out[`${input.prefix}_mzcs_fan_timer_${z.slug}`] = fanAutomation(input.prefix, z, input.features.fan_guard);
   }
@@ -245,6 +283,24 @@ export const VARIANTS: Array<{
     overrides: { features: { anomaly_alerts: false } },
     affects: [],
     note: 'runtime_alert leaves the inventory; the surviving payloads are unchanged.',
+  },
+  {
+    name: 'off-peak',
+    overrides: { features: { off_peak_entity: 'binary_sensor.off_peak_today' } },
+    affects: ['climate_mzcs_engine'],
+    note: 'Off-peak comfort adds the applied-setpoint step and re-keys the marker in the engine only.',
+  },
+  {
+    name: 'off-peak-custom-offset',
+    overrides: { features: { off_peak_entity: 'binary_sensor.off_peak_today', off_peak_offset: 5 } },
+    affects: ['climate_mzcs_engine'],
+    note: 'The offset is a helper SEED: relative to the default only the engine moves (because the entity is set), and the engine must be byte-identical to the off-peak variant - the seed reaches inventory meta only.',
+  },
+  {
+    name: 'steering',
+    overrides: { zones: STEERING_ZONES, features: { steering: true } },
+    affects: ['climate_mzcs_engine'],
+    note: 'Steering adds the override-timer gate term (and for_each key) to the engine, plus the NEW steering automation; the zone without room sensors provisions the objects but stays out of the steer loop.',
   },
   {
     name: 'single-zone',

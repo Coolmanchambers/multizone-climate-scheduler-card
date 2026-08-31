@@ -2,13 +2,14 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { canonicalInput, allGeneratedPayloads, signaturesFor, VARIANTS, zoneRefs } from './fixtures/canonical-config';
 import { parseSignature } from '../src/lib/automation-payloads';
-import { resolveEcoPreset } from '../src/types';
+import { resolveEcoPreset, resolveOffPeak } from '../src/types';
 import {
   engineAutomation,
   watchdogAutomation,
   learningAutomation,
   runtimeAlertAutomation,
   fanAutomation,
+  steeringAutomation,
 } from '../src/lib/automation-payloads';
 import type { ProvisionInput } from '../src/lib/provisioning';
 
@@ -41,7 +42,10 @@ function executorPayload(uid: string, input: ProvisionInput): Record<string, unk
   const seasons = input.seasons;
   const ecoPreset = resolveEcoPreset(input.features);
   const fanGuard = input.features.fan_guard;
-  if (uid === `${p}_mzcs_engine`) return engineAutomation(p, zones, seasons, ecoPreset);
+  const offPeakEntity = resolveOffPeak(input.features)?.entity ?? null;
+  if (uid === `${p}_mzcs_engine`)
+    return engineAutomation(p, zones, seasons, ecoPreset, offPeakEntity, input.features.steering);
+  if (uid === `${p}_mzcs_steering`) return steeringAutomation(p, zones, seasons, ecoPreset);
   if (uid === `${p}_mzcs_watchdog`) return watchdogAutomation(p);
   if (uid === `${p}_mzcs_runtime_learning`) return learningAutomation(p, zones);
   if (uid === `${p}_mzcs_runtime_alert`) return runtimeAlertAutomation(p, zones);
@@ -111,6 +115,18 @@ describe('the executor mapping above still mirrors its source', () => {
     expect(body).toContain('ctx.ecoPreset');
   });
 
+  it('passes the off-peak entity to the engine generator', () => {
+    // Dropping this argument is exactly finding NEW-3's shape: the executor
+    // would write an engine without the off-peak step while the differ signs
+    // one WITH it, and every off-peak install would plan a permanent Update.
+    expect(body).toContain('ctx.offPeakEntity');
+  });
+
+  it('passes the steering flag to the engine and maps the steering uid', () => {
+    expect(body).toContain('ctx.steering');
+    expect(body).toMatch(/steeringAutomation\(p,\s*ctx\.zones,\s*ctx\.seasons,/);
+  });
+
   it('passes the fan guard to the fan generator', () => {
     // Dropping this argument is the finding. It must be present.
     expect(body).toMatch(/fanAutomation\(p,\s*zone,\s*ctx\.fanGuard\)/);
@@ -121,12 +137,31 @@ describe('the executor mapping above still mirrors its source', () => {
     expect(body).toMatch(/runtimeAlertAutomation\(p,\s*ctx\.zones\)/);
   });
 
-  it('covers exactly the five generator kinds, no more and no fewer', () => {
-    const kinds = ['engine', 'watchdog', 'runtime_learning', 'runtime_alert', 'fan_timer'];
+  it('covers exactly the six generator kinds, no more and no fewer', () => {
+    const kinds = ['engine', 'watchdog', 'runtime_learning', 'runtime_alert', 'fan_timer', 'steering'];
     for (const k of kinds) expect(body, k).toContain(`_mzcs_${k}`);
     const generatorCalls = body.match(/\b\w+Automation\(/g) ?? [];
     expect(new Set(generatorCalls)).toEqual(
-      new Set(['engineAutomation(', 'watchdogAutomation(', 'learningAutomation(', 'runtimeAlertAutomation(', 'fanAutomation(']),
+      new Set([
+        'engineAutomation(',
+        'watchdogAutomation(',
+        'learningAutomation(',
+        'runtimeAlertAutomation(',
+        'fanAutomation(',
+        'steeringAutomation(',
+      ]),
     );
+  });
+});
+
+describe('QA-E6: steering-off re-apply releases in-flight overrides', () => {
+  // The revert logic lives in the automation the delete removes, and deleting
+  // an active timer fires NO cancelled event - without this, a zone strands at
+  // the steered setpoint until the next block transition.
+  it('the executor cancels a room_override timer and clears its zone marker before deleting it', () => {
+    const deleteBlock = EXEC_SRC.slice(EXEC_SRC.indexOf("phase = 'delete'"));
+    expect(deleteBlock).toContain("parsed?.cls === 'room_override_timer'");
+    expect(deleteBlock).toMatch(/callService\('timer',\s*'cancel'/);
+    expect(deleteBlock).toMatch(/zoneEntityId\('applied_block_marker', ctx\.prefix, parsed\.zone\)/);
   });
 });

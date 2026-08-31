@@ -87,6 +87,21 @@ const PINNED_VARIANTS: Record<string, Record<string, string>> = {
   },
   'single-season': { engine: '23cee162' },
   'three-seasons': { engine: '26c690bb' },
+  // Item 7: the off-peak entity moves the engine ONLY; every other automation
+  // must keep its default hash.
+  'off-peak': { engine: '2a376799', runtime_learning: 'ab1675eb', fan_timer_zone_one: 'fac7b42f' },
+  // Item 8: steering re-signs the engine (gate term + for_each key) and signs
+  // the NEW steering automation; the rest keep their default hashes.
+  steering: {
+    engine: '3d725ac4',
+    steering: '9d005136',
+    runtime_learning: 'ab1675eb',
+    fan_timer_zone_one: 'fac7b42f',
+  },
+  // The offset is a creation SEED read from a helper at runtime, so a custom
+  // value must produce the SAME engine as the plain off-peak variant - a
+  // config value leaking into the generator would show up here first.
+  'off-peak-custom-offset': { engine: '2a376799' },
 };
 
 /** The alternate-prefix instance, pinned separately - different id namespace. */

@@ -6,6 +6,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 
 ## [Unreleased]
 
+### Added
+- **Off-peak comfort.** Point `features.off_peak_entity` at a switch or binary sensor that is
+  ON when today is off-peak (weekends, utility holidays - a two-helper recipe is in the
+  README), and the engine applies each schedule block moved toward comfort by a tunable
+  offset: cooling lower, heating higher, `heat_cool` bands widened, `off` blocks untouched.
+  The offset lives in a provisioned helper (default 2°, range 0-10) on the Tuning tab, so
+  tuning it never re-provisions. The card shows an Off-peak chip by the next-block line, the
+  next-block temperature reflects the adjusted target, and tapping the chip pauses off-peak
+  for today (it resumes by itself at midnight) for days the flag is wrong. A mid-day flip
+  re-applies within one 15-minute safety tick. Fails safe: a missing or unavailable entity
+  means the schedule applies exactly as written. On heat_cool blocks the adjustment is capped so
+  a 2° deadband always survives. Note: an off-peak flip or offset tune mid-block re-applies the
+  schedule within one tick, which also releases a manual hold made during that block. Installs
+  that do not configure the entity generate a byte-identical engine and plan zero changes.
+- **Comfort steering** (`features.steering`, cool-only v1). Tap a room on the card to drive the
+  zone's thermostat until THAT room reaches a target, for a set duration, then the schedule
+  takes the zone back: commanded setpoint = thermostat reading minus how far the room is above
+  target, clamped to a tunable band and to a max offset from the scheduled block, throttled to
+  half-degree writes. The schedule engine steps aside while an override runs and re-asserts the
+  block within one safety tick of it ending. Refusals are visible (stale/unavailable sensor,
+  disabled zone, standby preset); disabling a zone mid-override cancels it. Dayparts: map
+  stretches of the day to rooms on the settings Zones tab and the zone steers its scheduled
+  setpoint to that room continuously - a manual override always wins until it expires. Installs
+  that leave the flag off generate a byte-identical engine and plan zero changes.
+- **Runtime history: expand several days at once.** Day rows in the runtime drawer now toggle
+  independently; previously opening a second day collapsed the first.
+
 ## [0.7.4] - 2026-08-30
 
 ### Added

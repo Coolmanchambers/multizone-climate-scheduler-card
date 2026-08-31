@@ -1,0 +1,440 @@
+{
+  "climate_mzcs_engine": {
+    "id": "climate_mzcs_engine",
+    "alias": "Climate: schedule engine",
+    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Applies the active season's schedule block to each ENABLED zone at block transitions. Per-zone applied-block markers mean manual changes and external raises HOLD until the next block; the 15-minute tick only recovers missed transitions. Zones stand down while their Eco preset is active. heat_cool blocks apply dual setpoints. On off-peak days (per the configured entity) applied setpoints shift toward comfort by the off-peak offset helper. [mzcs-sig:2a376799]",
+    "mode": "queued",
+    "max": 5,
+    "triggers": [
+      {
+        "trigger": "state",
+        "entity_id": [
+          "schedule.climate_zone_one_summer",
+          "schedule.climate_zone_one_winter",
+          "schedule.climate_zone_two_summer",
+          "schedule.climate_zone_two_winter",
+          "schedule.climate_zone_three_summer",
+          "schedule.climate_zone_three_winter"
+        ],
+        "alias": "Any zone schedule changed"
+      },
+      {
+        "trigger": "homeassistant",
+        "event": "start",
+        "alias": "HA started"
+      },
+      {
+        "trigger": "time_pattern",
+        "minutes": "/15",
+        "alias": "Safety tick"
+      },
+      {
+        "trigger": "state",
+        "entity_id": "input_select.climate_season",
+        "alias": "Season changed"
+      },
+      {
+        "trigger": "state",
+        "entity_id": [
+          "input_boolean.climate_zone_one_enabled",
+          "input_boolean.climate_zone_two_enabled",
+          "input_boolean.climate_zone_three_enabled"
+        ],
+        "to": "on",
+        "alias": "Zone re-enabled"
+      }
+    ],
+    "conditions": [],
+    "actions": [
+      {
+        "alias": "Resolve the active season key",
+        "variables": {
+          "season": "{{ {'Summer': 'summer', 'Winter': 'winter'}.get(states('input_select.climate_season'), states('input_select.climate_season') | lower) }}"
+        }
+      },
+      {
+        "alias": "Apply per zone",
+        "repeat": {
+          "for_each": [
+            {
+              "zone": "zone_one",
+              "climate": "climate.zone_one",
+              "marker": "input_text.climate_zone_one_applied_block",
+              "enabled": "input_boolean.climate_zone_one_enabled"
+            },
+            {
+              "zone": "zone_two",
+              "climate": "climate.zone_two",
+              "marker": "input_text.climate_zone_two_applied_block",
+              "enabled": "input_boolean.climate_zone_two_enabled"
+            },
+            {
+              "zone": "zone_three",
+              "climate": "climate.zone_three",
+              "marker": "input_text.climate_zone_three_applied_block",
+              "enabled": "input_boolean.climate_zone_three_enabled"
+            }
+          ],
+          "sequence": [
+            {
+              "alias": "Read this zone's active block",
+              "variables": {
+                "blk": "{{ state_attr('schedule.climate_' ~ repeat.item.zone ~ '_' ~ season, 'block') }}",
+                "blk_mode": "{{ state_attr('schedule.climate_' ~ repeat.item.zone ~ '_' ~ season, 'mode') }}",
+                "blk_cool": "{{ state_attr('schedule.climate_' ~ repeat.item.zone ~ '_' ~ season, 'cool_temp') }}",
+                "blk_heat": "{{ state_attr('schedule.climate_' ~ repeat.item.zone ~ '_' ~ season, 'heat_temp') }}"
+              }
+            },
+            {
+              "alias": "Compute the applied setpoints (off-peak comfort)",
+              "variables": {
+                "adj": "{{ (states('input_number.climate_off_peak_offset') | float(0)) if is_state('binary_sensor.off_peak_today', 'on') and ((states('input_text.climate_off_peak_paused_on') | as_datetime) is none or (states('input_text.climate_off_peak_paused_on') | as_datetime | as_local).date() != now().date()) else 0 }}",
+                "hc_adj": "{{ [ adj, [ ((blk_cool | float(0)) - (blk_heat | float(0)) - 2) / 2, 0 ] | max ] | min if blk_cool is not none and blk_heat is not none else adj }}",
+                "app_cool": "{{ (blk_cool | float(0)) - adj if blk_cool is not none else none }}",
+                "app_heat": "{{ (blk_heat | float(0)) + adj if blk_heat is not none else none }}",
+                "app_hi": "{{ (blk_cool | float(0)) - hc_adj if blk_cool is not none else none }}",
+                "app_lo": "{{ (blk_heat | float(0)) + hc_adj if blk_heat is not none else none }}",
+                "mark": "{{ blk ~ '|op' ~ adj }}"
+              }
+            },
+            {
+              "alias": "Skip when zone disabled, already applied, Eco active, or no block data",
+              "condition": "template",
+              "value_template": "{{ is_state(repeat.item.enabled, 'on') and blk is not none and mark != states(repeat.item.marker) and state_attr(repeat.item.climate, 'preset_mode') != 'eco' }}"
+            },
+            {
+              "alias": "Apply the block (dual range, off, or single target)",
+              "continue_on_error": true,
+              "choose": [
+                {
+                  "conditions": [
+                    {
+                      "condition": "template",
+                      "value_template": "{{ blk_mode == 'heat_cool' }}"
+                    }
+                  ],
+                  "sequence": [
+                    {
+                      "alias": "Apply heat_cool range",
+                      "action": "climate.set_temperature",
+                      "target": {
+                        "entity_id": "{{ repeat.item.climate }}"
+                      },
+                      "data": {
+                        "target_temp_high": "{{ app_hi }}",
+                        "target_temp_low": "{{ app_lo }}",
+                        "hvac_mode": "heat_cool"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "conditions": [
+                    {
+                      "condition": "template",
+                      "value_template": "{{ blk_mode == 'off' }}"
+                    }
+                  ],
+                  "sequence": [
+                    {
+                      "alias": "Turn the zone off",
+                      "action": "climate.set_hvac_mode",
+                      "target": {
+                        "entity_id": "{{ repeat.item.climate }}"
+                      },
+                      "data": {
+                        "hvac_mode": "off"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "conditions": [
+                    {
+                      "condition": "template",
+                      "value_template": "{{ blk_cool is not none or blk_heat is not none }}"
+                    }
+                  ],
+                  "sequence": [
+                    {
+                      "alias": "Apply single target",
+                      "action": "climate.set_temperature",
+                      "target": {
+                        "entity_id": "{{ repeat.item.climate }}"
+                      },
+                      "data": {
+                        "temperature": "{{ app_cool if blk_cool is not none else app_heat }}",
+                        "hvac_mode": "{{ blk_mode }}"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "default": []
+            },
+            {
+              "alias": "Record the applied block",
+              "action": "input_text.set_value",
+              "target": {
+                "entity_id": "{{ repeat.item.marker }}"
+              },
+              "data": {
+                "value": "{{ mark }}"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "climate_mzcs_watchdog": {
+    "id": "climate_mzcs_watchdog",
+    "alias": "Climate: engine watchdog",
+    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Alerts when the schedule engine automation is off or unavailable for 5 minutes. [mzcs-sig:d6ad29bd]",
+    "mode": "single",
+    "triggers": [
+      {
+        "trigger": "state",
+        "entity_id": "automation.climate_schedule_engine",
+        "to": [
+          "off",
+          "unavailable"
+        ],
+        "for": {
+          "minutes": 5
+        },
+        "alias": "Engine down"
+      }
+    ],
+    "conditions": [],
+    "actions": [
+      {
+        "alias": "Notify all admins via persistent notification",
+        "action": "persistent_notification.create",
+        "data": {
+          "title": "Climate schedule engine is down",
+          "message": "The Climate: schedule engine automation is off or unavailable. Zone schedules are not being applied - your thermostats hold their last setpoints (their own app schedules still work)."
+        }
+      }
+    ]
+  },
+  "climate_mzcs_runtime_learning": {
+    "id": "climate_mzcs_runtime_learning",
+    "alias": "Climate: runtime learning",
+    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Nightly EMA update of each zone's runtime-per-cooling-degree-day factor. Skips mild days; first valid day seeds directly. [mzcs-sig:ab1675eb]",
+    "mode": "single",
+    "triggers": [
+      {
+        "trigger": "time",
+        "at": "23:58:00",
+        "alias": "Nightly close"
+      }
+    ],
+    "conditions": [],
+    "actions": [
+      {
+        "alias": "Compute today's cooling degree-days",
+        "variables": {
+          "cdd": "{{ [ (states('sensor.climate_outdoor_daily_mean') | float(0)) - (states('input_number.climate_cdd_base') | float(75)), 0 ] | max }}",
+          "alpha": "{{ 2 / ((states('input_number.climate_runtime_learn_days') | float(30)) + 1) }}"
+        }
+      },
+      {
+        "alias": "Skip mild days",
+        "condition": "template",
+        "value_template": "{{ cdd > 0.5 }}"
+      },
+      {
+        "alias": "Update k per zone",
+        "repeat": {
+          "for_each": [
+            {
+              "runtime": "sensor.climate_zone_one_runtime_today",
+              "k": "input_number.climate_zone_one_k"
+            },
+            {
+              "runtime": "sensor.climate_zone_two_runtime_today",
+              "k": "input_number.climate_zone_two_k"
+            },
+            {
+              "runtime": "sensor.climate_zone_three_runtime_today",
+              "k": "input_number.climate_zone_three_k"
+            }
+          ],
+          "sequence": [
+            {
+              "alias": "Compute the EMA",
+              "variables": {
+                "runtime_h": "{{ states(repeat.item.runtime) | float(-1) }}",
+                "old_k": "{{ states(repeat.item.k) | float(0) }}"
+              }
+            },
+            {
+              "alias": "Skip if unavailable",
+              "condition": "template",
+              "value_template": "{{ runtime_h >= 0 }}"
+            },
+            {
+              "alias": "Write the new k",
+              "action": "input_number.set_value",
+              "target": {
+                "entity_id": "{{ repeat.item.k }}"
+              },
+              "data": {
+                "value": "{{ ((runtime_h / cdd) if old_k == 0 else (alpha * (runtime_h / cdd) + (1 - alpha) * old_k)) | round(2) }}"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "climate_mzcs_runtime_alert": {
+    "id": "climate_mzcs_runtime_alert",
+    "alias": "Climate: runtime anomaly alert",
+    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Evening check: notifies when a zone's runtime is over the weather-normalized expectation by the alert margin. Uses learned k; silent while learning. [mzcs-sig:34cfb90d]",
+    "mode": "single",
+    "triggers": [
+      {
+        "trigger": "time",
+        "at": "20:00:00",
+        "alias": "Evening check"
+      }
+    ],
+    "conditions": [],
+    "actions": [
+      {
+        "alias": "Check each zone",
+        "repeat": {
+          "for_each": [
+            {
+              "name": "Zone One",
+              "runtime": "sensor.climate_zone_one_runtime_today",
+              "expected": "sensor.climate_zone_one_expected_runtime"
+            },
+            {
+              "name": "Zone Two",
+              "runtime": "sensor.climate_zone_two_runtime_today",
+              "expected": "sensor.climate_zone_two_expected_runtime"
+            },
+            {
+              "name": "Zone Three",
+              "runtime": "sensor.climate_zone_three_runtime_today",
+              "expected": "sensor.climate_zone_three_expected_runtime"
+            }
+          ],
+          "sequence": [
+            {
+              "alias": "Compute exceedance",
+              "variables": {
+                "run_h": "{{ states(repeat.item.runtime) | float(0) }}",
+                "exp_h": "{{ states(repeat.item.expected) | float(0) }}",
+                "margin": "{{ states('input_number.climate_runtime_alert_margin') | float(35) }}"
+              }
+            },
+            {
+              "alias": "Only alert on a real, learned exceedance",
+              "condition": "template",
+              "value_template": "{{ exp_h > 0 and run_h > exp_h * (1 + margin / 100) and (run_h - exp_h) > 1 }}"
+            },
+            {
+              "alias": "Notify",
+              "action": "persistent_notification.create",
+              "data": {
+                "title": "HVAC running high",
+                "message": "{{ repeat.item.name }} has run {{ run_h | round(1) }}h today vs ~{{ exp_h | round(1) }}h expected for this weather. Worth a look (filters, doors, refrigerant)."
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "climate_mzcs_fan_timer_zone_one": {
+    "id": "climate_mzcs_fan_timer_zone_one",
+    "alias": "Climate: Zone One fan timer finished",
+    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Turns the Zone One fan off when its fan timer ends. [mzcs-sig:fac7b42f]",
+    "mode": "single",
+    "triggers": [
+      {
+        "trigger": "event",
+        "event_type": "timer.finished",
+        "event_data": {
+          "entity_id": "timer.climate_zone_one_fan"
+        },
+        "alias": "Zone One fan timer finished"
+      }
+    ],
+    "conditions": [],
+    "actions": [
+      {
+        "alias": "Turn the Zone One fan off",
+        "action": "climate.set_fan_mode",
+        "target": {
+          "entity_id": "climate.zone_one"
+        },
+        "data": {
+          "fan_mode": "off"
+        }
+      }
+    ]
+  },
+  "climate_mzcs_fan_timer_zone_two": {
+    "id": "climate_mzcs_fan_timer_zone_two",
+    "alias": "Climate: Zone Two fan timer finished",
+    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Turns the Zone Two fan off when its fan timer ends. [mzcs-sig:19dee477]",
+    "mode": "single",
+    "triggers": [
+      {
+        "trigger": "event",
+        "event_type": "timer.finished",
+        "event_data": {
+          "entity_id": "timer.climate_zone_two_fan"
+        },
+        "alias": "Zone Two fan timer finished"
+      }
+    ],
+    "conditions": [],
+    "actions": [
+      {
+        "alias": "Turn the Zone Two fan off",
+        "action": "climate.set_fan_mode",
+        "target": {
+          "entity_id": "climate.zone_two"
+        },
+        "data": {
+          "fan_mode": "off"
+        }
+      }
+    ]
+  },
+  "climate_mzcs_fan_timer_zone_three": {
+    "id": "climate_mzcs_fan_timer_zone_three",
+    "alias": "Climate: Zone Three fan timer finished",
+    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Turns the Zone Three fan off when its fan timer ends. [mzcs-sig:e226bee9]",
+    "mode": "single",
+    "triggers": [
+      {
+        "trigger": "event",
+        "event_type": "timer.finished",
+        "event_data": {
+          "entity_id": "timer.climate_zone_three_fan"
+        },
+        "alias": "Zone Three fan timer finished"
+      }
+    ],
+    "conditions": [],
+    "actions": [
+      {
+        "alias": "Turn the Zone Three fan off",
+        "action": "climate.set_fan_mode",
+        "target": {
+          "entity_id": "climate.zone_three"
+        },
+        "data": {
+          "fan_mode": "off"
+        }
+      }
+    ]
+  }
+}

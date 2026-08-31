@@ -36,6 +36,10 @@ const config: MzcsCardConfig = {
     },
     { entity: 'climate.studio_mini_split', name: 'Studio' },
   ],
+  // Item 7: off-peak comfort, fixtured ON so the chip, the adjusted next-block
+  // line and the pause-for-today flow are drivable in the harness.
+  // Item 8: steering ON so the room-row sheet and override flow are drivable.
+  features: { off_peak_entity: 'binary_sensor.off_peak_today', steering: true },
 };
 
 const hass = new MockHass();
@@ -55,6 +59,59 @@ for (const [id, ms] of [
     attributes: { device_class: 'timestamp', friendly_name: id },
   });
 }
+// Item 8 fixtures: Upstairs steering objects as a post-Apply install leaves
+// them - timer idle, select at Thermostat, tunables seeded. The zone enable is
+// ON so the sheet's kill-switch refusal can be toggled from the console.
+hass.set('input_boolean.climate_upstairs_enabled', {
+  state: 'on',
+  attributes: { friendly_name: 'Climate Upstairs enabled' },
+});
+hass.set('timer.climate_upstairs_room_override', {
+  state: 'idle',
+  attributes: { friendly_name: 'Climate Upstairs room override' },
+});
+hass.set('input_select.climate_upstairs_target_room', {
+  state: 'Thermostat',
+  attributes: {
+    friendly_name: 'Climate Upstairs target room',
+    options: ['Thermostat', 'Bedroom 3', 'Bedroom 1', 'sensor.bedroom_2_temperature', 'sensor.landing_temperature', 'sensor.dead_sensor_temperature'],
+  },
+});
+hass.set('input_number.climate_upstairs_steer_target', {
+  state: '76',
+  attributes: { friendly_name: 'Climate Upstairs steer target', min: 50, max: 95, step: 1 },
+});
+for (const [id, v] of [
+  ['input_number.climate_override_minutes', '60'],
+  ['input_number.climate_steer_min_setpoint', '68'],
+  ['input_number.climate_steer_max_setpoint', '85'],
+  ['input_number.climate_steer_max_offset', '5'],
+] as const) {
+  hass.set(id, { state: v, attributes: { friendly_name: id } });
+}
+// Item 8 stage 4: the upstairs sensor schedule (daypart editor + pilot), empty
+// until saved from the Zones tab.
+hass.set('schedule.climate_upstairs_sensor_schedule', {
+  state: 'off',
+  attributes: { friendly_name: 'Climate Upstairs sensor schedule' },
+});
+hass.extraSchedules.set('climate_upstairs_sensor_schedule', {
+  id: 'climate_upstairs_sensor_schedule',
+  name: 'Climate Upstairs sensor schedule',
+});
+// Item 7 fixtures: an off-peak day in progress, offset helper at 2, not paused.
+hass.set('binary_sensor.off_peak_today', {
+  state: 'on',
+  attributes: { friendly_name: 'Off Peak Today' },
+});
+hass.set('input_number.climate_off_peak_offset', {
+  state: '2',
+  attributes: { friendly_name: 'Climate off peak offset', min: 0, max: 10, step: 1 },
+});
+hass.set('input_text.climate_off_peak_paused_on', {
+  state: '',
+  attributes: { friendly_name: 'Climate off peak paused on' },
+});
 const card = document.createElement('multizone-climate-scheduler-card') as HTMLElement & {
   hass: import('../src/ha-types').HassLike;
   setConfig(c: MzcsCardConfig): void;

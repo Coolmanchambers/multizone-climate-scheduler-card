@@ -142,6 +142,25 @@ export interface MzcsCardConfig {
      * so Home Assistant owns standby behavior.
      */
     eco_preset?: string | false;
+    /**
+     * Off-peak comfort (item 7): a binary_sensor/input_boolean that is ON when
+     * today is off-peak. Omitted = feature off (the pre-0.7.5 behavior). The
+     * card never reads calendars or weekday rules itself - all day judgement
+     * lives in the user's own entity.
+     */
+    off_peak_entity?: string;
+    /**
+     * SEED for the provisioned off-peak offset helper (degrees of extra
+     * comfort), default 2. The engine reads the HELPER at runtime, so tuning
+     * it later never re-provisions; this value only matters at creation.
+     */
+    off_peak_offset?: number;
+    /**
+     * Comfort steering (item 8): drive a zone's thermostat so a selected ROOM
+     * reaches the override target while the room-override timer runs. Omitted
+     * = off (the pre-0.7.5 behavior). v1 is cool-only.
+     */
+    steering?: boolean;
   };
 }
 
@@ -154,6 +173,25 @@ export function resolveEcoPreset(features?: { eco_preset?: string | false }): st
   if (v === false) return null;
   if (typeof v === 'string' && v.trim()) return v.trim();
   return 'eco';
+}
+
+/**
+ * Resolve the off-peak comfort settings (item 7): the entity that says "today
+ * is off-peak" plus the creation-time seed for the offset helper, or null when
+ * the feature is off. Absent/blank entity = off, exactly the previous
+ * behavior (compat R3).
+ */
+export function resolveOffPeak(features?: {
+  off_peak_entity?: string;
+  off_peak_offset?: number;
+}): { entity: string; offsetSeed: number } | null {
+  const e = features?.off_peak_entity;
+  if (typeof e !== 'string' || !e.trim()) return null;
+  const o = features?.off_peak_offset;
+  // Clamped into the helper's own 0-10 range AND rounded to its step of 1, so
+  // the creation-time seed can never fail input_number.set_value.
+  const offsetSeed = typeof o === 'number' && Number.isFinite(o) ? Math.round(Math.min(10, Math.max(0, o))) : 2;
+  return { entity: e.trim(), offsetSeed };
 }
 
 /**

@@ -1,0 +1,755 @@
+{
+  "climate_mzcs_engine": {
+    "id": "climate_mzcs_engine",
+    "alias": "Climate: schedule engine",
+    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Applies the active season's schedule block to each ENABLED zone at block transitions. Per-zone applied-block markers mean manual changes and external raises HOLD until the next block; the 15-minute tick only recovers missed transitions. Zones stand down while their Eco preset is active. heat_cool blocks apply dual setpoints. Comfort steering owns a zone while its room-override timer is active; this engine skips it until the steering automation reverts. [mzcs-sig:3d725ac4]",
+    "mode": "queued",
+    "max": 5,
+    "triggers": [
+      {
+        "trigger": "state",
+        "entity_id": [
+          "schedule.climate_zone_one_summer",
+          "schedule.climate_zone_one_winter",
+          "schedule.climate_zone_two_summer",
+          "schedule.climate_zone_two_winter",
+          "schedule.climate_zone_three_summer",
+          "schedule.climate_zone_three_winter"
+        ],
+        "alias": "Any zone schedule changed"
+      },
+      {
+        "trigger": "homeassistant",
+        "event": "start",
+        "alias": "HA started"
+      },
+      {
+        "trigger": "time_pattern",
+        "minutes": "/15",
+        "alias": "Safety tick"
+      },
+      {
+        "trigger": "state",
+        "entity_id": "input_select.climate_season",
+        "alias": "Season changed"
+      },
+      {
+        "trigger": "state",
+        "entity_id": [
+          "input_boolean.climate_zone_one_enabled",
+          "input_boolean.climate_zone_two_enabled",
+          "input_boolean.climate_zone_three_enabled"
+        ],
+        "to": "on",
+        "alias": "Zone re-enabled"
+      },
+      {
+        "trigger": "state",
+        "entity_id": [
+          "input_text.climate_zone_one_applied_block",
+          "input_text.climate_zone_two_applied_block",
+          "input_text.climate_zone_three_applied_block"
+        ],
+        "to": "",
+        "alias": "Steering released a zone"
+      }
+    ],
+    "conditions": [],
+    "actions": [
+      {
+        "alias": "Resolve the active season key",
+        "variables": {
+          "season": "{{ {'Summer': 'summer', 'Winter': 'winter'}.get(states('input_select.climate_season'), states('input_select.climate_season') | lower) }}"
+        }
+      },
+      {
+        "alias": "Apply per zone",
+        "repeat": {
+          "for_each": [
+            {
+              "zone": "zone_one",
+              "climate": "climate.zone_one",
+              "marker": "input_text.climate_zone_one_applied_block",
+              "enabled": "input_boolean.climate_zone_one_enabled",
+              "override_timer": "timer.climate_zone_one_room_override"
+            },
+            {
+              "zone": "zone_two",
+              "climate": "climate.zone_two",
+              "marker": "input_text.climate_zone_two_applied_block",
+              "enabled": "input_boolean.climate_zone_two_enabled",
+              "override_timer": "timer.climate_zone_two_room_override"
+            },
+            {
+              "zone": "zone_three",
+              "climate": "climate.zone_three",
+              "marker": "input_text.climate_zone_three_applied_block",
+              "enabled": "input_boolean.climate_zone_three_enabled",
+              "override_timer": "timer.climate_zone_three_room_override"
+            }
+          ],
+          "sequence": [
+            {
+              "alias": "Read this zone's active block",
+              "variables": {
+                "blk": "{{ state_attr('schedule.climate_' ~ repeat.item.zone ~ '_' ~ season, 'block') }}",
+                "blk_mode": "{{ state_attr('schedule.climate_' ~ repeat.item.zone ~ '_' ~ season, 'mode') }}",
+                "blk_cool": "{{ state_attr('schedule.climate_' ~ repeat.item.zone ~ '_' ~ season, 'cool_temp') }}",
+                "blk_heat": "{{ state_attr('schedule.climate_' ~ repeat.item.zone ~ '_' ~ season, 'heat_temp') }}"
+              }
+            },
+            {
+              "alias": "Skip when zone disabled, already applied, Eco active, or no block data",
+              "condition": "template",
+              "value_template": "{{ is_state(repeat.item.enabled, 'on') and blk is not none and blk != states(repeat.item.marker) and state_attr(repeat.item.climate, 'preset_mode') != 'eco' and not (is_state(repeat.item.override_timer, 'active') and blk_mode == 'cool') }}"
+            },
+            {
+              "alias": "Apply the block (dual range, off, or single target)",
+              "continue_on_error": true,
+              "choose": [
+                {
+                  "conditions": [
+                    {
+                      "condition": "template",
+                      "value_template": "{{ blk_mode == 'heat_cool' }}"
+                    }
+                  ],
+                  "sequence": [
+                    {
+                      "alias": "Apply heat_cool range",
+                      "action": "climate.set_temperature",
+                      "target": {
+                        "entity_id": "{{ repeat.item.climate }}"
+                      },
+                      "data": {
+                        "target_temp_high": "{{ blk_cool }}",
+                        "target_temp_low": "{{ blk_heat }}",
+                        "hvac_mode": "heat_cool"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "conditions": [
+                    {
+                      "condition": "template",
+                      "value_template": "{{ blk_mode == 'off' }}"
+                    }
+                  ],
+                  "sequence": [
+                    {
+                      "alias": "Turn the zone off",
+                      "action": "climate.set_hvac_mode",
+                      "target": {
+                        "entity_id": "{{ repeat.item.climate }}"
+                      },
+                      "data": {
+                        "hvac_mode": "off"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "conditions": [
+                    {
+                      "condition": "template",
+                      "value_template": "{{ blk_cool is not none or blk_heat is not none }}"
+                    }
+                  ],
+                  "sequence": [
+                    {
+                      "alias": "Apply single target",
+                      "action": "climate.set_temperature",
+                      "target": {
+                        "entity_id": "{{ repeat.item.climate }}"
+                      },
+                      "data": {
+                        "temperature": "{{ blk_cool if blk_cool is not none else blk_heat }}",
+                        "hvac_mode": "{{ blk_mode }}"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "default": []
+            },
+            {
+              "alias": "Record the applied block",
+              "action": "input_text.set_value",
+              "target": {
+                "entity_id": "{{ repeat.item.marker }}"
+              },
+              "data": {
+                "value": "{{ blk }}"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "climate_mzcs_watchdog": {
+    "id": "climate_mzcs_watchdog",
+    "alias": "Climate: engine watchdog",
+    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Alerts when the schedule engine automation is off or unavailable for 5 minutes. [mzcs-sig:d6ad29bd]",
+    "mode": "single",
+    "triggers": [
+      {
+        "trigger": "state",
+        "entity_id": "automation.climate_schedule_engine",
+        "to": [
+          "off",
+          "unavailable"
+        ],
+        "for": {
+          "minutes": 5
+        },
+        "alias": "Engine down"
+      }
+    ],
+    "conditions": [],
+    "actions": [
+      {
+        "alias": "Notify all admins via persistent notification",
+        "action": "persistent_notification.create",
+        "data": {
+          "title": "Climate schedule engine is down",
+          "message": "The Climate: schedule engine automation is off or unavailable. Zone schedules are not being applied - your thermostats hold their last setpoints (their own app schedules still work)."
+        }
+      }
+    ]
+  },
+  "climate_mzcs_runtime_learning": {
+    "id": "climate_mzcs_runtime_learning",
+    "alias": "Climate: runtime learning",
+    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Nightly EMA update of each zone's runtime-per-cooling-degree-day factor. Skips mild days; first valid day seeds directly. [mzcs-sig:ab1675eb]",
+    "mode": "single",
+    "triggers": [
+      {
+        "trigger": "time",
+        "at": "23:58:00",
+        "alias": "Nightly close"
+      }
+    ],
+    "conditions": [],
+    "actions": [
+      {
+        "alias": "Compute today's cooling degree-days",
+        "variables": {
+          "cdd": "{{ [ (states('sensor.climate_outdoor_daily_mean') | float(0)) - (states('input_number.climate_cdd_base') | float(75)), 0 ] | max }}",
+          "alpha": "{{ 2 / ((states('input_number.climate_runtime_learn_days') | float(30)) + 1) }}"
+        }
+      },
+      {
+        "alias": "Skip mild days",
+        "condition": "template",
+        "value_template": "{{ cdd > 0.5 }}"
+      },
+      {
+        "alias": "Update k per zone",
+        "repeat": {
+          "for_each": [
+            {
+              "runtime": "sensor.climate_zone_one_runtime_today",
+              "k": "input_number.climate_zone_one_k"
+            },
+            {
+              "runtime": "sensor.climate_zone_two_runtime_today",
+              "k": "input_number.climate_zone_two_k"
+            },
+            {
+              "runtime": "sensor.climate_zone_three_runtime_today",
+              "k": "input_number.climate_zone_three_k"
+            }
+          ],
+          "sequence": [
+            {
+              "alias": "Compute the EMA",
+              "variables": {
+                "runtime_h": "{{ states(repeat.item.runtime) | float(-1) }}",
+                "old_k": "{{ states(repeat.item.k) | float(0) }}"
+              }
+            },
+            {
+              "alias": "Skip if unavailable",
+              "condition": "template",
+              "value_template": "{{ runtime_h >= 0 }}"
+            },
+            {
+              "alias": "Write the new k",
+              "action": "input_number.set_value",
+              "target": {
+                "entity_id": "{{ repeat.item.k }}"
+              },
+              "data": {
+                "value": "{{ ((runtime_h / cdd) if old_k == 0 else (alpha * (runtime_h / cdd) + (1 - alpha) * old_k)) | round(2) }}"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "climate_mzcs_runtime_alert": {
+    "id": "climate_mzcs_runtime_alert",
+    "alias": "Climate: runtime anomaly alert",
+    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Evening check: notifies when a zone's runtime is over the weather-normalized expectation by the alert margin. Uses learned k; silent while learning. [mzcs-sig:34cfb90d]",
+    "mode": "single",
+    "triggers": [
+      {
+        "trigger": "time",
+        "at": "20:00:00",
+        "alias": "Evening check"
+      }
+    ],
+    "conditions": [],
+    "actions": [
+      {
+        "alias": "Check each zone",
+        "repeat": {
+          "for_each": [
+            {
+              "name": "Zone One",
+              "runtime": "sensor.climate_zone_one_runtime_today",
+              "expected": "sensor.climate_zone_one_expected_runtime"
+            },
+            {
+              "name": "Zone Two",
+              "runtime": "sensor.climate_zone_two_runtime_today",
+              "expected": "sensor.climate_zone_two_expected_runtime"
+            },
+            {
+              "name": "Zone Three",
+              "runtime": "sensor.climate_zone_three_runtime_today",
+              "expected": "sensor.climate_zone_three_expected_runtime"
+            }
+          ],
+          "sequence": [
+            {
+              "alias": "Compute exceedance",
+              "variables": {
+                "run_h": "{{ states(repeat.item.runtime) | float(0) }}",
+                "exp_h": "{{ states(repeat.item.expected) | float(0) }}",
+                "margin": "{{ states('input_number.climate_runtime_alert_margin') | float(35) }}"
+              }
+            },
+            {
+              "alias": "Only alert on a real, learned exceedance",
+              "condition": "template",
+              "value_template": "{{ exp_h > 0 and run_h > exp_h * (1 + margin / 100) and (run_h - exp_h) > 1 }}"
+            },
+            {
+              "alias": "Notify",
+              "action": "persistent_notification.create",
+              "data": {
+                "title": "HVAC running high",
+                "message": "{{ repeat.item.name }} has run {{ run_h | round(1) }}h today vs ~{{ exp_h | round(1) }}h expected for this weather. Worth a look (filters, doors, refrigerant)."
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "climate_mzcs_steering": {
+    "id": "climate_mzcs_steering",
+    "alias": "Climate: comfort steering",
+    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Drives a zone's thermostat so the SELECTED ROOM reaches the override target while the room-override timer runs (cool only). Commanded setpoint = thermostat reading minus how far the room is above target, clamped to the steering band and to the max offset from the scheduled block. When the timer ends or is cancelled, the applied-block marker is cleared so the schedule engine re-asserts the block on its next trigger. [mzcs-sig:9d005136]",
+    "mode": "queued",
+    "max": 25,
+    "triggers": [
+      {
+        "trigger": "state",
+        "entity_id": [
+          "sensor.room_a_temperature",
+          "sensor.room_b_temperature",
+          "sensor.room_c_temperature"
+        ],
+        "alias": "A steered room reading changed"
+      },
+      {
+        "trigger": "state",
+        "entity_id": [
+          "schedule.climate_zone_one_sensor_schedule",
+          "schedule.climate_zone_two_sensor_schedule"
+        ],
+        "alias": "A daypart boundary passed"
+      },
+      {
+        "trigger": "state",
+        "entity_id": [
+          "timer.climate_zone_one_room_override",
+          "timer.climate_zone_two_room_override",
+          "timer.climate_zone_three_room_override"
+        ],
+        "to": "active",
+        "alias": "An override started"
+      },
+      {
+        "trigger": "event",
+        "event_type": "timer.finished",
+        "event_data": {
+          "entity_id": "timer.climate_zone_one_room_override"
+        },
+        "alias": "Zone One override timer finished"
+      },
+      {
+        "trigger": "event",
+        "event_type": "timer.finished",
+        "event_data": {
+          "entity_id": "timer.climate_zone_two_room_override"
+        },
+        "alias": "Zone Two override timer finished"
+      },
+      {
+        "trigger": "event",
+        "event_type": "timer.finished",
+        "event_data": {
+          "entity_id": "timer.climate_zone_three_room_override"
+        },
+        "alias": "Zone Three override timer finished"
+      },
+      {
+        "trigger": "event",
+        "event_type": "timer.cancelled",
+        "event_data": {
+          "entity_id": "timer.climate_zone_one_room_override"
+        },
+        "alias": "Zone One override cancelled"
+      },
+      {
+        "trigger": "event",
+        "event_type": "timer.cancelled",
+        "event_data": {
+          "entity_id": "timer.climate_zone_two_room_override"
+        },
+        "alias": "Zone Two override cancelled"
+      },
+      {
+        "trigger": "event",
+        "event_type": "timer.cancelled",
+        "event_data": {
+          "entity_id": "timer.climate_zone_three_room_override"
+        },
+        "alias": "Zone Three override cancelled"
+      },
+      {
+        "trigger": "time_pattern",
+        "minutes": "/5",
+        "alias": "Safety tick"
+      },
+      {
+        "trigger": "homeassistant",
+        "event": "start",
+        "alias": "HA started"
+      }
+    ],
+    "conditions": [],
+    "actions": [
+      {
+        "alias": "Revert on a timer event, steer otherwise",
+        "choose": [
+          {
+            "conditions": [
+              {
+                "condition": "template",
+                "value_template": "{{ trigger.platform == 'event' }}"
+              }
+            ],
+            "sequence": [
+              {
+                "alias": "Resolve which zone's override ended",
+                "variables": {
+                  "marker": "{{ {'timer.climate_zone_one_room_override': 'input_text.climate_zone_one_applied_block', 'timer.climate_zone_two_room_override': 'input_text.climate_zone_two_applied_block', 'timer.climate_zone_three_room_override': 'input_text.climate_zone_three_applied_block'}.get(trigger.event.data.entity_id) }}"
+                }
+              },
+              {
+                "alias": "Only timers this card manages",
+                "condition": "template",
+                "value_template": "{{ marker is not none }}"
+              },
+              {
+                "alias": "Clear the applied-block marker so the engine re-asserts the schedule",
+                "action": "input_text.set_value",
+                "target": {
+                  "entity_id": "{{ marker }}"
+                },
+                "data": {
+                  "value": ""
+                }
+              }
+            ]
+          }
+        ],
+        "default": [
+          {
+            "alias": "Resolve the active season key",
+            "variables": {
+              "season": "{{ {'Summer': 'summer', 'Winter': 'winter'}.get(states('input_select.climate_season'), states('input_select.climate_season') | lower) }}"
+            }
+          },
+          {
+            "alias": "Steer each zone with an active override",
+            "repeat": {
+              "for_each": [
+                {
+                  "zone": "zone_one",
+                  "climate": "climate.zone_one",
+                  "timer": "timer.climate_zone_one_room_override",
+                  "select": "input_select.climate_zone_one_target_room",
+                  "target": "input_number.climate_zone_one_steer_target",
+                  "enabled": "input_boolean.climate_zone_one_enabled",
+                  "sensor_schedule": "schedule.climate_zone_one_sensor_schedule",
+                  "rooms": {
+                    "Room A": "sensor.room_a_temperature",
+                    "Room B": "sensor.room_b_temperature"
+                  },
+                  "labels": {
+                    "sensor.room_a_temperature": "Room A",
+                    "sensor.room_b_temperature": "Room B"
+                  },
+                  "seens": {
+                    "sensor.room_a_temperature": "sensor.room_a_last_seen"
+                  }
+                },
+                {
+                  "zone": "zone_two",
+                  "climate": "climate.zone_two",
+                  "timer": "timer.climate_zone_two_room_override",
+                  "select": "input_select.climate_zone_two_target_room",
+                  "target": "input_number.climate_zone_two_steer_target",
+                  "enabled": "input_boolean.climate_zone_two_enabled",
+                  "sensor_schedule": "schedule.climate_zone_two_sensor_schedule",
+                  "rooms": {
+                    "sensor.room_c_temperature": "sensor.room_c_temperature"
+                  },
+                  "labels": {
+                    "sensor.room_c_temperature": "sensor.room_c_temperature"
+                  },
+                  "seens": {}
+                }
+              ],
+              "sequence": [
+                {
+                  "alias": "Resolve this zone's steering inputs",
+                  "variables": {
+                    "room": "{{ repeat.item.rooms.get(states(repeat.item.select)) }}",
+                    "blk_mode": "{{ state_attr('schedule.climate_' ~ repeat.item.zone ~ '_' ~ season, 'mode') }}",
+                    "blk_cool": "{{ state_attr('schedule.climate_' ~ repeat.item.zone ~ '_' ~ season, 'cool_temp') }}",
+                    "dp_label": "{{ repeat.item.labels.get(state_attr(repeat.item.sensor_schedule, 'sensor')) }}",
+                    "dp_room": "{{ repeat.item.rooms.get(dp_label) }}",
+                    "dp_fresh": "{{ dp_room is not none and states(dp_room) | float(-999) > -900 and states[dp_room] is not none and now() - states[dp_room].last_reported < timedelta(hours=3) and (repeat.item.seens.get(dp_room) is none or ((states(repeat.item.seens.get(dp_room)) | as_datetime) is not none and now() - (states(repeat.item.seens.get(dp_room)) | as_datetime) < timedelta(hours=3))) }}"
+                  }
+                },
+                {
+                  "alias": "Daypart pilot - start the scheduled steer when no override is running",
+                  "choose": [
+                    {
+                      "conditions": [
+                        {
+                          "condition": "template",
+                          "value_template": "{{ dp_label is not none and is_state(repeat.item.timer, 'idle') and is_state(repeat.item.enabled, 'on') and blk_mode == 'cool' and blk_cool is not none and blk_cool | float(0) >= 50 and blk_cool | float(0) <= 95 and dp_fresh and state_attr(repeat.item.climate, 'preset_mode') != 'eco' }}"
+                        }
+                      ],
+                      "sequence": [
+                        {
+                          "alias": "Point the zone at the daypart room",
+                          "continue_on_error": true,
+                          "action": "input_select.select_option",
+                          "target": {
+                            "entity_id": "{{ repeat.item.select }}"
+                          },
+                          "data": {
+                            "option": "{{ dp_label }}"
+                          }
+                        },
+                        {
+                          "alias": "Target the scheduled setpoint at that room",
+                          "continue_on_error": true,
+                          "action": "input_number.set_value",
+                          "target": {
+                            "entity_id": "{{ repeat.item.target }}"
+                          },
+                          "data": {
+                            "value": "{{ blk_cool | float }}"
+                          }
+                        },
+                        {
+                          "alias": "Run the override until the daypart ends",
+                          "continue_on_error": true,
+                          "action": "timer.start",
+                          "target": {
+                            "entity_id": "{{ repeat.item.timer }}"
+                          },
+                          "data": {
+                            "duration": "{{ [ ((state_attr(repeat.item.sensor_schedule, 'next_event') - now()).total_seconds() | int) if state_attr(repeat.item.sensor_schedule, 'next_event') is not none else 1800, 300 ] | max }}"
+                          }
+                        }
+                      ]
+                    }
+                  ],
+                  "default": []
+                },
+                {
+                  "alias": "Cancel the override if its zone was disabled mid-override",
+                  "choose": [
+                    {
+                      "conditions": [
+                        {
+                          "condition": "template",
+                          "value_template": "{{ is_state(repeat.item.timer, 'active') and not is_state(repeat.item.enabled, 'on') }}"
+                        }
+                      ],
+                      "sequence": [
+                        {
+                          "alias": "Cancel this override - the kill switch outranks steering",
+                          "continue_on_error": true,
+                          "action": "timer.cancel",
+                          "target": {
+                            "entity_id": "{{ repeat.item.timer }}"
+                          }
+                        }
+                      ]
+                    }
+                  ],
+                  "default": []
+                },
+                {
+                  "alias": "Steer only an enabled zone with an active override on a cooling block",
+                  "condition": "template",
+                  "value_template": "{{ is_state(repeat.item.timer, 'active') and is_state(repeat.item.enabled, 'on') and room is not none and blk_mode == 'cool' and blk_cool is not none and state_attr(repeat.item.climate, 'preset_mode') != 'eco' }}"
+                },
+                {
+                  "alias": "Read the room, the thermostat and the target",
+                  "variables": {
+                    "t_room": "{{ states(room) | float(-999) }}",
+                    "room_fresh": "{{ states(room) | float(-999) > -900 and states[room] is not none and now() - states[room].last_reported < timedelta(hours=3) and (repeat.item.seens.get(room) is none or ((states(repeat.item.seens.get(room)) | as_datetime) is not none and now() - (states(repeat.item.seens.get(room)) | as_datetime) < timedelta(hours=3))) }}",
+                    "t_thermo": "{{ state_attr(repeat.item.climate, 'current_temperature') }}",
+                    "t_target": "{{ states(repeat.item.target) | float(-999) }}"
+                  }
+                },
+                {
+                  "alias": "Refuse stale or unreadable inputs - the last commanded value stands",
+                  "condition": "template",
+                  "value_template": "{{ room_fresh and t_target > -900 and t_thermo is not none and state_attr(repeat.item.climate, 'temperature') is not none }}"
+                },
+                {
+                  "alias": "Compute the commanded setpoint, clamped to the band and the block offset",
+                  "variables": {
+                    "smin": "{{ states('input_number.climate_steer_min_setpoint') | float(68) }}",
+                    "smax": "{{ states('input_number.climate_steer_max_setpoint') | float(85) }}",
+                    "moff": "{{ states('input_number.climate_steer_max_offset') | float(5) }}",
+                    "commanded": "{{ [ [ [ [ (t_thermo | float) - (t_room - t_target), (blk_cool | float) - moff ] | max, (blk_cool | float) + moff ] | min, smin ] | max, smax ] | min | round(1) }}"
+                  }
+                },
+                {
+                  "alias": "Skip a write smaller than half a degree",
+                  "condition": "template",
+                  "value_template": "{{ (commanded - (state_attr(repeat.item.climate, 'temperature') | float(-999))) | abs >= 0.5 }}"
+                },
+                {
+                  "alias": "Steer the zone toward the target room",
+                  "continue_on_error": true,
+                  "action": "climate.set_temperature",
+                  "target": {
+                    "entity_id": "{{ repeat.item.climate }}"
+                  },
+                  "data": {
+                    "temperature": "{{ commanded }}"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "climate_mzcs_fan_timer_zone_one": {
+    "id": "climate_mzcs_fan_timer_zone_one",
+    "alias": "Climate: Zone One fan timer finished",
+    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Turns the Zone One fan off when its fan timer ends. [mzcs-sig:fac7b42f]",
+    "mode": "single",
+    "triggers": [
+      {
+        "trigger": "event",
+        "event_type": "timer.finished",
+        "event_data": {
+          "entity_id": "timer.climate_zone_one_fan"
+        },
+        "alias": "Zone One fan timer finished"
+      }
+    ],
+    "conditions": [],
+    "actions": [
+      {
+        "alias": "Turn the Zone One fan off",
+        "action": "climate.set_fan_mode",
+        "target": {
+          "entity_id": "climate.zone_one"
+        },
+        "data": {
+          "fan_mode": "off"
+        }
+      }
+    ]
+  },
+  "climate_mzcs_fan_timer_zone_two": {
+    "id": "climate_mzcs_fan_timer_zone_two",
+    "alias": "Climate: Zone Two fan timer finished",
+    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Turns the Zone Two fan off when its fan timer ends. [mzcs-sig:19dee477]",
+    "mode": "single",
+    "triggers": [
+      {
+        "trigger": "event",
+        "event_type": "timer.finished",
+        "event_data": {
+          "entity_id": "timer.climate_zone_two_fan"
+        },
+        "alias": "Zone Two fan timer finished"
+      }
+    ],
+    "conditions": [],
+    "actions": [
+      {
+        "alias": "Turn the Zone Two fan off",
+        "action": "climate.set_fan_mode",
+        "target": {
+          "entity_id": "climate.zone_two"
+        },
+        "data": {
+          "fan_mode": "off"
+        }
+      }
+    ]
+  },
+  "climate_mzcs_fan_timer_zone_three": {
+    "id": "climate_mzcs_fan_timer_zone_three",
+    "alias": "Climate: Zone Three fan timer finished",
+    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Turns the Zone Three fan off when its fan timer ends. [mzcs-sig:e226bee9]",
+    "mode": "single",
+    "triggers": [
+      {
+        "trigger": "event",
+        "event_type": "timer.finished",
+        "event_data": {
+          "entity_id": "timer.climate_zone_three_fan"
+        },
+        "alias": "Zone Three fan timer finished"
+      }
+    ],
+    "conditions": [],
+    "actions": [
+      {
+        "alias": "Turn the Zone Three fan off",
+        "action": "climate.set_fan_mode",
+        "target": {
+          "entity_id": "climate.zone_three"
+        },
+        "data": {
+          "fan_mode": "off"
+        }
+      }
+    ]
+  }
+}

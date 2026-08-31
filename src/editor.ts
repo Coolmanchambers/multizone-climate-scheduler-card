@@ -477,6 +477,87 @@ export class MzcsCardEditor extends LitElement {
               </p>
             `}
 
+        <h4>Comfort steering</h4>
+        <label class="checkrow">
+          <input
+            type="checkbox"
+            .checked=${c.features?.steering === true}
+            @change=${(e: Event) => {
+              const on = (e.target as HTMLInputElement).checked;
+              // this._config, not the render-scope config (item-45 pattern).
+              const features = { ...this._config?.features };
+              if (on) features.steering = true;
+              else delete features.steering;
+              this._emit({ features });
+            }}
+          />
+          Steer a zone toward a selected room (cool only)
+        </label>
+        <p class="muted">
+          Tap a room on the card to drive the zone's thermostat until THAT room reaches a
+          target, for a set time, then revert to the schedule. Needs room sensors on the
+          zone. Turning this on adds per-zone helpers and a steering automation on the next
+          Apply; the dry-run shows them first.
+        </p>
+
+        <h4>Off-peak comfort</h4>
+        <label class="fieldrow">
+          Off-peak day entity
+          <input
+            .value=${c.features?.off_peak_entity ?? ''}
+            placeholder="binary_sensor.off_peak_today"
+            @change=${(e: Event) => {
+              const el = e.target as HTMLInputElement;
+              const v = el.value.trim();
+              el.value = v;
+              // this._config, not the render-scope config (item-45 pattern):
+              // a stale spread here would silently drop the edit before it.
+              const features = { ...this._config?.features };
+              if (v) features.off_peak_entity = v;
+              else {
+                delete features.off_peak_entity;
+                delete features.off_peak_offset;
+              }
+              this._emit({ features });
+            }}
+          />
+        </label>
+        <p class="muted">
+          A switch or binary sensor that is ON when today is off-peak (weekends, utility
+          holidays). Leave empty to keep the feature off. While it is on, the schedule
+          applies each block moved toward comfort by the offset; the docs show a two-step
+          recipe (a local calendar plus one template sensor).
+        </p>
+        ${c.features?.off_peak_entity
+          ? html`
+              <label class="fieldrow">
+                Comfort offset (°, initial value)
+                <input
+                  type="number"
+                  min="0"
+                  max="10"
+                  .value=${String(c.features?.off_peak_offset ?? 2)}
+                  @change=${(e: Event) => {
+                    // An emptied field means "back to default", never 0:
+                    // Number('') is 0 and would silently seed a zero offset
+                    // (QA finding 7).
+                    const raw = (e.target as HTMLInputElement).value.trim();
+                    const v = raw === '' ? NaN : Math.round(Math.min(10, Math.max(0, Number(raw))));
+                    const features = { ...this._config?.features };
+                    if (Number.isFinite(v) && v !== 2) features.off_peak_offset = v;
+                    else delete features.off_peak_offset;
+                    this._emit({ features });
+                  }}
+                />
+              </label>
+              <p class="muted">
+                Seeds the provisioned offset helper on Apply. After provisioning, tune the
+                live value on the settings panel's Tuning tab - this field does not change
+                an existing install.
+              </p>
+            `
+          : nothing}
+
         <h4>Display</h4>
         <label class="fieldrow">
           Last-seen age on room rows

@@ -110,6 +110,10 @@ never collide in HA's name→object_id slugification (S12c incident rule).
   (3) [reserved: consecutive-days alert is post-v1], `input_number.climate_runtime_learn_days`
   (30), `input_number.climate_cdd_base` (75)
 - `input_text.climate_theme` (card theme token)
+- `input_number.climate_off_peak_offset` (2; 0-10, degrees of extra comfort on off-peak days)
+  + `input_text.climate_off_peak_paused_on` (ISO date meaning "off-peak paused for this day";
+  empty otherwise) - both created ONLY when `features.off_peak_entity` is configured (added
+  0.7.5, item 7; additive)
 - `sensor.climate_next_block` (template; state = earliest next_event across the active season's
   schedules; the card computes its next-block line locally)
 - `sensor.climate_outdoor_temp` (template from the configured weather entity) +
@@ -122,7 +126,12 @@ never collide in HA's name→object_id slugification (S12c incident rule).
   heat_cool dual range and off; per-zone enable + applied-block-marker + standby-preset gates;
   15-min safety tick; season name→key map). The standby gate is configurable via
   `features.eco_preset` (default `'eco'` = original behavior and byte-identical to the 0.7.0
-  generator; a string names a different preset; `false` removes the gate)
+  generator; a string names a different preset; `false` removes the gate). With
+  `features.off_peak_entity` configured (0.7.5, item 7) the engine also computes applied
+  setpoints on a shared adjustment step - cool minus / heat plus the live offset helper while
+  the entity is `on` and today is not paused - and the applied-block marker becomes
+  `<block>|op<adj>` so a mid-day flip or an offset tune re-applies within one safety tick;
+  without the option the generated output is byte-identical to 0.7.4
 - "Climate: <Zone> fan timer finished" (per zone; stands down while the configured fan-guard
   helper is on)
 - "Climate: runtime learning" (nightly 23:58 EMA of k per zone; skips mild days; first valid
@@ -179,31 +188,45 @@ is retained privately.
 
 Nothing in the card, the contract, or the tests depends on those values.
 
-## 7b. Comfort steering (added pre-S1, spec §14) - **DEFERRED post-v1**
+## 7b. Comfort steering - **SHIPPED 0.7.5 (v1: cool-only; temporary override + dayparts)**
 
-Not shipped in v0.7.0: `features.steering` is hard-off in the card and no steering automation
-generator exists (desiring one would be a perpetual phantom Create - QA-R A2-5). The helper
-inventory below stays feature-gated and ready.
+Enabled via `features.steering: true` (absent/false = off, and the generated engine stays
+byte-identical to a non-steering install). The steering automation generator landed in 0.7.5,
+so the automation is desired exactly when the feature is on (the A2-5 phantom-Create rule holds
+in its real form: desire only what a generator signs).
 
-HA cannot select some thermostats' internal sensor (vendor API limit); the engine reproduces it via
-**setpoint compensation**: commanded setpoint = `thermostat_reading - (room_reading - target)`,
-clamped, throttled, reverted on target-reached / timer expiry / sensor unavailable. v1 steers in
-single-mode cool/heat only; on-peak hold caps compensation (exact rule settled with the S7
-audit).
+HA cannot select some thermostats' internal sensor (vendor API limit); the steering automation
+reproduces it via **setpoint compensation**: commanded setpoint =
+`thermostat_reading - (room_reading - target)`, clamped to the steering band and to
+±`steer_max_offset` of the scheduled block's cool setpoint (band wins), throttled to half-degree
+writes, cool-only in v1. The ENGINE skips a zone while its override timer is `active`; on
+timer end or cancel the steering automation clears the applied-block marker FIRST, so the
+engine re-asserts the schedule on its next trigger. Refusals (stale >3h / unreadable room,
+missing target, non-cool block, standby preset) skip the write; a zone disabled mid-override
+gets its timer cancelled - the kill switch outranks steering. **Dayparts** reuse the same
+mechanism: a "pilot" in the steering automation starts the identical override (target = the
+scheduled setpoint, duration = to the daypart's end) whenever the sensor schedule maps the
+current daypart to a room and NO timer is running - so a manual override always wins until it
+expires.
 
-**Per zone:** `input_select.climate_<zone>_target_room` (default "Thermostat"),
-`timer.climate_<zone>_room_override`.
+**Per zone:** `input_select.climate_<zone>_target_room` ("Thermostat" + one option per
+configured room sensor, label = configured name else entity id),
+`timer.climate_<zone>_room_override` (restore: true),
+`input_number.climate_<zone>_steer_target` (50-95 step 1; the override's target temperature -
+added 0.7.5 by maintainer decision 2026-08-30, the original reservation had nowhere to hold it).
 **Global tunables:** `input_number.climate_override_minutes` (60),
 `input_number.climate_steer_min_setpoint` (68), `input_number.climate_steer_max_setpoint` (85),
 `input_number.climate_steer_max_offset` (5).
-**Sensor schedule:** per zone, named periods each mapping to thermostat-or-sensor (daypart
-UX: Morning/Midday/Evening/Night defaults, editable times, any count). Storage follows
-the §4 decision (blocks with data payload - identical shape).
-**Seed (original onboarding config):** Upstairs - Morning/Midday/Evening = thermostat, Night =
-a bedroom sensor.
-**Card UX:** tap room chip → 1h override with countdown + highlighted chip; sensor-schedule
-editing in Manage. Steering inputs are Aqara-class sensors only (never Blink temps).
-**Build placement:** S9.5a engine+override, S9.5b sensor schedule + UX (after Aqara install).
+**Sensor schedule:** per zone, `schedule.climate_<zone>_sensor_schedule` - blocks identical
+across all 7 days, block data `{sensor: <entity_id> | "thermostat"}`; each daypart runs to the
+next one's start, the last to midnight; an empty schedule means the pilot is inert. Edited on
+the settings Zones tab (start time + target per row).
+**Automation:** `climate_mzcs_steering` ("Climate: comfort steering") - the revert branch, the
+per-zone steer loop and the daypart pilot described above; created only under
+`features.steering`.
+**Card UX:** tap a room row → sheet (target temp + duration, defaults = current setpoint +
+`override_minutes`) → Start; active room shows a highlighted row, countdown chip and cancel;
+stale/unreadable rooms refuse to start, visibly.
 
 ## 7c. Kill switch (PRODUCT REQUIREMENT - final build)
 

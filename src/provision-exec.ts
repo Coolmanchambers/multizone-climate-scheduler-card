@@ -21,11 +21,12 @@ import {
   learningAutomation,
   watchdogAutomation,
   runtimeAlertAutomation,
+  steeringAutomation,
   parseSignature,
   contentHash,
   type ZoneRef,
 } from './lib/automation-payloads';
-import { parseEntityId } from './lib/naming';
+import { parseEntityId, zoneEntityId } from './lib/naming';
 import type { TimeRange, DayKey } from './lib/schedule-ranges';
 
 export interface ExecContext {
@@ -36,6 +37,10 @@ export interface ExecContext {
   fanGuard?: string;
   /** resolved standby preset: a name, or null = stand-down disabled; absent = 'eco' */
   ecoPreset?: string | null;
+  /** resolved off-peak day entity (item 7), or null/absent = feature off */
+  offPeakEntity?: string | null;
+  /** comfort steering enabled (item 8); absent = off */
+  steering?: boolean;
   /** weather entity feeding the outdoor-temperature chain (CDD learning) */
   weatherEntity?: string;
   log: (line: string) => void;
@@ -312,7 +317,17 @@ function templateFlowSpec(id: string, spec: Record<string, unknown>, ctx: ExecCo
 
 function automationPayload(uid: string, ctx: ExecContext): Record<string, unknown> | null {
   const p = ctx.prefix;
-  if (uid === `${p}_mzcs_engine`) return engineAutomation(p, ctx.zones, ctx.seasons, ctx.ecoPreset === undefined ? 'eco' : ctx.ecoPreset);
+  if (uid === `${p}_mzcs_engine`)
+    return engineAutomation(
+      p,
+      ctx.zones,
+      ctx.seasons,
+      ctx.ecoPreset === undefined ? 'eco' : ctx.ecoPreset,
+      ctx.offPeakEntity ?? null,
+      ctx.steering ?? false,
+    );
+  if (uid === `${p}_mzcs_steering`)
+    return steeringAutomation(p, ctx.zones, ctx.seasons, ctx.ecoPreset === undefined ? 'eco' : ctx.ecoPreset);
   if (uid === `${p}_mzcs_watchdog`) return watchdogAutomation(p);
   if (uid === `${p}_mzcs_runtime_learning`) return learningAutomation(p, ctx.zones);
   if (uid === `${p}_mzcs_runtime_alert`) return runtimeAlertAutomation(p, ctx.zones);
@@ -672,6 +687,35 @@ export async function executePlan(hass: HassLike, plan: Plan, ctx: ExecContext):
         await hass.callApi!('DELETE', `config/config_entries/entry/${entryId}`);
       } else {
         const { domain, objectId } = splitId(a.id);
+        // Steering-off re-apply (QA finding E6): the revert logic lives in the
+        // automation being deleted, and deleting an active timer fires NO
+        // timer.cancelled event - so without this, an in-flight override
+        // strands the zone at the steered setpoint until the next block
+        // transition. Cancel the timer and clear the zone's marker BEFORE the
+        // delete; both are best-effort (full teardown deletes the marker
+        // anyway).
+        const parsed = parseEntityId(
+          a.id,
+          ctx.prefix,
+          ctx.zones.map((z) => z.slug),
+          ctx.seasons.map((s) => s.key),
+        );
+        if (parsed?.cls === 'room_override_timer' && parsed.zone) {
+          try {
+            await hass.callService('timer', 'cancel', { entity_id: a.id });
+          } catch {
+            /* already idle or gone */
+          }
+          try {
+            await hass.callService('input_text', 'set_value', {
+              entity_id: zoneEntityId('applied_block_marker', ctx.prefix, parsed.zone),
+              value: '',
+            });
+            ctx.log(`Released steering override for ${parsed.zone} before deleting its timer`);
+          } catch {
+            ctx.log(`NOTE: could not clear ${parsed.zone}'s applied-block marker before deleting its timer`);
+          }
+        }
         if (domain === 'schedule') {
           // Snapshot the week into the log so an intentional-but-regretted
           // season/zone removal is recoverable (QA-R B2-5).

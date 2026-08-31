@@ -123,9 +123,16 @@ export class MockHass implements HassLike {
   }
 
   private mutate(fn: () => void): void {
-    fn();
-    // New object identity so Lit's @property change detection fires.
+    // Copy FIRST, then apply the change to the copy. The old order wrote the
+    // new state entry into the states object every earlier snapshot still
+    // shared, so between two consecutive snapshots the changed entity's entry
+    // was the SAME reference - and the card's reference-equality render gate
+    // correctly concluded nothing changed (its renders were riding the
+    // once-a-minute wall-clock fallback instead; measured live via the item-7
+    // off-peak chip going stale for up to a minute after a tap). Real HA never
+    // mutates a previously handed-out state map; now neither does the mock.
     this.states = { ...this.states };
+    fn();
     for (const l of this.listeners) l();
   }
 
@@ -181,7 +188,35 @@ export class MockHass implements HassLike {
     if (domain === 'timer' && service === 'start' && entityId) {
       this.mutate(() => {
         const e = this.states[entityId];
-        if (e) this.states[entityId] = { ...e, state: 'active' };
+        if (!e) return;
+        // Honor a passed duration ("HH:MM:SS") so countdown UIs have a real
+        // finishes_at, like HA provides.
+        const dur = typeof data?.duration === 'string' ? data.duration : '0:30:00';
+        const [h, m, s] = dur.split(':').map((x) => Number(x) || 0);
+        const finishes = new Date(Date.now() + ((h! * 60 + m!) * 60 + s!) * 1000).toISOString();
+        this.states[entityId] = { ...e, state: 'active', attributes: { ...e.attributes, finishes_at: finishes } };
+      });
+    }
+    if (domain === 'timer' && service === 'cancel' && entityId) {
+      this.mutate(() => {
+        const e = this.states[entityId];
+        if (!e) {
+          return;
+        }
+        const { finishes_at: _f, ...attrs } = e.attributes as Record<string, unknown>;
+        this.states[entityId] = { ...e, state: 'idle', attributes: attrs };
+      });
+    }
+    if (domain === 'input_number' && service === 'set_value' && entityId) {
+      this.mutate(() => {
+        const e = this.states[entityId];
+        if (e && typeof data?.value === 'number') this.states[entityId] = { ...e, state: String(data.value) };
+      });
+    }
+    if (domain === 'input_select' && service === 'select_option' && entityId) {
+      this.mutate(() => {
+        const e = this.states[entityId];
+        if (e && typeof data?.option === 'string') this.states[entityId] = { ...e, state: data.option };
       });
     }
   }
@@ -223,9 +258,16 @@ export class MockHass implements HassLike {
         .map((id) => ({ id: id.slice('input_number.'.length), min: 1, max: 15, step: 1 }));
     }
     if (t === 'input_select/list') return [];
-    if (t === 'schedule/list') return [this.scheduleFixture];
+    if (t === 'schedule/list') return [this.scheduleFixture, ...this.extraSchedules.values()];
     if (t === 'schedule/update') {
-      const { type: _t, schedule_id: _id, ...days } = msg;
+      const { type: _t, schedule_id: id, ...days } = msg;
+      // Item 8: sensor schedules live beside the zone-schedule fixture, keyed
+      // by id, so a daypart save cannot clobber the zone schedule.
+      if (typeof id === 'string' && id !== this.scheduleFixture.id && this.extraSchedules.has(id)) {
+        const updated = { ...this.extraSchedules.get(id)!, ...days };
+        this.extraSchedules.set(id, updated);
+        return updated;
+      }
       this.scheduleFixture = { ...this.scheduleFixture, ...days };
       return this.scheduleFixture;
     }
@@ -439,6 +481,9 @@ export class MockHass implements HassLike {
   }
 
   /** Upstairs Summer weekend/weekday week matching the prod S7 provisioning. */
+  /** Additional schedule storage items (sensor schedules etc.), keyed by id. */
+  public extraSchedules = new Map<string, Record<string, unknown>>();
+
   public scheduleFixture: Record<string, unknown> = (() => {
     const wd = [
       { from: '00:00:00', to: '06:00:00', data: { block: 'Sleep', mode: 'cool', cool_temp: 76 } },

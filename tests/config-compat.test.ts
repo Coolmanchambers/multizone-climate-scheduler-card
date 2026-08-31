@@ -4,6 +4,7 @@ import {
   normalizeCardConfig,
   normalizeRoomSensors,
   resolveEcoPreset,
+  resolveOffPeak,
   resolveDisplay,
   DEFAULT_STALE_HOURS,
   DEFAULT_AGEING_MINUTES,
@@ -62,11 +63,17 @@ function input(overrides: Partial<ProvisionInput['features']> = {}): ProvisionIn
 function expectSameProvisioning(a: ProvisionInput, b: ProvisionInput): void {
   expect(buildDesired(a)).toEqual(buildDesired(b));
   const refs = (i: ProvisionInput) => i.zones.map((z) => ({ ...z, climate: z.climate ?? `climate.${z.slug}` }));
-  expect(
-    automationSignatures(a.prefix, refs(a), a.seasons, a.features.fan_guard, resolveEcoPreset(a.features)),
-  ).toEqual(
-    automationSignatures(b.prefix, refs(b), b.seasons, b.features.fan_guard, resolveEcoPreset(b.features)),
-  );
+  const sigsOf = (i: ProvisionInput) =>
+    automationSignatures(
+      i.prefix,
+      refs(i),
+      i.seasons,
+      i.features.fan_guard,
+      resolveEcoPreset(i.features),
+      resolveOffPeak(i.features)?.entity ?? null,
+      i.features.steering,
+    );
+  expect(sigsOf(a)).toEqual(sigsOf(b));
 }
 
 /**
@@ -597,5 +604,95 @@ describe('seasons[].name: refuse non-strings with a message, not a TypeError (it
 
   it('a nameless season without a key gets the name message, position-addressed', () => {
     expect(() => buildDesired(seasonsOf([{ default_mode: 'cool' }]))).toThrow(/season 1.*name/i);
+  });
+});
+
+describe('registry row: features.off_peak_entity / off_peak_offset (absent -> feature off, added 0.7.5)', () => {
+  it('(a) a config without the keys resolves to feature-off, and junk shapes stay off', () => {
+    expect(resolveOffPeak(undefined)).toBeNull();
+    expect(resolveOffPeak({})).toBeNull();
+    expect(resolveOffPeak({ off_peak_entity: '   ' })).toBeNull();
+    expect(resolveOffPeak({ off_peak_entity: 123 as unknown as string })).toBeNull();
+  });
+
+  it('(a) the offset is a clamped seed with default 2', () => {
+    const e = { off_peak_entity: 'binary_sensor.off_peak_today' };
+    expect(resolveOffPeak(e)).toEqual({ entity: 'binary_sensor.off_peak_today', offsetSeed: 2 });
+    expect(resolveOffPeak({ ...e, off_peak_offset: 5 })!.offsetSeed).toBe(5);
+    // Out-of-range seeds clamp into the helper's own 0-10 bounds so the
+    // creation-time input_number.set_value cannot fail.
+    expect(resolveOffPeak({ ...e, off_peak_offset: 99 })!.offsetSeed).toBe(10);
+    expect(resolveOffPeak({ ...e, off_peak_offset: -3 })!.offsetSeed).toBe(0);
+    expect(resolveOffPeak({ ...e, off_peak_offset: NaN })!.offsetSeed).toBe(2);
+  });
+
+  it('(b)(c) a config without the keys provisions identically to one with an empty features block, through the real config path', () => {
+    expectSameProvisioning(viaConfig(baseConfig()), viaConfig({ ...baseConfig(), features: {} }));
+  });
+
+  it('configuring the entity adds EXACTLY the two off-peak helpers and re-signs only the engine', () => {
+    const off = viaConfig(baseConfig());
+    const on = viaConfig({
+      ...baseConfig(),
+      features: { off_peak_entity: 'binary_sensor.off_peak_today' },
+    });
+    const offById = new Map(buildDesired(off).map((o) => [o.id, o]));
+    const onDesired = buildDesired(on);
+    const added = onDesired.filter((o) => !offById.has(o.id)).map((o) => o.id);
+    expect(added.sort()).toEqual([
+      'input_number.climate_off_peak_offset',
+      'input_text.climate_off_peak_paused_on',
+    ]);
+    // Every shared NON-automation object keeps its exact spec; among the
+    // automations, only the engine's signature moves.
+    for (const o of onDesired) {
+      const prev = offById.get(o.id);
+      if (!prev) continue;
+      if (o.kind !== 'automation' || !String(o.id).endsWith('_mzcs_engine')) {
+        expect(o.spec, o.id).toEqual(prev.spec);
+      }
+    }
+    const engOn = onDesired.find((o) => o.id === 'automation:climate_mzcs_engine')!;
+    const engOff = offById.get('automation:climate_mzcs_engine')!;
+    expect(engOn.spec.sig).not.toBe(engOff.spec.sig);
+  });
+});
+
+describe('registry row: features.steering (absent -> off, generator landed 0.7.5)', () => {
+  it('(a) absent, false and junk all resolve to off', () => {
+    for (const v of [undefined, false, 0, '', 'true', 1] as unknown[]) {
+      const input = viaConfig({ ...baseConfig(), features: v === undefined ? {} : { steering: v as boolean } });
+      expect(input.features.steering, JSON.stringify(v)).toBe(v === true);
+    }
+  });
+
+  it('(b)(c) a config without the key provisions identically to steering: false, through the real config path', () => {
+    expectSameProvisioning(
+      viaConfig(baseConfig()),
+      viaConfig({ ...baseConfig(), features: { steering: false } }),
+    );
+  });
+
+  it('(b)(c) room sensors alone perturb NOTHING - only the flag activates them', () => {
+    const plain = viaConfig(baseConfig());
+    const withRooms = viaConfig({
+      ...baseConfig(),
+      zones: [
+        {
+          entity: 'climate.zone_a',
+          name: 'Zone A',
+          room_sensors: [{ entity: 'sensor.room_a_temperature', name: 'Room A' }],
+        },
+      ],
+    });
+    expectSameProvisioning(plain, withRooms);
+  });
+});
+
+describe('QA round-5: offset seed rounds to the helper step', () => {
+  it('a fractional off_peak_offset seeds a step-aligned value', () => {
+    const e = { off_peak_entity: 'binary_sensor.off_peak_today' };
+    expect(resolveOffPeak({ ...e, off_peak_offset: 2.5 })!.offsetSeed).toBe(3);
+    expect(resolveOffPeak({ ...e, off_peak_offset: 9.9 })!.offsetSeed).toBe(10);
   });
 });

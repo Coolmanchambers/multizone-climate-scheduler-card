@@ -4,7 +4,7 @@
 // guarantee: plan(applyPlan(plan(...)), desired) has zero actionable entries.
 
 import type { BlockMode, DayGranularity } from '../types';
-import { resolveEcoPreset } from '../types';
+import { resolveEcoPreset, resolveOffPeak, normalizeRoomSensors } from '../types';
 import {
   zoneEntityId,
   zoneScheduleId,
@@ -26,6 +26,41 @@ export interface ProvisionZone {
   name: string;
   /** climate entity id; feeds the automation generators' signatures */
   climate?: string;
+  /**
+   * Room sensors as {label, entity, seen?}, derived from the config's
+   * room_sensors via steeringRooms() - THE single builder (three hand-copies
+   * of the label rule was QA INFO-6's NEW-3 shape). Consumed ONLY by steering
+   * (target_room options + the steering automation's maps); nothing else may
+   * read it, so configs without steering are unaffected by room changes.
+   */
+  rooms?: Array<{ label: string; entity: string; seen?: string }>;
+}
+
+/**
+ * THE single room_sensors -> steering rooms mapping (config-deterministic, no
+ * hass). Label = configured name, else the entity id, with two sanitizations
+ * (QA finding E4): a label that collides with the "Thermostat" sentinel or
+ * with an earlier room's label falls back to the entity id, and duplicate
+ * entities are dropped - otherwise the sentinel stops meaning "don't steer",
+ * or duplicate input_select options abort the whole Apply into rollback.
+ * `seen` carries the row's last_seen companion so the generated automation's
+ * freshness gate keeps the item-36 protection (QA finding E5).
+ */
+export function steeringRooms(
+  roomSensors: unknown,
+): Array<{ label: string; entity: string; seen?: string }> {
+  const used = new Set<string>(['thermostat']);
+  const entities = new Set<string>();
+  const out: Array<{ label: string; entity: string; seen?: string }> = [];
+  for (const r of normalizeRoomSensors(roomSensors as Parameters<typeof normalizeRoomSensors>[0])) {
+    if (entities.has(r.entity)) continue;
+    entities.add(r.entity);
+    let label = r.name ?? r.entity;
+    if (used.has(label.trim().toLowerCase())) label = r.entity;
+    used.add(label.trim().toLowerCase());
+    out.push({ label, entity: r.entity, ...(r.last_seen ? { seen: r.last_seen } : {}) });
+  }
+  return out;
 }
 
 export interface ProvisionSeason {
@@ -52,6 +87,9 @@ export interface ProvisionInput {
     fan_guard?: string;
     /** standby preset for the engine's stand-down gate (see MzcsCardConfig) */
     eco_preset?: string | false;
+    /** off-peak comfort day entity + offset seed (item 7, see MzcsCardConfig) */
+    off_peak_entity?: string;
+    off_peak_offset?: number;
   };
   /** weather entity providing the outdoor temperature for CDD learning */
   weather_entity?: string;
@@ -151,10 +189,8 @@ function weeklySpec(set: ScheduleSet): Record<DayKey, TimeRange[]> {
  *   engine applies blocks against `schedule.<prefix>_<zone>_undefined`, and a
  *   fully-applied install replans to all-Unchanged - fetchExisting's orphan-
  *   schedule fallback claims the entity even though the season parser cannot.
- *   Refusing a converging install is the breaking change R3 forbids. (Its one
- *   real defect - the card's schedule drawer looks the entity up by slugified
- *   NAME and finds nothing - is a card bug on the backlog, not a reason to
- *   stop provisioning.)
+ *   Refusing a converging install is the breaking change R3 forbids. (Its
+ *   one-time drawer-lookup defect was fixed in 0.7.3 by resolveSeasonKey.)
  * - It does not test key TYPES. `key: 1` and `key: off` name live entities.
  * - It does not group by trimmed or normalized keys. `key: null` beside an
  *   absent key yields `_null` and `_undefined` - DISTINCT ids that provisioned
@@ -295,12 +331,23 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
       out.push({
         id: zoneEntityId('target_room_select', p, z.slug),
         kind: 'helper',
-        spec: { name: `${label} ${z.name} target room`, options: ['Thermostat'] },
+        // Options derive from the zone's configured room sensors (spec §6):
+        // "Thermostat" = not steering; a room label = steer to that room.
+        spec: { name: `${label} ${z.name} target room`, options: ['Thermostat', ...(z.rooms ?? []).map((r) => r.label)] },
       });
       out.push({
         id: zoneEntityId('room_override_timer', p, z.slug),
         kind: 'helper',
         spec: { name: `${label} ${z.name} room override`, restore: true },
+      });
+      // The override's target temperature (decided with the maintainer
+      // 2026-08-30: CONTRACT §7b reserved no store for it). Written by the
+      // card when an override starts; read by the steering automation on
+      // every recompute; survives an HA restart.
+      out.push({
+        id: zoneEntityId('steer_target', p, z.slug),
+        kind: 'helper',
+        spec: { name: `${label} ${z.name} steer target`, min: 50, max: 95, step: 1 },
       });
       out.push({
         id: zoneEntityId('sensor_schedule', p, z.slug),
@@ -358,6 +405,26 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
       });
     }
   }
+  // Off-peak comfort (item 7): both helpers exist ONLY when the feature is
+  // configured, so unconfigured installs keep their exact inventory. The
+  // engine reads the offset HELPER (tunable without re-provisioning); the
+  // config value is only its creation seed. The pause helper holds an ISO
+  // date ("off-peak paused for this day"); it seeds nothing - unknown/empty
+  // never equals today, which means not paused.
+  const offPeak = resolveOffPeak(input.features);
+  if (offPeak) {
+    out.push({
+      id: globalEntityId('off_peak_offset', p),
+      kind: 'helper',
+      spec: { name: `${label} off peak offset`, min: 0, max: 10, step: 1, unit: '°F' },
+      meta: { seed: offPeak.offsetSeed },
+    });
+    out.push({
+      id: globalEntityId('off_peak_paused_on', p),
+      kind: 'helper',
+      spec: { name: `${label} off peak paused on` },
+    });
+  }
   out.push({
     id: globalEntityId('next_block_sensor', p),
     kind: 'template_sensor',
@@ -395,7 +462,15 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
   // and gets an Update; the executor then regenerates it only when its content
   // still matches its own signature (i.e. never hand-edited).
   const zoneRefs = input.zones.map((z) => ({ ...z, climate: z.climate ?? `climate.${z.slug}` }));
-  const sigs = automationSignatures(p, zoneRefs, input.seasons, input.features.fan_guard, resolveEcoPreset(input.features));
+  const sigs = automationSignatures(
+    p,
+    zoneRefs,
+    input.seasons,
+    input.features.fan_guard,
+    resolveEcoPreset(input.features),
+    offPeak?.entity ?? null,
+    input.features.steering,
+  );
   const auto = (key: string, zoneName?: string): DesiredObject => {
     const uid = automationUniqueId(p, zoneName ? `${key}_${zoneName.toLowerCase()}` : key);
     return {
@@ -420,10 +495,10 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
       });
     }
   }
-  // NOTE: the steering AUTOMATION is intentionally not desired yet - no
-  // generator exists for it (S9.5). Desiring it would produce a perpetual
-  // non-converging Create (QA-R finding A2-5). Steering helpers above remain
-  // feature-gated so their provisioning is ready when the generator lands.
+  // The steering automation (item 8): a generator exists as of 0.7.5, so it
+  // is desired exactly when the feature is on - a Create for enabling
+  // installs, absent (and therefore never a phantom Create) everywhere else.
+  if (input.features.steering) out.push(auto('steering'));
 
   // Guard against compound id collisions the reserved-slug check cannot see
   // (e.g. zones 'up'/'up_late' with seasons 'late_summer'/'summer' both
@@ -535,25 +610,43 @@ export function defaultSeasons(): ProvisionSeason[] {
 export function provisionInputFromConfig(
   config: {
     prefix?: string;
-    zones: Array<{ entity: string; name: string }>;
+    zones: Array<{ entity: string; name: string; room_sensors?: unknown }>;
     seasons?: ProvisionSeason[];
     weather_entity?: string;
-    features?: { fan_timer?: number[]; anomaly_alerts?: boolean; fan_guard?: string; eco_preset?: string | false };
+    features?: {
+      fan_timer?: number[];
+      anomaly_alerts?: boolean;
+      fan_guard?: string;
+      eco_preset?: string | false;
+      off_peak_entity?: string;
+      off_peak_offset?: number;
+      steering?: boolean;
+    };
   },
   schedules: ProvisionInput['schedules'],
   slug: (name: string) => string,
 ): ProvisionInput {
+  const steering = config.features?.steering === true;
   return {
     prefix: config.prefix ?? 'climate',
-    zones: config.zones.map((z) => ({ slug: slug(z.name), name: z.name, climate: z.entity })),
+    zones: config.zones.map((z) => ({
+      slug: slug(z.name),
+      name: z.name,
+      climate: z.entity,
+      // Rooms feed ONLY steering; built exactly when the feature is on so a
+      // non-steering config is byte-identical to one that never had sensors.
+      ...(steering ? { rooms: steeringRooms(z.room_sensors) } : {}),
+    })),
     seasons: config.seasons ?? defaultSeasons(),
     schedules,
     features: {
       fan_timer: (config.features?.fan_timer?.length ?? 3) > 0,
       anomaly_alerts: config.features?.anomaly_alerts ?? true,
-      steering: false,
+      steering,
       fan_guard: config.features?.fan_guard,
       eco_preset: config.features?.eco_preset,
+      off_peak_entity: config.features?.off_peak_entity,
+      off_peak_offset: config.features?.off_peak_offset,
     },
     weather_entity: config.weather_entity,
   };

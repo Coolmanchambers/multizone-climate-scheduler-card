@@ -128,6 +128,7 @@ objects, all tagged with the label `mzcs` so you can audit them at any time unde
 | `timer.<prefix>_<zone>_fan` | Backs the one-tap fan timer |
 | `binary_sensor.<prefix>_<zone>_running` | True while the zone is actively heating/cooling |
 | `sensor.<prefix>_<zone>_runtime_today` | Hours run today |
+| `sensor.<prefix>_<zone>_runtime_mirror` | Mirrors runtime for long-term statistics |
 | `sensor.<prefix>_<zone>_expected_runtime` | Weather-normalized expectation |
 | `input_number.<prefix>_<zone>_k` | Learned runtime per cooling-degree-day |
 | `input_text.<prefix>_<zone>_applied_block` | Lets manual changes hold until the next block |
@@ -353,6 +354,69 @@ device itself. The editor shows this warning when you untick it.
   <img src="docs/controls.png" alt="The controls expander showing Heat, Cool, Heat-Cool, Off and Eco buttons plus fan timer chips" width="420">
 </p>
 
+### Off-peak comfort
+
+On days that cost less to run - typically weekends, plus utility holidays - you can prefer
+comfort over economy without touching your schedule. Point `features.off_peak_entity` (editor:
+**Off-peak comfort**) at a switch or binary sensor that is **ON when today is off-peak**. While
+it is on, the engine applies each block moved toward comfort by the offset: cooling setpoints
+lower, heating setpoints higher, `heat_cool` bands widened, `off` blocks untouched. The card
+shows an **Off-peak** chip next to the next-block line and the next-block temperature reflects
+the adjusted target. If the flag is wrong for a day (a holiday your utility does not observe),
+tap the chip to **pause off-peak for today** - it resumes by itself at midnight.
+
+The card deliberately consumes ONE boolean and never reads calendars itself, so all the day
+judgement stays in an entity you own and can extend. The recommended recipe is two helpers:
+
+1. **A local calendar for the exceptions.** Settings → Devices & Services → Helpers → Create
+   helper → **Local calendar**, e.g. "Peak Holidays". Add an all-day event for each utility
+   holiday. (A subscribed ICS calendar works identically.)
+2. **A template binary sensor combining weekend + calendar.** Create helper → **Template** →
+   *Template a binary sensor*, e.g. "Off Peak Today":
+
+   ```jinja
+   {{ now().weekday() >= 5 or is_state('calendar.peak_holidays', 'on') }}
+   ```
+
+   `weekday()` is 0=Mon…6=Sun, so `>= 5` means Sat/Sun. An all-day calendar event reports `on`
+   for that whole day. Weekends-only: drop the calendar term. Holidays-only: drop the weekday
+   term. A utility with seasonal windows can extend the same template - which is exactly why
+   the logic belongs to you, and any existing peak/off-peak automation can drive it on day one.
+
+The offset itself lives in a provisioned helper (default 2°, range 0-10) on the settings
+**Tuning** tab, so you can tune it any time without re-provisioning. The engine fails safe: if
+the entity is missing or unavailable, the schedule applies exactly as written. On heat_cool
+blocks the adjustment is capped so at least a 2° gap always survives between the two setpoints.
+
+One nuance to the "manual changes hold until the next block" rule on off-peak installs: an
+off-peak flip (or an offset tune) mid-block re-applies the schedule within 15 minutes, which
+also releases a manual hold made during that block. That is the trade that makes a holiday
+comfortable from its first block.
+
+### Comfort steering
+
+A thermostat cools its whole zone from one sensor in one spot. When what you actually care
+about is a different room ("cool the office to 76"), enable `features.steering` and tap that
+room on the card: pick a target and a duration, and the card drives the thermostat until THAT
+room reaches the target - by commanding `thermostat reading - (room reading - target)`, clamped
+to a tunable band and to a max offset from your scheduled setpoint. The rest of the zone may
+overshoot while the room catches up; that is the point, not a bug. When the time is up (or you
+cancel), the schedule takes the zone back automatically.
+
+Worth knowing:
+
+- **Cool-only for now.** Steering acts on cooling blocks; heating support can follow.
+- **The schedule engine steps aside** while an override runs, and re-asserts the block within
+  15 minutes of it ending.
+- **Refusals are visible.** A stale or unavailable room sensor refuses to start an override; a
+  disabled zone or an active standby preset disables Start with the reason shown. Disabling a
+  zone mid-override cancels it - the kill switch outranks everything.
+- **Room by time of day (dayparts).** On the settings Zones tab you can map stretches of the
+  day to rooms ("nights follow the bedroom"). During such a daypart the zone steers its
+  scheduled setpoint to that room continuously. A manual override from the main screen always
+  wins until it expires, then the daypart resumes.
+- Tunables (band, max offset, default duration) live on the settings **Tuning** tab.
+
 ### Removing the card does NOT remove what it created
 
 > [!CAUTION]
@@ -458,8 +522,8 @@ Assistant's own schedule editor — the card reads whatever is there.
 > Hand-writing this YAML is supported but easy to get subtly wrong, because a config that looks
 > fine can still be missing a field that ends up baked into entity names. The clearest example is
 > `seasons[].key`: leave it out on two seasons and they collide, and the card refuses to provision
-> until you give each one its own. Leave it out on a single season and the card still works, but
-> that season's schedule row will not open. Other fields silently fall back to defaults you may not
+> until you give each one its own. Leave it out on a single season and the card still works
+> (since 0.7.3 its schedule row opens too). Other fields silently fall back to defaults you may not
 > have intended.
 >
 > If you do write it by hand, run the dry-run (gear icon → **Setup** tab → **Run dry-run preview**)
@@ -499,6 +563,10 @@ features:
                                       # down while this helper is on
   eco_preset: away                    # optional: standby preset the engine
                                       # respects ('eco' default; false disables)
+  off_peak_entity: binary_sensor.off_peak_today  # optional: ON = today is off-peak,
+                                      # schedule applies with extra comfort
+  off_peak_offset: 2                  # optional: degrees of extra comfort
+                                      # (initial value for the offset helper)
 display:                              # optional, presentation only
   last_seen: always                   # always | ageing | off
   ageing_minutes: 45
@@ -515,11 +583,15 @@ display:                              # optional, presentation only
 | `seasons[].key` | string | — | **Required.** Fixed id used in this season's entity names. Choose it once and leave it — changing it renames every object for that season. |
 | `seasons[].name` | string | — | Display name. Safe to rename at any time; the `key` is what entity ids use. |
 | `seasons[].default_mode` | enum | — | `cool`, `heat`, `heat_cool`, or `off`. |
+| `season_switch` | enum | `manual` | Written by the visual editor; only `manual` does anything today (the auto modes are the planned recommender). |
 | `weather_entity` | string | — | Enables outdoor tracking, learning, and alerts. |
 | `features.fan_timer` | list | `[15,30,60]` | Fan timer presets, in minutes. Omitting the key keeps the defaults; set it to `[]` to hide the chips and skip the fan timers and their automations. |
 | `features.anomaly_alerts` | bool | `true` | Creates the evening runtime alert automation. |
 | `features.fan_guard` | string | — | A helper that suppresses fan-off while it is on. |
 | `features.eco_preset` | string \| `false` | `eco` | Standby preset the engine stands down for; `false` disables the gate. |
+| `features.off_peak_entity` | string | — | A `binary_sensor` or `input_boolean` that is **ON when today is off-peak**. While on, the engine applies each block moved toward comfort by the offset (cooling lower, heating higher; `off` blocks unchanged). Omit to keep the feature off. See [Off-peak comfort](#off-peak-comfort). |
+| `features.off_peak_offset` | number | `2` | Degrees of extra comfort, 0-10. This is the **initial value** for the provisioned offset helper - after Apply, tune the live value on the settings Tuning tab. |
+| `features.steering` | bool | `false` | Comfort steering (cool-only v1): tap a room to drive the zone until THAT room reaches a target, plus an optional room-by-time-of-day schedule. Adds per-zone helpers and a steering automation on the next Apply. See [Comfort steering](#comfort-steering). |
 | `display.last_seen` | enum | `always` | Age label on room rows that have a `last_seen` companion: `always`, `ageing` (only past the ageing threshold), or `off`. Rows without a companion never show one. |
 | `display.ageing_minutes` | number | `45` | Age at which the label turns amber (and appears, in `ageing` mode). |
 | `display.stale_hours` | number | `3` | Hours without a report before a reading is greyed out and marked stale. |
@@ -613,7 +685,6 @@ Being upfront so nothing surprises you. These are planned, not shipped:
 
 - **Automatic season switching.** The Manual selector works; the Semi-auto and Full-auto options
   are disabled placeholders for a forecast-driven recommender.
-- **Comfort steering** (compensating a thermostat's setpoint from a room sensor's reading).
 - **Consecutive-day anomaly alerts and actionable mobile notifications.** Today's alert is a
   single-evening check delivered as a persistent notification.
 - **Automatic area/category assignment** for created objects. Everything gets the `mzcs` label.

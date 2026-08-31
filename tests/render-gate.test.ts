@@ -86,6 +86,16 @@ describe('render gate watch list', () => {
     expect(SRC).toContain('lastSeenEntity: rs.last_seen');
   });
 
+  it('watches the config-derived off-peak day entity (item 7, QA round-5 finding 2)', () => {
+    // Like the item-36 companions, the off-peak entity comes from config, so
+    // the class scans cannot see it. Without this pin the watch push could be
+    // deleted with the whole suite green, and the off-peak chip + adjusted
+    // next-block line would freeze until unrelated traffic broke through.
+    expect(SRC).toContain('if (offPeak) ids.push(offPeak.entity);');
+    // And the renderer actually reads it.
+    expect(SRC).toContain('this.hass.states[op.entity]?.state');
+  });
+
   it('backs the wall-clock fallback with a real timer', () => {
     // Both QA reviewers flagged that the minute branch only ran when hass
     // traffic happened to arrive. A frozen sensor generates no traffic.

@@ -10,6 +10,7 @@ export type ZoneClass =
   | 'runtime_mirror'
   | 'expected_runtime'
   | 'target_room_select'
+  | 'steer_target'
   | 'sensor_schedule'
   | 'applied_block_marker'
   | 'zone_enabled'
@@ -30,6 +31,8 @@ export type GlobalClass =
   | 'steer_min_setpoint'
   | 'steer_max_setpoint'
   | 'steer_max_offset'
+  | 'off_peak_offset'
+  | 'off_peak_paused_on'
   | 'next_block_sensor'
   | 'outdoor_temp_sensor'
   | 'outdoor_daily_mean'
@@ -51,6 +54,7 @@ const ZONE_CLASS_DEFS: Record<ZoneClass, { domain: string; suffix: string }> = {
   runtime_mirror: { domain: 'sensor', suffix: 'runtime_mirror' },
   expected_runtime: { domain: 'sensor', suffix: 'expected_runtime' },
   target_room_select: { domain: 'input_select', suffix: 'target_room' },
+  steer_target: { domain: 'input_number', suffix: 'steer_target' },
   sensor_schedule: { domain: 'schedule', suffix: 'sensor_schedule' },
   applied_block_marker: { domain: 'input_text', suffix: 'applied_block' },
   zone_enabled: { domain: 'input_boolean', suffix: 'enabled' },
@@ -72,6 +76,8 @@ const GLOBAL_CLASS_DEFS: Record<GlobalClass, { domain: string; suffix: string }>
   steer_min_setpoint: { domain: 'input_number', suffix: 'steer_min_setpoint' },
   steer_max_setpoint: { domain: 'input_number', suffix: 'steer_max_setpoint' },
   steer_max_offset: { domain: 'input_number', suffix: 'steer_max_offset' },
+  off_peak_offset: { domain: 'input_number', suffix: 'off_peak_offset' },
+  off_peak_paused_on: { domain: 'input_text', suffix: 'off_peak_paused_on' },
   next_block_sensor: { domain: 'sensor', suffix: 'next_block' },
   outdoor_temp_sensor: { domain: 'sensor', suffix: 'outdoor_temp' },
   outdoor_daily_mean: { domain: 'sensor', suffix: 'outdoor_daily_mean' },

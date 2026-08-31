@@ -96,8 +96,18 @@ One row per config shape that has ever changed. Add a row and a compat test in t
 | `features` | may be absent | present | `normalizeCardConfig` + `resolve*` |
 | `zones[].room_sensors[].last_seen` | absent (pre-0.7.4) | optional timestamp entity id | `normalizeRoomSensors` (junk stripped silently) |
 | `display` | absent (pre-0.7.4) | `{ last_seen, ageing_minutes, stale_hours }` | `resolveDisplay` |
+| `features.off_peak_entity` | absent (pre-0.7.5) | optional entity id; absent/blank = feature off | `resolveOffPeak` |
+| `features.off_peak_offset` | absent (pre-0.7.5) | optional helper SEED (default 2, clamped 0-10) | `resolveOffPeak` |
+| `features.steering` | absent (pre-0.7.5) | optional boolean; only `true` enables | `provisionInputFromConfig` (strict `=== true`) |
 
-R2 note for the two rows above: both ship reader and writer in the same release, which R2's
+The three 0.7.5 rows (`features.off_peak_*` and `features.steering`) ride the same exemption as
+the 0.7.4 pair below:
+additive keys inside `features`, which every prior bundle spreads through untouched and no
+generator or renderer reads - a cached old bundle on a new-shape config degrades to exactly its
+old behavior. The engine-safety half is pinned by the off-peak compat cases: an absent option
+provisions and signs byte-identically to the pre-0.7.5 shape.
+
+R2 note for the two 0.7.4 rows: both ship reader and writer in the same release, which R2's
 letter forbids. The exemption is deliberate and verified, not an oversight: both are ADDITIVE
 keys that the previous bundle provably ignores - 0.7.3's `normalizeCardConfig` spreads unknown
 top-level keys through untouched, and its `normalizeRoomSensors` passes object rows with unknown
@@ -163,9 +173,9 @@ a fully-applied install replans to create 0 / adopt 0 / update 0 / delete 0. **I
 `fetchExisting`'s orphan-schedule fallback claims the entity even though the season parser cannot.
 
 So the card **leaves a single keyless season alone**. Refusing it would have been a breaking change
-to working software, which R3 forbids without an explicit decision. Its real defect is narrower and
-is tracked separately: the card's schedule drawer looks for `..._<slug of the season name>`, which
-does not exist, so that row is dead.
+to working software, which R3 forbids without an explicit decision. Its one-time side defect - the
+schedule drawer looking the entity up by name slug and finding nothing - was fixed in 0.7.3 by
+`resolveSeasonKey`, so the row opens too.
 
 **Season sets whose keys collide ARE refused** - duplicate keys, or two-plus seasons with no key
 at all, whenever at least one zone exists to collide in. Every such config already threw at v0.7.1
