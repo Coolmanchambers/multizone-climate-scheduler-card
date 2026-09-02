@@ -2575,7 +2575,7 @@
     "kind": "automation",
     "spec": {
       "alias": "Climate: schedule engine",
-      "sig": "26c690bb"
+      "sig": "f32b0571"
     }
   },
   {
@@ -2591,7 +2591,7 @@
     "kind": "automation",
     "spec": {
       "alias": "Climate: runtime learning",
-      "sig": "ab1675eb"
+      "sig": "9060cb64"
     }
   },
   {

@@ -1,12 +1,21 @@
 [
   {
+    "id": "timer.climate_zone_one_fan",
+    "kind": "helper",
+    "spec": {
+      "name": "Climate Zone One fan",
+      "restore": true
+    }
+  },
+  {
     "id": "binary_sensor.climate_zone_one_running",
     "kind": "template_sensor",
     "spec": {
       "name": "Climate Zone One running"
     },
     "meta": {
-      "source": "hvac_action"
+      "source": "hvac_action",
+      "power": "sensor.zone_one_power"
     }
   },
   {
@@ -555,6 +564,14 @@
           }
         ]
       }
+    }
+  },
+  {
+    "id": "timer.climate_zone_two_fan",
+    "kind": "helper",
+    "spec": {
+      "name": "Climate Zone Two fan",
+      "restore": true
     }
   },
   {
@@ -1113,6 +1130,14 @@
           }
         ]
       }
+    }
+  },
+  {
+    "id": "timer.climate_zone_three_fan",
+    "kind": "helper",
+    "spec": {
+      "name": "Climate Zone Three fan",
+      "restore": true
     }
   },
   {
@@ -1870,6 +1895,30 @@
     "spec": {
       "alias": "Climate: runtime anomaly alert",
       "sig": "34cfb90d"
+    }
+  },
+  {
+    "id": "automation:climate_mzcs_fan_timer_zone_one",
+    "kind": "automation",
+    "spec": {
+      "alias": "Climate: Zone One fan timer finished",
+      "sig": "fac7b42f"
+    }
+  },
+  {
+    "id": "automation:climate_mzcs_fan_timer_zone_two",
+    "kind": "automation",
+    "spec": {
+      "alias": "Climate: Zone Two fan timer finished",
+      "sig": "19dee477"
+    }
+  },
+  {
+    "id": "automation:climate_mzcs_fan_timer_zone_three",
+    "kind": "automation",
+    "spec": {
+      "alias": "Climate: Zone Three fan timer finished",
+      "sig": "e226bee9"
     }
   }
 ]

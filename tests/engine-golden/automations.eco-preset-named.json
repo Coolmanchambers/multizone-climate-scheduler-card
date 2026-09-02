@@ -2,7 +2,7 @@
   "climate_mzcs_engine": {
     "id": "climate_mzcs_engine",
     "alias": "Climate: schedule engine",
-    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Applies the active season's schedule block to each ENABLED zone at block transitions. Per-zone applied-block markers mean manual changes and external raises HOLD until the next block; the 15-minute tick only recovers missed transitions. Zones stand down while their 'away' preset is active. heat_cool blocks apply dual setpoints. [mzcs-sig:62f37a13]",
+    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Applies the active season's schedule block to each ENABLED zone at block transitions. Per-zone applied-block markers mean manual changes and external raises HOLD until the next block; the 15-minute tick only recovers missed transitions. Zones stand down while their 'away' preset is active. heat_cool blocks apply dual setpoints. On off-peak days (per the configured entity) applied setpoints shift toward comfort by the off-peak offset helper. [mzcs-sig:52efa429]",
     "mode": "queued",
     "max": 5,
     "triggers": [
@@ -86,9 +86,15 @@
               }
             },
             {
+              "alias": "Compute the applied-block marker",
+              "variables": {
+                "mark": "{{ season ~ '|' ~ blk ~ '|' ~ blk_mode ~ '|' ~ blk_cool ~ '|' ~ blk_heat }}"
+              }
+            },
+            {
               "alias": "Skip when zone disabled, already applied, standby preset active, or no block data",
               "condition": "template",
-              "value_template": "{{ is_state(repeat.item.enabled, 'on') and blk is not none and blk != states(repeat.item.marker) and state_attr(repeat.item.climate, 'preset_mode') != 'away' }}"
+              "value_template": "{{ is_state(repeat.item.enabled, 'on') and blk is not none and states(repeat.item.climate) not in ['unavailable', 'unknown'] and mark != states(repeat.item.marker) and state_attr(repeat.item.climate, 'preset_mode') != 'away' }}"
             },
             {
               "alias": "Apply the block (dual range, off, or single target)",
@@ -167,7 +173,7 @@
                 "entity_id": "{{ repeat.item.marker }}"
               },
               "data": {
-                "value": "{{ blk }}"
+                "value": "{{ mark }}"
               }
             }
           ]
@@ -209,7 +215,7 @@
   "climate_mzcs_runtime_learning": {
     "id": "climate_mzcs_runtime_learning",
     "alias": "Climate: runtime learning",
-    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Nightly EMA update of each zone's runtime-per-cooling-degree-day factor. Skips mild days; first valid day seeds directly. [mzcs-sig:ab1675eb]",
+    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Nightly EMA update of each zone's runtime-per-cooling-degree-day factor. Skips mild days; first valid day seeds directly. [mzcs-sig:9060cb64]",
     "mode": "single",
     "triggers": [
       {
@@ -264,12 +270,13 @@
             },
             {
               "alias": "Write the new k",
+              "continue_on_error": true,
               "action": "input_number.set_value",
               "target": {
                 "entity_id": "{{ repeat.item.k }}"
               },
               "data": {
-                "value": "{{ ((runtime_h / cdd) if old_k == 0 else (alpha * (runtime_h / cdd) + (1 - alpha) * old_k)) | round(2) }}"
+                "value": "{{ [ ((runtime_h / cdd) if old_k == 0 else (alpha * (runtime_h / cdd) + (1 - alpha) * old_k)), 10 ] | min | round(2) }}"
               }
             }
           ]

@@ -99,6 +99,7 @@ One row per config shape that has ever changed. Add a row and a compat test in t
 | `features.off_peak_entity` | absent (pre-0.7.5) | optional entity id; absent/blank = feature off | `resolveOffPeak` |
 | `features.off_peak_offset` | absent (pre-0.7.5) | optional helper SEED (default 2, clamped 0-10) | `resolveOffPeak` |
 | `features.steering` | absent (pre-0.7.5) | optional boolean; only `true` enables | `provisionInputFromConfig` (strict `=== true`) |
+| `zones[].power_entity` | absent (pre-0.7.7) | optional power sensor id; running-sensor CREATION meta only, never compared | `provisionInputFromConfig` (trimmed; blank = absent) |
 
 The three 0.7.5 rows (`features.off_peak_*` and `features.steering`) ride the same exemption as
 the 0.7.4 pair below:
@@ -106,6 +107,12 @@ additive keys inside `features`, which every prior bundle spreads through untouc
 generator or renderer reads - a cached old bundle on a new-shape config degrades to exactly its
 old behavior. The engine-safety half is pinned by the off-peak compat cases: an absent option
 provisions and signs byte-identically to the pre-0.7.5 shape.
+
+The 0.7.7 row (`zones[].power_entity`) rides the same exemption: an additive zone key the old
+bundle provably ignores (the pre-0.7.7 editor's `_setZone` spreads unknown zone keys through
+untouched, and the pre-0.7.7 `provisionInputFromConfig` never reads it), pinned by the
+power-heuristic compat cases: absent, blank, and set all provision the same differ-compared
+spec, and no automation signature moves.
 
 R2 note for the two 0.7.4 rows: both ship reader and writer in the same release, which R2's
 letter forbids. The exemption is deliberate and verified, not an oversight: both are ADDITIVE
@@ -170,7 +177,8 @@ one. Verified against released v0.7.1: a single keyless season provisions, the g
 engine automation resolves and applies its blocks against `schedule.<prefix>_<zone>_undefined`, and
 a fully-applied install replans to create 0 / adopt 0 / update 0 / delete 0. **It converges.**
 (27 objects at one zone and one season, not the 24 an earlier draft claimed - measured.)
-`fetchExisting`'s orphan-schedule fallback claims the entity even though the season parser cannot.
+`fetchExisting` claims the entity through the live engine automation's schedule list (0.7.7) even
+though the season parser cannot; the card also passes `String(key)` so the parser matches too.
 
 So the card **leaves a single keyless season alone**. Refusing it would have been a breaking change
 to working software, which R3 forbids without an explicit decision. Its one-time side defect - the

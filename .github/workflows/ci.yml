@@ -21,6 +21,9 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      # The committed bundle is what HACS serves between releases; a source
+      # change pushed without a rebuild used to pass CI silently (0.7.7 review).
+      - run: git diff --exit-code dist/
       - uses: actions/upload-artifact@v4
         with:
           name: multizone-climate-scheduler-card

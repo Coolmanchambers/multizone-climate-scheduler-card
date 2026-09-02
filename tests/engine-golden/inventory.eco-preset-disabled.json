@@ -1869,7 +1869,7 @@
     "kind": "automation",
     "spec": {
       "alias": "Climate: schedule engine",
-      "sig": "5bd0ad9b"
+      "sig": "ea548b71"
     }
   },
   {
@@ -1885,7 +1885,7 @@
     "kind": "automation",
     "spec": {
       "alias": "Climate: runtime learning",
-      "sig": "ab1675eb"
+      "sig": "9060cb64"
     }
   },
   {

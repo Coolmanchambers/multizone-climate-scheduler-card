@@ -50,6 +50,19 @@ export interface ZoneConfig {
    * than the entity's own friendly name.
    */
   room_sensors?: Array<string | RoomSensorConfig>;
+  /**
+   * Item 29: a power sensor (W) for this zone's equipment. When set, the
+   * PROVISIONED running sensor is generated as an OR of "drawing more than
+   * 100W" and "hvac active with the room >= 1° past setpoint" instead of the
+   * hvac_action template - for brands (e.g. SmartThings mini-splits) that
+   * never expose hvac_action, where power alone stalls for hours and the
+   * delta alone misses steady-state duty cycling (both measured live). Both
+   * failing together undercounts - the fail-safe direction. Absent = the
+   * hvac_action template, exactly as before. Applies at CREATION: an already
+   * provisioned running sensor keeps its template until deliberately
+   * recreated (template bodies are never compared or overwritten).
+   */
+  power_entity?: string;
 }
 
 export interface SeasonConfig {
@@ -213,6 +226,21 @@ export function normalizeCardConfig(config: MzcsCardConfig): MzcsCardConfig {
   }
   const rawZones = config.zones ?? [];
   if (rawZones.length > 4) throw new Error('A maximum of 4 zones is supported.');
+  // Shapes that pass here but throw inside render/shouldUpdate leave a blank
+  // card (and an editor that cannot open) instead of HA's config-error card
+  // (0.7.7 review C6). None of these ever provisioned, so refusing is R3-safe.
+  if (config.seasons !== undefined && !Array.isArray(config.seasons)) {
+    throw new Error('seasons must be a list of { key, name, default_mode } items.');
+  }
+  if (Array.isArray(config.seasons) && config.seasons.some((s) => !s || typeof s !== 'object')) {
+    throw new Error('Every seasons entry must be a { key, name, default_mode } item (an empty "-" is not one).');
+  }
+  rawZones.forEach((z, i) => {
+    if (!z || typeof z !== 'object') throw new Error(`Zone ${i + 1} must be a { entity, name } item.`);
+    if (z.room_sensors !== undefined && !Array.isArray(z.room_sensors)) {
+      throw new Error(`Zone ${i + 1}: room_sensors must be a list of sensor entity ids (one per line with a leading "-").`);
+    }
+  });
   const zones = rawZones.map((z) => ({
     ...z,
     name:

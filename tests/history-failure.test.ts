@@ -139,7 +139,10 @@ describe('failures survive whatever Home Assistant rejects with (QA R5)', () => 
 });
 
 describe('every card call site consumes the result discriminant (QA T2)', () => {
-  it('no fetch result is used without checking ok', async () => {
+  // 20 s budget: this scan reads and regex-walks the 4,000-line card source,
+  // which on a cold OneDrive cache under a full-suite load has exceeded the
+  // 5 s default twice (2026-09-01) - a flake, never a real failure.
+  it('no fetch result is used without checking ok', { timeout: 20_000 }, async () => {
     const { readFileSync } = await import('node:fs');
     const src = readFileSync(new URL('../src/multizone-climate-scheduler-card.ts', import.meta.url), 'utf8');
     // The regression these tests exist for lived in the CARD, not the adapter:

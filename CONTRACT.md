@@ -85,7 +85,11 @@ never collide in HA's name→object_id slugification (S12c incident rule).
 
 **Per zone:**
 - `timer.climate_<zone>_fan` + automation "Climate: <Zone> fan timer finished"
-- `binary_sensor.climate_<zone>_running` (template, from hvac_action) [adopted if pre-existing]
+- `binary_sensor.climate_<zone>_running` (template; from hvac_action, or - when the zone
+  configures `power_entity`, 0.7.7 item 29 - an OR of power-above-standby and an hvac-active
+  setpoint-delta check, for brands that never expose hvac_action - in `heat_cool` only the
+  power branch applies, the setpoint being a pair; the choice is CREATION-only
+  meta, never compared) [adopted if pre-existing]
 - `sensor.climate_<zone>_runtime_today` (history_stats; feeds today's figure and the learning
   automation. The runtime drawer's PAST days come from the running sensor's raw recorder history
   - history_stats entries carry no state_class, so they have no long-term statistics to read)
@@ -129,12 +133,21 @@ never collide in HA's name→object_id slugification (S12c incident rule).
   generator; a string names a different preset; `false` removes the gate). With
   `features.off_peak_entity` configured (0.7.5, item 7) the engine also computes applied
   setpoints on a shared adjustment step - cool minus / heat plus the live offset helper while
-  the entity is `on` and today is not paused - and the applied-block marker becomes
-  `<block>|op<adj>` so a mid-day flip or an offset tune re-applies within one safety tick;
-  without the option the generated output is byte-identical to 0.7.4
+  the entity is `on` and today is not paused - and the applied-block marker gains an
+  `|op<adj>` suffix so a mid-day flip or an offset tune re-applies within one safety tick.
+  **Marker (0.7.7):** `<season>|<block>|<mode>|<cool>|<heat>` - the block's CONTENT, not its
+  name alone, so a season switch or a same-named block with different setpoints applies at the
+  next trigger while a manual thermostat change still holds until the next block. The gate
+  also refuses an `unavailable`/`unknown` thermostat (a skipped service call is not "applied"),
+  and with steering on it keeps a zone whose thermostat is not yet cooling. Both changed the
+  engine signature deliberately in 0.7.7: every install plans one engine Update (and one
+  runtime-learning Update, see below).
 - "Climate: <Zone> fan timer finished" (per zone; stands down while the configured fan-guard
   helper is on)
-- "Climate: runtime learning" (nightly 23:58 EMA of k per zone; skips mild days; first valid
+- "Climate: runtime learning" (nightly 23:58 EMA of k per zone, clamped to the k helper's max
+  since 0.7.7 - the clamp is what keeps an out-of-range write from aborting the loop; the
+  step's `continue_on_error` only covers Home Assistant errors, not a range refusal; skips
+  mild days; first valid
   day seeds directly)
 - "Climate: runtime anomaly alert" (evening check, actual vs expected x margin, persistent
   notification; consecutive-days logic + iOS actionable/snooze are post-v1)
@@ -156,6 +169,8 @@ zones:
     room_sensors: [sensor.bedroom_3_temperature, ...]
     # room_sensors rows also accept {entity, name, last_seen} - last_seen names an
     # optional timestamp companion that joins that row's stale check and shows an age
+    # power_entity: sensor.upstairs_hvac_power   # optional (W): running detection for
+    #                               # brands without hvac_action; creation-only meta (§5)
   - entity: climate.downstairs_thermostat
     name: Downstairs
 seasons:
@@ -166,6 +181,10 @@ weather_entity: weather.forecast_home   # optional; enables the CDD learning cha
 features: { fan_timer: [15, 30, 60], anomaly_alerts: true, fan_guard: input_boolean.hvac_fan_guard }
 # features.eco_preset: 'away'   # optional: standby preset the engine respects ('eco' default;
 #                               # false disables the stand-down gate)
+# features.off_peak_entity: binary_sensor.off_peak_today   # optional (0.7.5, §5): ON = today
+#                               # is off-peak; the engine applies blocks shifted toward comfort
+# features.off_peak_offset: 2   # optional: creation seed for the offset helper (0-10)
+# features.steering: true       # optional (0.7.5, §7b): comfort steering objects + automation
 # display: { last_seen: always, ageing_minutes: 45, stale_hours: 3 }   # optional, presentation
 #                               # only - never reaches the engine or any provisioned object
 ```

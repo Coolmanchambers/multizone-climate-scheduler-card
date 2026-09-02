@@ -59,7 +59,15 @@ export function configSummary(raw: MzcsCardConfig): SummaryGroup[] {
         : sensors
             .map((rs) => `${rs.name ?? rs.entity}${rs.last_seen ? ' (last-seen ✓)' : ''}`)
             .join(', ');
-    return { label: z.name, value: z.entity, detail: rooms };
+    // Trimmed like provisionInputFromConfig resolves it: a whitespace-only
+    // value provisions NOTHING, so showing it would be the screen lying about
+    // behavior (QA 0.7.7, the item-40 class).
+    const power = typeof z.power_entity === 'string' ? z.power_entity.trim() : '';
+    return {
+      label: z.name,
+      value: z.entity,
+      detail: `${rooms}${power ? ` · power: ${power}` : ''}`,
+    };
   });
 
   // An absent seasons block MEANS Summer+Winter (provisionInputFromConfig

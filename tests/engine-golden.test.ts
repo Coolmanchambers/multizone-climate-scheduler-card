@@ -38,9 +38,9 @@ function golden(name: string): unknown {
  * shapes; the rest are specific to this fixture's zone and season names.
  */
 const PINNED: Record<string, string> = {
-  climate_mzcs_engine: '6e68985e',
+  climate_mzcs_engine: 'e8f4ca14',
   climate_mzcs_watchdog: 'd6ad29bd',
-  climate_mzcs_runtime_learning: 'ab1675eb',
+  climate_mzcs_runtime_learning: '9060cb64',
   climate_mzcs_runtime_alert: '34cfb90d',
   climate_mzcs_fan_timer_zone_one: 'fac7b42f',
   climate_mzcs_fan_timer_zone_two: '19dee477',
@@ -63,52 +63,60 @@ const PINNED: Record<string, string> = {
  * suppressing.
  */
 const PINNED_VARIANTS: Record<string, Record<string, string>> = {
-  'eco-preset-named': { engine: '62f37a13' },
-  'eco-preset-disabled': { engine: '5bd0ad9b' },
+  'eco-preset-named': { engine: '52efa429' },
+  'eco-preset-disabled': { engine: 'ea548b71' },
   'fan-guard': { fan_timer_zone_one: '53dcd274', fan_timer_zone_two: '5fba46bc', fan_timer_zone_three: 'd3b8f72e' },
   // These two DROP automations rather than changing them, so their surviving
   // signatures must equal the default's. Pinned anyway: a generator that started
   // varying on a feature flag would show up here first.
-  'fan-timer-off': { engine: '6e68985e', runtime_learning: 'ab1675eb', runtime_alert: '34cfb90d' },
+  'fan-timer-off': { engine: 'e8f4ca14', runtime_learning: '9060cb64', runtime_alert: '34cfb90d' },
   // Weather affects NO automation: its signatures must equal the default's
   // (item 37 - the variant exists to pin the conditional outdoor pair's false
   // branch). A weather-dependent generator change would show up here first.
-  'with-weather': { engine: '6e68985e', runtime_learning: 'ab1675eb', runtime_alert: '34cfb90d' },
-  'anomaly-alerts-off': { engine: '6e68985e', runtime_learning: 'ab1675eb', fan_timer_zone_one: 'fac7b42f' },
-  'single-zone': { engine: '08c752f4', runtime_learning: '9a20aee7', runtime_alert: '015c309b', fan_timer_zone_one: 'fac7b42f' },
+  'with-weather': { engine: 'e8f4ca14', runtime_learning: '9060cb64', runtime_alert: '34cfb90d' },
+  'anomaly-alerts-off': { engine: 'e8f4ca14', runtime_learning: '9060cb64', fan_timer_zone_one: 'fac7b42f' },
+  'single-zone': { engine: 'f91ace2a', runtime_learning: 'c86080e0', runtime_alert: '015c309b', fan_timer_zone_one: 'fac7b42f' },
   'four-zones': {
-    engine: 'd2673b28',
-    runtime_learning: '4d7bdff3',
+    engine: 'a2d5829e',
+    runtime_learning: '841bbc6c',
     runtime_alert: 'be454b0f',
     fan_timer_zone_one: 'fac7b42f',
     fan_timer_zone_two: '19dee477',
     fan_timer_zone_three: 'e226bee9',
     fan_timer_zone_four: '891b4085',
   },
-  'single-season': { engine: '23cee162' },
-  'three-seasons': { engine: '26c690bb' },
+  'single-season': { engine: '69382758' },
+  'three-seasons': { engine: 'f32b0571' },
+  // Item 47: an apostrophe season name changes the engine's season map key to
+  // the double-quoted form; nothing else reads seasons, so every other
+  // automation must keep its default hash.
+  'apostrophe-season': { engine: '8f61381b', runtime_learning: '9060cb64', fan_timer_zone_one: 'fac7b42f' },
+  // Item 29: a zone power sensor is running-sensor creation META only - every
+  // signature must equal the default's. A generator that started varying on
+  // it would show up here first.
+  'power-heuristic': { engine: 'e8f4ca14', runtime_learning: '9060cb64', fan_timer_zone_one: 'fac7b42f' },
   // Item 7: the off-peak entity moves the engine ONLY; every other automation
   // must keep its default hash.
-  'off-peak': { engine: '2a376799', runtime_learning: 'ab1675eb', fan_timer_zone_one: 'fac7b42f' },
+  'off-peak': { engine: '558184d5', runtime_learning: '9060cb64', fan_timer_zone_one: 'fac7b42f' },
   // Item 8: steering re-signs the engine (gate term + for_each key) and signs
   // the NEW steering automation; the rest keep their default hashes.
   steering: {
-    engine: '3d725ac4',
+    engine: 'f1347e4c',
     steering: '9d005136',
-    runtime_learning: 'ab1675eb',
+    runtime_learning: '9060cb64',
     fan_timer_zone_one: 'fac7b42f',
   },
   // The offset is a creation SEED read from a helper at runtime, so a custom
   // value must produce the SAME engine as the plain off-peak variant - a
   // config value leaking into the generator would show up here first.
-  'off-peak-custom-offset': { engine: '2a376799' },
+  'off-peak-custom-offset': { engine: '558184d5' },
 };
 
 /** The alternate-prefix instance, pinned separately - different id namespace. */
 const PINNED_ALT_PREFIX: Record<string, string> = {
-  hvac_mzcs_engine: 'fa818666',
+  hvac_mzcs_engine: '30c62efc',
   hvac_mzcs_watchdog: 'cfcd2866',
-  hvac_mzcs_runtime_learning: '9e1fa5cc',
+  hvac_mzcs_runtime_learning: '5463d825',
   hvac_mzcs_runtime_alert: '28a72788',
   hvac_mzcs_fan_timer_zone_one: 'cec04818',
   hvac_mzcs_fan_timer_zone_two: '7618fc60',

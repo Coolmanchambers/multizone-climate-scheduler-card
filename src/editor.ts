@@ -9,7 +9,7 @@ import type { MzcsCardConfig, ZoneConfig, SeasonConfig, BlockMode, LastSeenMode 
 import { normalizeCardConfig, normalizeRoomSensors, tidyRoomSensorRow, resolveDisplay, DEFAULT_AGEING_MINUTES, DEFAULT_STALE_HOURS } from './types';
 import { lastSeenSuggestion, planBulkLastSeen, applyBulkLastSeen, withLastSeen, type BulkLastSeenRow } from './lib/last-seen';
 import { defaultSeasons } from './lib/provisioning';
-import { slugify } from './lib/naming';
+import { slugify, RESERVED_SLUGS } from './lib/naming';
 import { EDITOR_TYPE } from './const';
 
 declare global {
@@ -53,6 +53,9 @@ export class MzcsCardEditor extends LitElement {
    * may still show, because it never writes without a click.
    */
   private _clearedLastSeen = new Set<string>();
+  /** Per-zone name-field refusals (item 43); keyed by zone index, new-identity
+   * writes so Lit re-renders. */
+  @state() private _zoneNameErr = new Map<number, string>();
 
   public setConfig(config: MzcsCardConfig): void {
     // Read what the CARD reads (item 40, docs/config-compatibility.md R1).
@@ -73,6 +76,8 @@ export class MzcsCardEditor extends LitElement {
     // A new config invalidates any open bulk preview: its zone indexes and
     // skip decisions were computed against the old one (QA finding, 2026-08-30).
     this._bulkLastSeen = null;
+    // Same index-validity reasoning for the name-refusal messages (QA 0.7.7).
+    this._zoneNameErr = new Map();
     this._config = {
       // Spread the whole config first: top-level keys this editor has no UI for
       // - `view_layout` and anything Lovelace adds later - were silently dropped
@@ -135,10 +140,17 @@ export class MzcsCardEditor extends LitElement {
 
   private _selector(selector: Record<string, unknown>, value: unknown, onChange: (v: unknown) => void, label?: string) {
     if (!this._ready || !customElements.get('ha-selector')) {
+      // Degraded mode (no ha-selector): a multi-entity picker takes a
+      // comma-separated list here, delivered as the string[] the real
+      // selector would send - the callbacks call .filter on it (0.7.7 review).
+      const multiple = Boolean((selector.entity as { multiple?: boolean } | undefined)?.multiple);
       return html`<input
-        .value=${typeof value === 'string' ? value : ''}
+        .value=${Array.isArray(value) ? value.join(', ') : typeof value === 'string' ? value : ''}
         placeholder=${label ?? ''}
-        @change=${(e: Event) => onChange((e.target as HTMLInputElement).value)}
+        @change=${(e: Event) => {
+          const raw = (e.target as HTMLInputElement).value;
+          onChange(multiple ? raw.split(',').map((s) => s.trim()).filter(Boolean) : raw);
+        }}
       />`;
     }
     return html`<ha-selector
@@ -251,7 +263,12 @@ export class MzcsCardEditor extends LitElement {
                 <span>Zone ${i + 1}</span>
                 <button
                   class="link danger"
-                  @click=${() => this._emit({ zones: zones.filter((_, zi) => zi !== i) })}
+                  @click=${() => {
+                    // Index-keyed refusal messages go stale when zones shift
+                    // (QA 0.7.7: the error re-rendered under the wrong zone).
+                    this._zoneNameErr = new Map();
+                    this._emit({ zones: (this._config?.zones ?? []).filter((_, zi) => zi !== i) });
+                  }}
                 >
                   Remove
                 </button>
@@ -266,19 +283,43 @@ export class MzcsCardEditor extends LitElement {
                 class="namefield"
                 .value=${z.name ?? ''}
                 placeholder="Display name"
-                @change=${(e: Event) =>
-                  this._setZone(i, { name: (e.target as HTMLInputElement).value })}
+                @change=${(e: Event) => {
+                  const el = e.target as HTMLInputElement;
+                  const name = el.value;
+                  // Item 43: a name whose slug is a reserved class suffix would
+                  // make this zone's entity ids parse as the card's own objects.
+                  // Refuse at entry; the field shows why and keeps the old name.
+                  if (RESERVED_SLUGS.has(slugify(name))) {
+                    el.value = this._config?.zones?.[i]?.name ?? '';
+                    const errs = new Map(this._zoneNameErr);
+                    errs.set(i, `"${name}" is reserved for the card's own entities - pick another name.`);
+                    this._zoneNameErr = errs;
+                    return;
+                  }
+                  if (this._zoneNameErr.has(i)) {
+                    const errs = new Map(this._zoneNameErr);
+                    errs.delete(i);
+                    this._zoneNameErr = errs;
+                  }
+                  this._setZone(i, { name });
+                }}
               />
+              ${this._zoneNameErr.has(i)
+                ? html`<p class="bad">${this._zoneNameErr.get(i)}</p>`
+                : nothing}
               ${this._selector(
                 { entity: { domain: 'sensor', device_class: 'temperature', multiple: true } },
                 normalizeRoomSensors(z.room_sensors).map((rs) => rs.entity),
                 (v) => {
                   // Keep every field the user already set (label, last_seen) as
                   // the selection changes - rebuilding rows from the id alone
-                  // silently drops them (the item-36 trap).
+                  // silently drops them (the item-36 trap). Rows come from
+                  // this._config, not the render-scope zone (item-45 pattern):
+                  // a label written earlier in the same update window must
+                  // survive this rebuild.
                   const ids = ((v as string[]) ?? []).filter(Boolean);
                   const byId = new Map(
-                    normalizeRoomSensors(z.room_sensors).map((rs) => [rs.entity, rs]),
+                    normalizeRoomSensors(this._config?.zones?.[i]?.room_sensors).map((rs) => [rs.entity, rs]),
                   );
                   this._setZone(i, {
                     room_sensors: ids.map((id) =>
@@ -300,7 +341,9 @@ export class MzcsCardEditor extends LitElement {
                       @change=${(e: Event) => {
                         const label = (e.target as HTMLInputElement).value.trim();
                         this._setZone(i, {
-                          room_sensors: normalizeRoomSensors(z.room_sensors).map((x) =>
+                          room_sensors: normalizeRoomSensors(
+                            this._config?.zones?.[i]?.room_sensors,
+                          ).map((x) =>
                             tidyRoomSensorRow(
                               x.entity === rs.entity ? { ...x, name: label || undefined } : x,
                             ),
@@ -312,13 +355,37 @@ export class MzcsCardEditor extends LitElement {
                   ${this._renderLastSeenField(i, rs.entity, rs.last_seen)}
                 `,
               )}
+              ${this._selector(
+                { entity: { domain: 'sensor', device_class: 'power' } },
+                z.power_entity ?? '',
+                (v) => {
+                  // Item 29: reaches only the running sensor's CREATION
+                  // template - see the hint below.
+                  const id = typeof v === 'string' ? v.trim() : '';
+                  this._setZone(i, { power_entity: id || undefined });
+                },
+                'Power sensor (optional)',
+              )}
+              ${z.power_entity?.trim()
+                ? html`<p class="muted">
+                    With a power sensor, the provisioned "running" detection turns on when the
+                    sensor reads over 100 W (it must report watts, not kW) or when hvac is active
+                    with the room past setpoint (heat_cool relies on the power reading alone) -
+                    instead of hvac_action, for brands that never report it (some mini-splits).
+                    Applies when the running sensor is created; an existing one keeps its
+                    detection until you delete it and re-Apply.
+                  </p>`
+                : nothing}
             </div>
           `,
         )}
         ${zones.length < 4
           ? html`<button
               class="link"
-              @click=${() => this._emit({ zones: [...zones, { entity: '', name: `Zone ${zones.length + 1}` }] })}
+              @click=${() => {
+                const cur = this._config?.zones ?? [];
+                this._emit({ zones: [...cur, { entity: '', name: `Zone ${cur.length + 1}` }] });
+              }}
             >
               + Add zone
             </button>`
@@ -333,18 +400,27 @@ export class MzcsCardEditor extends LitElement {
                 .value=${s.name}
                 @change=${(e: Event) => {
                   const name = (e.target as HTMLInputElement).value;
+                  // this._config, not the render-scope seasons (item-45
+                  // pattern): two change events inside one Lit update window
+                  // must not lose the first edit.
+                  const cur = this._config?.seasons ?? [];
+                  const row = cur[i];
+                  if (!row) return;
                   // Season keys FREEZE once the season's schedules exist in HA:
                   // schedule entity ids embed the key, so re-deriving it from a
                   // renamed season would make the differ delete real schedules
                   // and re-seed placeholders. Before provisioning, the key may
                   // still follow the name (nicer entity ids).
                   const newKey = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-                  // Keep the old key when frozen, empty, or when the new key
-                  // would collide with another season's key (QA-R C2-5).
-                  const collides = seasons.some((x, xi) => xi !== i && x.key === newKey);
+                  // Keep the old key when frozen, empty, when the new key would
+                  // collide with another season's key (QA-R C2-5), or when it
+                  // spells a reserved class suffix (item 43 - a reserved key
+                  // makes the schedule id collide with the card's own objects).
+                  const collides =
+                    cur.some((x, xi) => xi !== i && x.key === newKey) || RESERVED_SLUGS.has(newKey);
                   const key =
-                    this._seasonProvisioned(s.key) || !newKey || collides ? s.key : newKey;
-                  const next = seasons.map((x, xi) => (xi === i ? { ...x, name, key } : x));
+                    this._seasonProvisioned(row.key) || !newKey || collides ? row.key : newKey;
+                  const next = cur.map((x, xi) => (xi === i ? { ...x, name, key } : x));
                   this._emit({ seasons: next });
                 }}
               />
@@ -353,7 +429,9 @@ export class MzcsCardEditor extends LitElement {
                 @change=${(e: Event) => {
                   const mode = (e.target as HTMLSelectElement).value as BlockMode;
                   this._emit({
-                    seasons: seasons.map((x, xi) => (xi === i ? { ...x, default_mode: mode } : x)),
+                    seasons: (this._config?.seasons ?? []).map((x, xi) =>
+                      xi === i ? { ...x, default_mode: mode } : x,
+                    ),
                   });
                 }}
               >
@@ -363,7 +441,8 @@ export class MzcsCardEditor extends LitElement {
               </select>
               <button
                 class="link danger"
-                @click=${() => this._emit({ seasons: seasons.filter((_, xi) => xi !== i) })}
+                @click=${() =>
+                  this._emit({ seasons: (this._config?.seasons ?? []).filter((_, xi) => xi !== i) })}
               >
                 Remove
               </button>
@@ -374,13 +453,11 @@ export class MzcsCardEditor extends LitElement {
           ? html`<button
               class="link"
               @click=${() => {
-                let n = seasons.length + 1;
-                while (seasons.some((s) => s.key === `season_${n}`)) n++;
+                const cur = this._config?.seasons ?? [];
+                let n = cur.length + 1;
+                while (cur.some((s) => s.key === `season_${n}`)) n++;
                 this._emit({
-                  seasons: [
-                    ...seasons,
-                    { key: `season_${n}`, name: `Season ${n}`, default_mode: 'cool' },
-                  ],
+                  seasons: [...cur, { key: `season_${n}`, name: `Season ${n}`, default_mode: 'cool' }],
                 });
               }}
             >
@@ -413,7 +490,8 @@ export class MzcsCardEditor extends LitElement {
             @change=${(e: Event) =>
               this._emit({
                 features: {
-                  ...c.features,
+                  // this._config, not the render-scope config (item-45 pattern).
+                  ...this._config?.features,
                   fan_timer: (e.target as HTMLInputElement).checked ? [15, 30, 60] : [],
                 },
               })}
@@ -426,7 +504,10 @@ export class MzcsCardEditor extends LitElement {
             .checked=${c.features?.anomaly_alerts ?? true}
             @change=${(e: Event) =>
               this._emit({
-                features: { ...c.features, anomaly_alerts: (e.target as HTMLInputElement).checked },
+                features: {
+                  ...this._config?.features,
+                  anomaly_alerts: (e.target as HTMLInputElement).checked,
+                },
               })}
           />
           Runtime anomaly alerts
@@ -437,7 +518,7 @@ export class MzcsCardEditor extends LitElement {
             .checked=${c.features?.eco_preset !== false}
             @change=${(e: Event) => {
               const on = (e.target as HTMLInputElement).checked;
-              const features = { ...c.features };
+              const features = { ...this._config?.features };
               if (on) delete features.eco_preset;
               else features.eco_preset = false;
               this._emit({ features });
@@ -455,7 +536,7 @@ export class MzcsCardEditor extends LitElement {
                     const el = e.target as HTMLInputElement;
                     const name = el.value.replace(/['"\\]/g, '').trim() || 'eco';
                     el.value = name;
-                    const features = { ...c.features };
+                    const features = { ...this._config?.features };
                     if (name === 'eco') delete features.eco_preset;
                     else features.eco_preset = name;
                     this._emit({ features });

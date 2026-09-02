@@ -11,7 +11,9 @@ import {
   fanAutomation,
   steeringAutomation,
 } from '../src/lib/automation-payloads';
-import type { ProvisionInput } from '../src/lib/provisioning';
+import type { ProvisionInput, Plan } from '../src/lib/provisioning';
+import { executePlan, execContextFor } from '../src/provision-exec';
+import type { HassLike } from '../src/ha-types';
 
 /**
  * QA finding NEW-3: the executor has a THIRD hand-built uid -> generator map.
@@ -99,6 +101,64 @@ describe('what the executor WRITES equals what the differ SIGNS', () => {
   it('a fan uid for a zone that is not configured yields no payload', () => {
     expect(executorPayload('climate_mzcs_fan_timer_ghost_zone', canonicalInput())).toBeNull();
   });
+});
+
+/**
+ * 0.7.7 review (adversary HIGH-1): the transcription above is only a mirror.
+ * Two executor mutations - "off-peak only when steering" and "eco preset
+ * defaulted to eco" - kept every scanned token, wrote an engine whose
+ * embedded signature differed from the differ's, and the whole suite stayed
+ * green. So the REAL executor is driven here: executePlan on an automation
+ * create with a capturing hass, the ExecContext built by the same builder the
+ * card uses, for every variant; what it POSTs must equal the signed payload.
+ */
+describe('the REAL executor writes what the differ signs (executed, not transcribed)', () => {
+  for (const [name, overrides] of CONFIGS) {
+    const input = canonicalInput(overrides);
+    const signed = allGeneratedPayloads(input);
+    const sigs = signaturesFor(input);
+
+    it(`${name}: executePlan POSTs the signed payload for every automation uid`, async () => {
+      const posted = new Map<string, Record<string, unknown>>();
+      // Registry entries for what was posted, so the executor's label step
+      // resolves immediately instead of waiting out its registry-lag retries.
+      const registry = new Map<string, string>();
+      const slug = (n: string) => n.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+      const hass: HassLike = {
+        states: {},
+        callService: async () => undefined,
+        callWS: async (msg) => {
+          if (msg.type === 'config/entity_registry/get_entries') {
+            const ids = (msg.entity_ids as string[]) ?? [];
+            return Object.fromEntries(
+              ids.map((id) => [id, registry.has(id) ? { unique_id: registry.get(id), labels: [] } : null]),
+            );
+          }
+          return {};
+        },
+        callApi: async (method, path, data) => {
+          const m = path.match(/^config\/automation\/config\/(.+)$/);
+          if (m && method === 'GET') throw { status_code: 404 };
+          if (m && method === 'POST') {
+            posted.set(m[1]!, data as Record<string, unknown>);
+            registry.set(`automation.${slug(String((data as Record<string, unknown>).alias))}`, m[1]!);
+            return { result: 'ok' };
+          }
+          return {};
+        },
+      };
+      const p: Plan = { create: [], adopt: [], update: [], delete: [], noop: [] };
+      for (const uid of Object.keys(signed)) {
+        p.create.push({ op: 'create', id: `automation:${uid}`, kind: 'automation', spec: {} });
+      }
+      const res = await executePlan(hass, p, execContextFor(input, () => {}));
+      expect(res.created, name).toBe(Object.keys(signed).length);
+      for (const uid of Object.keys(signed)) {
+        expect(posted.get(uid), `${name}/${uid}`).toEqual(signed[uid]);
+        expect(parseSignature(posted.get(uid)?.description), `${name}/${uid}`).toBe(sigs[uid]);
+      }
+    }, 20_000);
+  }
 });
 
 describe('the executor mapping above still mirrors its source', () => {

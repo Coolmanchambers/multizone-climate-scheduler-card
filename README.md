@@ -86,12 +86,12 @@ or you want the card to control equipment directly (it never does — automation
 
 | Visual schedule editor | Runtime history |
 |---|---|
-| <img src="docs/schedule.png" alt="Schedule editor with Every day, Weekday-Weekend and Individual days chips above colored temperature strips for weekdays and weekend" width="380"> | <img src="docs/runtime.png" alt="Runtime drawer showing daily HVAC runtime for the last 10 days, the oldest day marked as partial" width="380"> |
-| Colored temperature strips per season. Tap a block to edit it. Switch between one schedule for every day, weekday/weekend, or all seven days. | Daily runtime per zone for the last 10 days. Tap a day to see its individual run segments and setpoint changes. |
+| <img src="docs/schedule.png" alt="Schedule editor with Every day, Weekday-Weekend and Individual days chips above colored temperature strips for weekdays and weekend" width="380"> | <img src="docs/runtime.png" alt="Runtime drawer showing daily HVAC runtime for the recent days the recorder holds, the oldest day marked as partial" width="380"> |
+| Colored temperature strips per season. Tap a block to edit it. Switch between one schedule for every day, weekday/weekend, or all seven days. | Daily runtime per zone for the recent days your recorder still holds (up to 10). Tap a day to see its individual run segments and setpoint changes. |
 
 | Change-set preview | Managed objects |
 |---|---|
-| <img src="docs/preview.png" alt="Settings panel on the Setup tab listing every object that will be created, with an Apply 48 changes button" width="380"> | <img src="docs/objects.png" alt="Objects tab listing schedules and helpers with status chips" width="380"> |
+| <img src="docs/preview.png" alt="Settings panel on the Setup tab with the competing-writer scan and every object that will be created, with the Apply button" width="380"> | <img src="docs/objects.png" alt="Objects tab listing schedules and helpers with status chips" width="380"> |
 | **Nothing is ever written silently.** Every apply shows exactly what will be created, adopted, edited, or deleted — by name — and waits for you to confirm. | The Objects tab inventories everything the card manages, each with a status — including automations you've hand-edited, which it will never touch. |
 
 | Scheduling switches | Settings, tabbed |
@@ -144,6 +144,11 @@ nothing reads them today.
 **Automations:** the schedule engine, one fan-timer automation per zone, nightly runtime
 learning, the runtime anomaly alert, and an engine watchdog.
 
+**Only with a feature enabled:** off-peak comfort adds its offset and pause helpers;
+comfort steering adds, per zone, a target-room selector, an override timer, a target
+temperature, and a sensor schedule, plus four global tunables and the steering automation.
+The dry-run lists every one before anything is written.
+
 </details>
 
 The **schedule engine** automation applies the active season's current block to each *enabled*
@@ -154,13 +159,13 @@ re-asserts the current block if a transition was ever missed.
 
 ## Requirements
 
-- A current Home Assistant release (developed and tested against 2026.x; requires native
-  `schedule` helpers with custom block data).
+- Home Assistant **2024.8 or newer** (enforced by HACS; developed and tested against 2026.x;
+  requires native `schedule` helpers with custom block data).
 - One to four `climate` entities.
 - **Optional:** a `weather` entity — enables outdoor-temperature tracking, runtime learning,
-  and the anomaly alert. Everything else works without it, but see the note on the outdoor
-  sensors under [Troubleshooting](#troubleshooting): without a weather entity the preview keeps
-  listing two of them as pending, by design.
+  and the anomaly alert. Everything else works without one, and the preview settles to
+  all-Unchanged either way (the two outdoor sensors are simply not created until a weather
+  entity exists).
 - **Optional:** temperature sensors per room, for the deviation chips.
 
 ---
@@ -247,7 +252,7 @@ Open the card's gear icon → **Setup** tab → **Run dry-run preview**. You get
 of every object that will be created. Read it, then press **Apply**.
 
 <p align="center">
-  <img src="docs/preview.png" alt="The dry-run preview listing every object to be created, with an Apply 48 changes button underneath" width="420">
+  <img src="docs/preview.png" alt="The dry-run preview with the competing-writer scan and every object to be created, with the Apply button underneath" width="420">
 </p>
 
 This creates the backend objects. **Every zone is created with scheduling switched off**, so at
@@ -334,6 +339,12 @@ If you nudge the temperature by hand, the engine will **not** fight you — your
 until the next scheduled block, then the schedule resumes. This is deliberate. If you want the
 schedule re-applied right now, use **Apply now** in the schedule editor.
 
+The hold is keyed on the *block's content* (season, name, mode and setpoints), not on the
+thermostat. So editing the current block's temperatures in the schedule editor, or switching
+seasons, applies within the engine's next trigger (at most 15 minutes) without touching
+**Apply now** - while a change made on the thermostat itself, or with the stepper, still holds
+until the next block.
+
 ### A standby preset makes a zone stand down
 
 While a zone's thermostat reports its standby preset — **`eco` by default**, the most common
@@ -379,8 +390,9 @@ judgement stays in an entity you own and can extend. The recommended recipe is t
    ```
 
    `weekday()` is 0=Mon…6=Sun, so `>= 5` means Sat/Sun. An all-day calendar event reports `on`
-   for that whole day. Weekends-only: drop the calendar term. Holidays-only: drop the weekday
-   term. A utility with seasonal windows can extend the same template - which is exactly why
+   for that whole day. Weekends-only: drop the calendar term. Holidays-only: skip the template
+   entirely and point `off_peak_entity` straight at the calendar — a calendar entity reads `on`
+   during its all-day events, so it works as the day flag on its own. A utility with seasonal windows can extend the same template - which is exactly why
    the logic belongs to you, and any existing peak/off-peak automation can drive it on day one.
 
 The offset itself lives in a provisioned helper (default 2°, range 0-10) on the settings
@@ -489,10 +501,12 @@ contents are written to the log first, but the deletion is real.
 
 ## Day-to-day use
 
-The gear icon opens the settings panel, grouped into tabs: **Zones** (scheduling switches and
-the active season), **Tuning** (thresholds and learning values), **Objects** (everything the
-card manages), **Setup** (preview and apply), **Theme**, and **Danger** (removal, kept
-deliberately apart from everything else).
+The gear icon opens the settings panel, grouped into tabs: **Zones** (scheduling switches, the
+active season, and steering's room-by-time-of-day schedules), **Tuning** (thresholds and other
+live values), **Objects** (everything the card manages), **Setup** (preview and apply),
+**Config** (a read-only view of everything stored in the card's configuration, with directions
+to the card editor), **Theme**, and **Danger** (removal, kept deliberately apart from
+everything else).
 
 | I want to… | Do this |
 |---|---|
@@ -502,6 +516,7 @@ deliberately apart from everything else).
 | Switch seasons | Gear icon → **Zones** tab → **Active season**. |
 | Stop all automation immediately | Gear icon → **Zones** tab → switch the zone (or the master) **Off**. |
 | See how much the system ran | Tap the **Runtime ·** row; tap a day for its individual runs. |
+| See every card-editor setting and its current value | Gear icon → **Config** tab (read-only; it tells you where to edit). |
 | Change the look | Gear icon → **Theme** tab. |
 | See everything the card manages | Gear icon → **Objects** tab. |
 | Report a bug | Gear icon → **Objects** tab → **Build report**. |
@@ -516,7 +531,8 @@ Assistant's own schedule editor — the card reads whatever is there.
 
 > **Use the visual editor to configure this card.** Edit the dashboard, then click the pencil on
 > this card. It is *not* behind the card's gear icon — that opens the settings panel, which tunes
-> a card that is already configured. The visual editor writes the current shape for everything you
+> a card that is already configured (its **Config** tab shows all of these values read-only and
+> points back here). The visual editor writes the current shape for everything you
 > change through it. (It does not retro-fix a hand-written config you paste in.)
 >
 > Hand-writing this YAML is supported but easy to get subtly wrong, because a config that looks
@@ -527,9 +543,7 @@ Assistant's own schedule editor — the card reads whatever is there.
 > have intended.
 >
 > If you do write it by hand, run the dry-run (gear icon → **Setup** tab → **Run dry-run preview**)
-> and read it before applying. A healthy, fully provisioned install settles to all Unchanged -
-> except without a `weather_entity`, where two pending creates are expected forever (see
-> [Troubleshooting](#troubleshooting)).
+> and read it before applying. A healthy, fully provisioned install settles to all Unchanged.
 
 The reference below is for understanding what the editor produced, and for YAML-mode users who
 have read the warning above. Old config shapes keep working: see
@@ -543,6 +557,8 @@ zones:
     entity: climate.downstairs_thermostat
   - name: Upstairs
     entity: climate.upstairs_thermostat
+    power_entity: sensor.upstairs_hvac_power   # optional (watts): running detection
+                                      # for brands without hvac_action, see below
     room_sensors:                     # optional, drives deviation chips
       - sensor.bedroom_3_temperature           # uses the entity's own name
       - entity: sensor.zb_landing_temp_sensor      # or label it yourself
@@ -567,6 +583,7 @@ features:
                                       # schedule applies with extra comfort
   off_peak_offset: 2                  # optional: degrees of extra comfort
                                       # (initial value for the offset helper)
+  steering: false                     # optional: comfort steering (cool-only)
 display:                              # optional, presentation only
   last_seen: always                   # always | ageing | off
   ageing_minutes: 45
@@ -580,6 +597,7 @@ display:                              # optional, presentation only
 | `zones[].entity` | string | — | Any `climate.*` entity. |
 | `zones[].room_sensors` | list | — | Temperature sensors shown as deviation chips. Each item is either an entity id or `{entity, name, last_seen}` when you want a different label than the entity's friendly name, or a last-seen companion. |
 | `zones[].room_sensors[].last_seen` | string | — | Optional timestamp entity carrying when the sensor's device last actually reported (e.g. a Zigbee2MQTT `_last_seen` entity). When set and reporting, it joins the stale check for that row and shows an age label; if it goes missing or unavailable the row quietly falls back to the standard check, with no age shown. The editor can suggest matches. Without it the row behaves exactly as before. |
+| `zones[].power_entity` | string | — | Optional power sensor (W) for the zone's equipment. When set, the provisioned running-detection uses power draw (>100 W) OR an hvac-active setpoint-delta check instead of `hvac_action` - for brands that never report `hvac_action` (some mini-splits). In `heat_cool` mode only the power branch applies (the setpoint is a pair). Applies when the running sensor is created; an existing sensor keeps its detection until deleted and re-applied. |
 | `seasons[].key` | string | — | **Required.** Fixed id used in this season's entity names. Choose it once and leave it — changing it renames every object for that season. |
 | `seasons[].name` | string | — | Display name. Safe to rename at any time; the `key` is what entity ids use. |
 | `seasons[].default_mode` | enum | — | `cool`, `heat`, `heat_cool`, or `off`. |
@@ -657,11 +675,10 @@ fresh generated copy.
 **Re-running Apply keeps showing the same edit.** Open an issue and attach a diagnostics report — a
 healthy install settles to "Unchanged" for everything after one apply.
 
-**The preview always shows 2 pending creates, and I have no weather entity.** That is expected, not
-a bug. The two outdoor sensors are always part of the plan so that an existing one is never queued
-for deletion, but they are only actually created when a weather entity is configured. With no
-weather entity they stay pending indefinitely and nothing else is affected. Set a weather entity,
-or ignore those two.
+**I have no weather entity — where are the outdoor sensors?** They are only created when a
+weather entity is configured; without one the preview settles to all-Unchanged and nothing else
+is affected (the **Objects** tab may list the pair as *Missing*, which just means "not created").
+An outdoor pair that already exists is never deleted if you later remove the weather entity.
 
 **Reporting a bug — send a diagnostics report.** Gear icon → **Objects** tab → **Build report**.
 It gathers the card version, your Home Assistant version, the shape of your configuration, the

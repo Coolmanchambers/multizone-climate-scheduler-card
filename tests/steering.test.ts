@@ -62,8 +62,10 @@ describe('spec §8.1/§8.2 - the engine changes ONLY under the flag', () => {
     const gate = byAlias(eng, 'Skip when zone disabled')!;
     // Compound term (QA finding M5): the engine reclaims the zone the moment
     // a scheduled block transitions away from cooling mid-override.
+    // 0.7.7: composed marker, availability term, and the engine keeps the
+    // zone until the thermostat is actually cooling (steering writes no mode).
     expect(gate.value_template).toBe(
-      "{{ is_state(repeat.item.enabled, 'on') and blk is not none and blk != states(repeat.item.marker) and state_attr(repeat.item.climate, 'preset_mode') != 'eco' and not (is_state(repeat.item.override_timer, 'active') and blk_mode == 'cool') }}",
+      "{{ is_state(repeat.item.enabled, 'on') and blk is not none and states(repeat.item.climate) not in ['unavailable', 'unknown'] and mark != states(repeat.item.marker) and state_attr(repeat.item.climate, 'preset_mode') != 'eco' and not (is_state(repeat.item.override_timer, 'active') and blk_mode == 'cool' and is_state(repeat.item.climate, 'cool')) }}",
     );
   });
 });

@@ -24,6 +24,7 @@ const FULL: MzcsCardConfig = {
       room_sensors: [
         { entity: 'sensor.room_a_temperature', name: 'Room A', last_seen: 'sensor.room_a_last_seen' },
       ],
+      power_entity: 'sensor.zone_a_power',
     },
   ],
   seasons: [{ key: 'summer', name: 'Summer', default_mode: 'cool' }],
@@ -52,6 +53,7 @@ describe('STANDING RULE: every editor-written key influences the Config tab', ()
     ['zones[].name', (c) => ({ ...c, zones: [{ ...c.zones[0]!, name: 'Zone B' }] })],
     ['zones[].entity', (c) => ({ ...c, zones: [{ ...c.zones[0]!, entity: 'climate.zone_b' }] })],
     ['zones[].room_sensors', (c) => ({ ...c, zones: [{ ...c.zones[0]!, room_sensors: undefined }] })],
+    ['zones[].power_entity', (c) => ({ ...c, zones: [{ ...c.zones[0]!, power_entity: undefined }] })],
     [
       'room_sensors[].name',
       (c) => ({
@@ -114,6 +116,14 @@ describe('content rules', () => {
 
   it('lists room sensors with their labels and last-seen presence', () => {
     expect(flat(FULL)).toContain('Room A (last-seen ✓)');
+  });
+
+  it('whitespace-only power_entity shows NO power line - provisioning ignores it (QA 0.7.7)', () => {
+    const s = JSON.stringify(
+      configSummary({ ...FULL, zones: [{ ...FULL.zones[0]!, power_entity: '   ' }] }),
+    );
+    expect(s).not.toContain('power:');
+    expect(flat(FULL)).toContain('power: sensor.zone_a_power');
   });
 
   it('absent fan_timer shows the ON default, never Off (browser-caught, the documented inversion trap)', () => {

@@ -6,6 +6,8 @@ import type { MzcsCardConfig, ZoneConfig } from './types';
 import { resolveEcoPreset, resolveOffPeak, normalizeRoomSensors, normalizeCardConfig, resolveDisplay } from './types';
 import { formatAge, ageVisible, ageing } from './lib/last-seen';
 import type { HassLike } from './ha-types';
+import { execContextFor } from './provision-exec';
+import { planIdShape } from './lib/provisioning';
 import {
   climateSummary,
   fanTimerActive,
@@ -295,6 +297,8 @@ export class MzcsCard extends LitElement {
   @state() private _objectsLoading = false;
   @state() private _objectsError?: string;
   private _objectsLoadedFor?: string;
+  /** Local-day stamp the runtime history was fetched for (with _rtLoadedFor). */
+  private _rtLoadedDay?: number;
 
   public setConfig(config: MzcsCardConfig): void {
     // Normalization lives in ONE place (docs/config-compatibility.md R1), and
@@ -319,6 +323,14 @@ export class MzcsCard extends LitElement {
     this._execConfirm = false;
     this._execResult = undefined;
     this._execLog = [];
+    // The Danger tab's armed state and the Objects tab's loaded-for key both
+    // describe the previous config (0.7.7 review C7): an armed teardown with
+    // its plan cleared rendered no buttons until a tab switch, and the object
+    // statuses stayed stale after a seasons/features change.
+    this._tdAsk = false;
+    this._tdArmed = false;
+    this._tdConfirm = '';
+    this._objectsLoadedFor = undefined;
   }
 
   public static async getConfigElement(): Promise<HTMLElement> {
@@ -381,7 +393,9 @@ export class MzcsCard extends LitElement {
       this.hass!,
       input.prefix,
       input.zones.map((z) => z.slug),
-      input.seasons.map((s) => s.key),
+      // String(): a legacy keyless season's schedule id embeds "undefined"
+      // and must still parse (0.7.7 refutation LOW-4).
+      input.seasons.map((s) => String(s.key)),
     );
   }
 
@@ -519,11 +533,18 @@ export class MzcsCard extends LitElement {
       // and refuse if it no longer matches what the user confirmed - they must
       // review the refreshed list and type the prefix again (Fable review F4).
       const liveExisting = await this._fetchExistingFor(input);
+      // Post-await flow re-check (invariant 8; 0.7.7 review C5): a closed
+      // panel, a different tab, or a replaced config/preview must not tear
+      // down on the captured locals. The typed prefix was already consumed
+      // above, so nothing re-fires without retyping.
+      if (!this._setupOpen || this._setupTab !== 'danger' || this._config !== cfg || this._dryRun !== p) {
+        this._execLog = ['Teardown cancelled: the panel changed while the registry was being read. Arm it again.'];
+        return;
+      }
       const fresh = plan([], liveExisting);
       const rank: Record<string, number> = { automation: 0, template_sensor: 1, stats_sensor: 1, schedule: 2, helper: 3 };
       fresh.delete.sort((a, b) => (rank[a.kind] ?? 9) - (rank[b.kind] ?? 9));
-      const ids = (pl: Plan) => pl.delete.map((a) => a.id).sort().join('|');
-      if (ids(fresh) !== ids(p)) {
+      if (planIdShape(fresh) !== planIdShape(p)) {
         this._dryRun = fresh;
         this._dryRunKind = 'teardown';
         this._tdArmed = true;
@@ -544,25 +565,13 @@ export class MzcsCard extends LitElement {
           }
         }
       }
-      const zoneRefs = cfg.zones.map((z) => ({
-        slug: slugify(z.name),
-        name: z.name,
-        climate: z.entity,
-        ...(cfg.features?.steering === true ? { rooms: steeringRooms(z.room_sensors) } : {}),
-      }));
-      const result = await executePlan(hass, fresh, {
-        prefix: input.prefix,
-        zones: zoneRefs,
-        seasons: input.seasons,
-        fanGuard: cfg.features?.fan_guard,
-        ecoPreset: resolveEcoPreset(cfg.features),
-        offPeakEntity: resolveOffPeak(cfg.features)?.entity ?? null,
-        steering: cfg.features?.steering === true,
-        weatherEntity: cfg.weather_entity,
-        log: (line) => {
+      const result = await executePlan(
+        hass,
+        fresh,
+        execContextFor(input, (line) => {
           this._execLog = [...this._execLog, line];
-        },
-      });
+        }),
+      );
       this._execResult = result;
       const existing = await this._fetchExistingFor(input);
       this._dryRun = plan(buildDesired(input), existing);
@@ -588,45 +597,34 @@ export class MzcsCard extends LitElement {
     this._execLog = [];
     try {
       const input = this._provisionInput();
-      const zoneRefs = cfg.zones.map((z) => ({
-        slug: slugify(z.name),
-        name: z.name,
-        climate: z.entity,
-        ...(cfg.features?.steering === true ? { rooms: steeringRooms(z.room_sensors) } : {}),
-      }));
       // Freshness gate (QA-R B1-3/C1-1): recompute the plan against the LIVE
       // registry and refuse to execute if it no longer matches the preview -
       // protects against stale previews, config edits, and a second device
       // applying concurrently.
       const preExisting = await this._fetchExistingFor(input);
+      // The registry read took time: the user may have closed the panel,
+      // left the tab, or a dashboard save may have replaced the config and
+      // cleared the preview. None of those may proceed on the captured
+      // locals (invariant 8; 0.7.7 review C5).
+      if (!this._setupOpen || this._setupTab !== 'setup' || this._config !== cfg || this._dryRun !== p) {
+        this._execLog = ['Apply cancelled: the panel changed while the registry was being read. Run the dry-run again.'];
+        return;
+      }
       const fresh = plan(buildDesired(input), preExisting);
-      const shape = (pl: Plan) =>
-        JSON.stringify([
-          pl.create.map((x) => x.id).sort(),
-          pl.adopt.map((x) => x.id).sort(),
-          pl.update.map((x) => x.id).sort(),
-          pl.delete.map((x) => x.id).sort(),
-        ]);
-      if (shape(fresh) !== shape(p)) {
+      if (planIdShape(fresh) !== planIdShape(p)) {
         this._dryRun = fresh;
         this._dryRunKind = 'setup';
         this._execRunning = false;
         this._execLog = ['The registry changed since this preview was made. Review the refreshed plan and apply again.'];
         return;
       }
-      const result = await executePlan(hass, fresh, {
-        prefix: input.prefix,
-        zones: zoneRefs,
-        seasons: input.seasons,
-        fanGuard: cfg.features?.fan_guard,
-        ecoPreset: resolveEcoPreset(cfg.features),
-        offPeakEntity: resolveOffPeak(cfg.features)?.entity ?? null,
-        steering: cfg.features?.steering === true,
-        weatherEntity: cfg.weather_entity,
-        log: (line) => {
+      const result = await executePlan(
+        hass,
+        fresh,
+        execContextFor(input, (line) => {
           this._execLog = [...this._execLog, line];
-        },
-      });
+        }),
+      );
       this._execResult = result;
       // Verify step of the universal change-set rule: replan against the live
       // registry so the user sees what actually landed.
@@ -1416,8 +1414,21 @@ export class MzcsCard extends LitElement {
     const themeId = globalEntityId('theme', this._prefix);
     if (!entityExists(hass, themeId)) return nothing;
     const { presetKey, tokens } = resolveTheme(hass.states[themeId]?.state);
-    const setTheme = (value: string) =>
-      void hass.callService('input_text', 'set_value', { entity_id: themeId, value });
+    // A refused write (the theme helper's max on installs provisioned before
+    // 0.7.7 is HA's default 100, two short of a 12-token custom theme) used
+    // to vanish into an unhandled rejection: the preset stayed and the colour
+    // pickers never appeared, with nothing on screen (0.7.7 review C1).
+    const setTheme = (value: string) => {
+      this._themeError = undefined;
+      hass.callService('input_text', 'set_value', { entity_id: themeId, value }).catch((e: unknown) => {
+        const max = Number(hass.states[themeId]?.attributes.max);
+        const hint =
+          value.length > (Number.isFinite(max) ? max : 100)
+            ? ` The theme helper allows ${Number.isFinite(max) ? max : 100} characters and this theme needs ${value.length}: raise its "Maximum length" to 255 in Settings > Devices & services > Helpers (${themeId}).`
+            : '';
+        this._themeError = `Could not save the theme: ${errorText(e)}.${hint}`;
+      });
+    };
     return html`
       <div class="chips">
         ${Object.entries(THEME_PRESETS).map(
@@ -1437,6 +1448,7 @@ export class MzcsCard extends LitElement {
           Custom
         </button>
       </div>
+      ${this._themeError ? html`<p class="muted" style="margin:4px 0 0;">${this._themeError}</p>` : nothing}
       ${presetKey === 'custom'
         ? html`
             ${CUSTOM_COLOR_LABELS.map(
@@ -1463,6 +1475,7 @@ export class MzcsCard extends LitElement {
   }
 
   private _appliedTheme?: string;
+  @state() private _themeError?: string;
   private _renderedMinute = -1;
   private _tick?: ReturnType<typeof setInterval>;
 
@@ -1549,6 +1562,22 @@ export class MzcsCard extends LitElement {
    * equality is exact), or when the wall-clock minute advanced, since the
    * next-block line and runtime figures are time-derived.
    */
+  protected willUpdate(changed: Map<string, unknown>): void {
+    // The drawer's week was read once per zone/season and never again, so an
+    // edit made in HA's native schedule editor or on another device (a
+    // supported second editing surface, CONTRACT §4) never showed here until
+    // a zone switch or reload (0.7.7 review C3). The schedule entity is
+    // already on the watch list: when its state object changes and nothing
+    // is drafted, re-read the week. A boundary crossing costs one extra read.
+    if (!changed.has('hass') || !this.hass) return;
+    const prev = changed.get('hass') as HassLike | undefined;
+    const schedId = this._schedLoadedFor;
+    if (!prev || !schedId || this._schedBusy || this._schedDrafts.size > 0) return;
+    if (prev.states[schedId] === this.hass.states[schedId]) return;
+    const zone = this._zone();
+    if (zone && this._scheduleEntityId(zone) === schedId) queueMicrotask(() => void this._loadWeek(zone));
+  }
+
   protected shouldUpdate(changed: Map<string, unknown>): boolean {
     if (changed.size > 1 || !changed.has('hass')) return true;
     const prev = changed.get('hass') as HassLike | undefined;
@@ -1692,8 +1721,19 @@ export class MzcsCard extends LitElement {
     // no state_class, so those statistics never exist, on any install - the
     // 0.7.2 bug. Ten days matches HA's default recorder retention.
     const runningId = zoneEntityId('running_sensor', this._prefix, slug);
-    if (this._rtLoadedFor !== runningId) {
+    // Keyed on the zone AND the local day (0.7.7 review C3): a wall tablet
+    // never switches zone or reloads, so the row fetched as "today" froze at
+    // its fetch-time total and became a wrong past day at midnight, and the
+    // days since never appeared.
+    const localDay = new Date();
+    localDay.setHours(0, 0, 0, 0);
+    const dayKey = localDay.getTime();
+    if (this._rtLoadedFor !== runningId || this._rtLoadedDay !== dayKey) {
+      // The previous day's drill-in was captured mid-day; drop it so a tap
+      // re-reads the completed day.
+      if (this._rtLoadedDay !== undefined && this._rtLoadedDay !== dayKey) this._rtDayCache.delete(this._rtLoadedDay);
       this._rtLoadedFor = runningId;
+      this._rtLoadedDay = dayKey;
       this._rtDays = undefined;
       queueMicrotask(() =>
         void fetchDailyRuntimeFromHistory(hass, runningId, 10).then((d) => {
@@ -1795,7 +1835,9 @@ export class MzcsCard extends LitElement {
       return;
     }
     this._rtDaysOpen = new Set(this._rtDaysOpen).add(dayStart);
-    if (this._rtDayCache.has(dayStart)) return;
+    // Completed days are cached for good; today's detail is still accruing,
+    // so re-read it on every open (0.7.7 review C3).
+    if (this._rtDayCache.has(dayStart) && dayStart + 86_400_000 <= Date.now()) return;
     if (!this.hass) return;
     this._rtDayLoading = new Set(this._rtDayLoading).add(dayStart);
     try {
@@ -1825,6 +1867,10 @@ export class MzcsCard extends LitElement {
         start: dayStart,
         end: dayStart + 86_400_000,
       };
+      // The tab handler clears the cache synchronously on a zone switch; a
+      // read still in flight for the OLD zone must not land in the new zone's
+      // cache and be served on its next tap (0.7.7 review C2).
+      if (this._rtLoadedFor !== runningId) return;
       this._rtDayCache.set(dayStart, detail);
     } finally {
       this._rtDayLoading = new Set([...this._rtDayLoading].filter((d) => d !== dayStart));
@@ -2430,11 +2476,18 @@ export class MzcsCard extends LitElement {
     const now = new Date();
     const nextIsToday =
       next?.minutesUntil != null && next.minutesUntil < 1440 - (now.getHours() * 60 + now.getMinutes());
+    // heat_cool blocks get the engine's deadband-CAPPED adjustment (hc_adj):
+    // the offset can never shrink the range below a 2-degree gap, so the
+    // preview must not show a number the engine will not write (0.7.7 review).
+    const previewOffset =
+      next && offPeak && next.cool_temp != null && next.heat_temp != null
+        ? Math.max(0, Math.min(offPeak.offset, (next.cool_temp - next.heat_temp - 2) / 2))
+        : (offPeak?.offset ?? 0);
     const shownTemp =
       next && nextTemp != null && offPeak?.adjusting && nextIsToday
         ? next.cool_temp != null
-          ? nextTemp - offPeak.offset
-          : nextTemp + offPeak.offset
+          ? nextTemp - previewOffset
+          : nextTemp + previewOffset
         : nextTemp;
     const nextLine = next
       ? `Next · ${fmtTime(next.time)} ${next.name}${shownTemp != null ? ` → ${shownTemp}°` : ''}`
@@ -2722,10 +2775,14 @@ export class MzcsCard extends LitElement {
           <input
             class="bname-in"
             type="text"
+            maxlength="40"
             .value=${b.name}
             @change=${(e: Event) =>
               mut((blk) => {
-                blk[sel.idx]!.name = (e.target as HTMLInputElement).value;
+                // Bounded (0.7.7): the block name is part of the engine's
+                // composed applied-block marker, which older installs store
+                // in a 100-character input_text.
+                blk[sel.idx]!.name = (e.target as HTMLInputElement).value.slice(0, 40);
               })}
           />
         </div>
@@ -2896,7 +2953,13 @@ export class MzcsCard extends LitElement {
             steer && this._steerSheet && this._steerSheet.zone === steer.slug && this._steerSheet.room === rs.entity;
           // A stale/unreadable sensor refuses to START an override (spec §4) -
           // visibly: the row stays inert and says why on tap-target hover.
-          const canOpen = Boolean(steer && steerLabel != null && !isSteering && !r.stale && r.temp != null);
+          // Steering is Fahrenheit-only in v1 (its band helpers are bounded
+          // 50-95 and the automation's clamp floors at 68): a Celsius zone
+          // (setpoint reads below 45, the block editor's own unit heuristic)
+          // must not open a sheet that would arm an override it cannot mean
+          // (0.7.7 review C4).
+          const fahrenheit = setpoint != null && setpoint >= 45;
+          const canOpen = Boolean(steer && steerLabel != null && !isSteering && !r.stale && r.temp != null && fahrenheit);
           const openSheet = () => {
             if (canOpen) this._openSteerSheet(zone, rs.entity, steerLabel!, setpoint);
           };

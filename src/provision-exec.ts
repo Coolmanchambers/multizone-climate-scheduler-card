@@ -14,7 +14,8 @@
 //     reverted - see the failure log line).
 
 import type { HassLike } from './ha-types';
-import type { Plan, PlanAction, ProvisionSeason } from './lib/provisioning';
+import type { Plan, PlanAction, ProvisionSeason, ProvisionInput } from './lib/provisioning';
+import { resolveEcoPreset, resolveOffPeak } from './types';
 import {
   engineAutomation,
   fanAutomation,
@@ -24,6 +25,7 @@ import {
   steeringAutomation,
   parseSignature,
   contentHash,
+  seasonMapExpr,
   type ZoneRef,
 } from './lib/automation-payloads';
 import { parseEntityId, zoneEntityId } from './lib/naming';
@@ -46,6 +48,28 @@ export interface ExecContext {
   log: (line: string) => void;
 }
 
+/**
+ * THE ExecContext builder, shared by the card's Apply and teardown flows and by
+ * the executor-parity test. The card used to assemble a third zone-ref list by
+ * hand beside the differ's `provisionInputFromConfig` and the fixture's
+ * `zoneRefs` (0.7.7 review, adversary LOW-1); the parity test then compared a
+ * transcription of the executor against the differ and could not see either.
+ * One builder, driven from the same ProvisionInput the differ signs from.
+ */
+export function execContextFor(input: ProvisionInput, log: (line: string) => void): ExecContext {
+  return {
+    prefix: input.prefix,
+    zones: input.zones.map((z) => ({ ...z, climate: z.climate ?? `climate.${z.slug}` })),
+    seasons: input.seasons,
+    fanGuard: input.features.fan_guard,
+    ecoPreset: resolveEcoPreset(input.features),
+    offPeakEntity: resolveOffPeak(input.features)?.entity ?? null,
+    steering: input.features.steering === true,
+    weatherEntity: input.weather_entity,
+    log,
+  };
+}
+
 interface CreatedRecord {
   kind: 'collection' | 'config_entry' | 'automation';
   domain?: string;
@@ -54,6 +78,63 @@ interface CreatedRecord {
   automationId?: string;
   /** object existed before this run - rollback must never delete it */
   preexisted?: boolean;
+  /** already handed to the rollback list mid-create (config entries register
+   * the moment their flow completes, BEFORE the locate/rename that can fail -
+   * 0.7.7 review: a failed locate used to orphan the entry every retry) */
+  registered?: boolean;
+}
+
+/** Config-entry domains the executor itself creates and may therefore delete. */
+const DELETABLE_ENTRY_DOMAINS = new Set(['template', 'history_stats', 'statistics']);
+
+/**
+ * Storage id of a UI-created helper or schedule: the registry unique_id (for
+ * collection helpers it IS the storage id), falling back to the entity's
+ * object_id when the registry is silent (YAML helpers carry no unique_id;
+ * pre-S13 behaviour). Addressing storage by object_id alone rewrote or deleted
+ * the WRONG item once an entity had been renamed: fixed for schedule renames
+ * in S13 (A1/F2), and for every other helper update/delete/snapshot in the
+ * 0.7.7 review (E3), through this one resolver.
+ */
+async function storageIdFor(hass: HassLike, entityId: string): Promise<string> {
+  const { objectId } = splitId(entityId);
+  try {
+    const entries = (await hass.callWS!({
+      type: 'config/entity_registry/get_entries',
+      entity_ids: [entityId],
+    })) as Record<string, { unique_id?: string } | null>;
+    const uniq = entries?.[entityId]?.unique_id;
+    if (typeof uniq === 'string' && uniq) return uniq;
+  } catch {
+    // registry unreadable -> object_id fallback
+  }
+  return objectId;
+}
+
+/**
+ * Domain of a config entry, or null when it cannot be read. Deleting a flow-
+ * created sensor deletes its OWNING ENTRY; an adopted entity that belongs to
+ * some other integration would take that whole integration down (0.7.7 review
+ * E2), so the executor only deletes entries of the domains it creates itself.
+ */
+async function configEntryDomain(hass: HassLike, entryId: string): Promise<string | null> {
+  try {
+    const single = (await hass.callWS!({ type: 'config_entries/get_single', entry_id: entryId })) as
+      | { config_entry?: { domain?: string }; domain?: string }
+      | null;
+    const d = single?.config_entry?.domain ?? single?.domain;
+    if (typeof d === 'string' && d) return d;
+  } catch {
+    // older core without get_single, or a transient failure - try the list
+  }
+  try {
+    const all = (await hass.callWS!({ type: 'config_entries/get' })) as Array<{ entry_id?: string; domain?: string }>;
+    const hit = Array.isArray(all) ? all.find((e) => e?.entry_id === entryId) : undefined;
+    if (typeof hit?.domain === 'string' && hit.domain) return hit.domain;
+  } catch {
+    // unreadable
+  }
+  return null;
 }
 
 const DAY_KEYS: DayKey[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
@@ -176,6 +257,38 @@ async function labelEntity(hass: HassLike, entityId: string): Promise<void> {
   }
 }
 
+/**
+ * Label the entity of an automation the executor just wrote. The entity id is
+ * derived from the alias, but a FOREIGN automation may already own that id
+ * (ours then lands at `_2`): labelling the computed id blindly marked the
+ * bystander as managed and left ours unlabelled (0.7.7 review E5). Only the
+ * candidate whose registry unique_id is our automation id gets the label;
+ * the registry can lag the POST, hence the retries. Unresolvable = no label
+ * (the next Apply adopts it - the documented best-effort-label class).
+ */
+async function labelAutomation(hass: HassLike, uid: string, alias: string, ctx: ExecContext): Promise<void> {
+  const base = `automation.${haSlug(alias)}`;
+  const candidates = [base, ...[2, 3, 4, 5].map((n) => `${base}_${n}`)];
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const entries = (await hass.callWS!({
+        type: 'config/entity_registry/get_entries',
+        entity_ids: candidates,
+      })) as Record<string, { unique_id?: string } | null>;
+      for (const c of candidates) {
+        if (entries?.[c]?.unique_id === uid) {
+          await labelEntity(hass, c);
+          return;
+        }
+      }
+    } catch {
+      // registry lag - retry below
+    }
+    await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+  }
+  ctx.log(`NOTE: could not resolve the entity for automation ${uid} to label it - the next Apply adopts it`);
+}
+
 /** Entity id of an automation config uid, resolved from live states. */
 function automationEntityId(hass: HassLike, uid: string): string | null {
   for (const entityId in hass.states) {
@@ -228,10 +341,6 @@ async function driveFlow(
   throw new Error(`Flow ${handler}: did not complete`);
 }
 
-function seasonMapJinja(ctx: ExecContext): string {
-  return `{${ctx.seasons.map((s) => `'${s.name.replace(/'/g, '')}': '${s.key}'`).join(', ')}}`;
-}
-
 function templateFlowSpec(id: string, spec: Record<string, unknown>, ctx: ExecContext):
   | { handler: string; menu: string | null; fields: Record<string, unknown> }
   | null {
@@ -241,12 +350,30 @@ function templateFlowSpec(id: string, spec: Record<string, unknown>, ctx: ExecCo
   if (id.startsWith('binary_sensor.') && spec.source === 'hvac_action') {
     const zone = zoneFor(id, ctx);
     if (!zone) return null;
+    // Item 29: with a configured power sensor the running template becomes an
+    // OR of the two measured heuristics - power draw above standby, or hvac
+    // active with the room >= 1° past setpoint. Power alone stalls for hours
+    // (SmartThings feed, measured 2026-08-30); the delta alone misses
+    // steady-state duty cycling at setpoint-hold (measured 2026-08-29). Both
+    // failing together undercounts - the fail-safe direction. heat_cool
+    // relies on the power branch (its setpoint attr is a pair, not a number).
+    // A missing/unavailable power entity reads float(0) and falls through to
+    // the delta branch. The delta branch's floats are ASYMMETRIC sentinels
+    // (QA 0.7.7 MED-1): the reading side defaults far LOW and the setpoint
+    // side far HIGH, so a missing attribute makes the comparison false and
+    // the branch stays fail-safe - float(0) on both sides turned a dropped
+    // current_temperature into a fabricated 60-degree delta and pinned the
+    // sensor ON for the whole dropout. Without meta.power: the original
+    // hvac_action template, byte-identical.
+    const power = typeof spec.power === 'string' && spec.power ? spec.power : null;
     return {
       handler: 'template',
       menu: 'binary_sensor',
       fields: {
         name,
-        state: `{{ state_attr('${zone.climate}', 'hvac_action') in ['cooling', 'heating'] }}`,
+        state: power
+          ? `{{ (states('${power}') | float(0)) > 100 or (is_state('${zone.climate}', 'cool') and (state_attr('${zone.climate}', 'current_temperature') | float(-9999)) - (state_attr('${zone.climate}', 'temperature') | float(9999)) >= 1) or (is_state('${zone.climate}', 'heat') and (state_attr('${zone.climate}', 'temperature') | float(-9999)) - (state_attr('${zone.climate}', 'current_temperature') | float(9999)) >= 1) }}`
+          : `{{ state_attr('${zone.climate}', 'hvac_action') in ['cooling', 'heating'] }}`,
         device_class: 'running',
       },
     };
@@ -293,7 +420,7 @@ function templateFlowSpec(id: string, spec: Record<string, unknown>, ctx: ExecCo
       fields: {
         name,
         state:
-          `{% set season = ${seasonMapJinja(ctx)}.get(states('${sel}'), states('${sel}') | lower) %}` +
+          `{% set season = ${seasonMapExpr(ctx.seasons)}.get(states('${sel}'), states('${sel}') | lower) %}` +
           `{% set evs = states.schedule | selectattr('entity_id', 'search', '^schedule\\.${p}_[a-z0-9_]+_' ~ season ~ '$') | map(attribute='attributes.next_event') | reject('none') | list %}` +
           `{{ evs | min if evs | count > 0 else 'unknown' }}`,
       },
@@ -343,7 +470,15 @@ async function createOne(
   hass: HassLike,
   a: Extract<PlanAction, { op: 'create' }>,
   ctx: ExecContext,
+  register: (rec: CreatedRecord) => void = () => {},
 ): Promise<CreatedRecord | null> {
+  // A config entry joins the rollback list the moment its flow completes, so
+  // a failed locate/rename afterwards still removes the entry (0.7.7 review).
+  const entryRecord = (entryId: string): CreatedRecord => {
+    const rec: CreatedRecord = { kind: 'config_entry', entryId, registered: true };
+    register(rec);
+    return rec;
+  };
   // Creation sees the compared spec PLUS the creation-only meta payload
   // (seed values, seeded week, template types). Only spec is ever diffed.
   const spec = { ...a.spec, ...(a.meta ?? {}) };
@@ -371,7 +506,7 @@ async function createOne(
       const stored = parseSignature(preexisting.description);
       if (stored && contentHash(preexisting) === stored) {
         await hass.callApi!('POST', `config/automation/config/${uid}`, payload);
-        await labelEntity(hass, `automation.${haSlug(String(payload.alias))}`);
+        await labelAutomation(hass, uid, String(payload.alias), ctx);
         ctx.log(`Recreated ${a.id} (existed in storage, pristine)`);
         return { kind: 'automation', automationId: uid, preexisted: true };
       }
@@ -380,9 +515,10 @@ async function createOne(
     }
     await hass.callApi!('POST', `config/automation/config/${uid}`, payload);
     // Label the automation ENTITY (managed = mzcs label, same as every other
-    // kind). The entity id is derived from the alias - the executor's hass
-    // snapshot predates the create, so it cannot be looked up from states.
-    await labelEntity(hass, `automation.${haSlug(String(payload.alias))}`);
+    // kind), resolved through the registry by unique id - the executor's hass
+    // snapshot predates the create, and the alias-derived id may belong to a
+    // bystander.
+    await labelAutomation(hass, uid, String(payload.alias), ctx);
     return { kind: 'automation', automationId: uid };
   }
   const { domain, objectId } = splitId(a.id);
@@ -395,6 +531,11 @@ async function createOne(
     const body: Record<string, unknown> = {};
     if (domain === 'timer') Object.assign(body, { restore: spec.restore ?? true, duration: '0:30:00' });
     if (domain === 'input_select') Object.assign(body, { options: spec.options ?? ['-'] });
+    // Creation-only (never in spec): HA's default max of 100 refused every
+    // 12-token custom theme (102 characters), so custom themes could never be
+    // saved on an executor-provisioned install, and the composed applied-block
+    // marker (0.7.7) needs headroom for long block names (0.7.7 review C1).
+    if (domain === 'input_text') Object.assign(body, { max: 255 });
     if (domain === 'input_number') {
       Object.assign(body, {
         min: spec.min ?? 0,
@@ -458,8 +599,9 @@ async function createOne(
           percentile: 50,
           precision: 1,
         });
+        const rec = entryRecord(entryId);
         await ensureEntityId(hass, await flowEntityId(hass, 'sensor', statsName, entryId), a.id, ctx);
-        return { kind: 'config_entry', entryId };
+        return rec;
       }
       const zone = zoneFor(a.id, ctx);
       if (!zone) {
@@ -474,8 +616,9 @@ async function createOne(
         start: '{{ today_at() }}',
         end: '{{ now() }}',
       });
+      const rec = entryRecord(entryId);
       await ensureEntityId(hass, await flowEntityId(hass, 'sensor', statsName, entryId), a.id, ctx);
-      return { kind: 'config_entry', entryId };
+      return rec;
     }
     const flow = templateFlowSpec(a.id, spec, ctx);
     if (!flow) {
@@ -487,9 +630,10 @@ async function createOne(
       return null;
     }
     const entryId = await driveFlow(hass, flow.handler, flow.menu, flow.fields);
+    const rec = entryRecord(entryId);
     const flowDomain = flow.menu === 'binary_sensor' ? 'binary_sensor' : 'sensor';
     await ensureEntityId(hass, await flowEntityId(hass, flowDomain, String(flow.fields.name), entryId), a.id, ctx);
-    return { kind: 'config_entry', entryId };
+    return rec;
   }
   ctx.log(`SKIP ${a.id} - unsupported kind ${a.kind}`);
   return null;
@@ -512,6 +656,46 @@ async function rollback(hass: HassLike, created: CreatedRecord[], ctx: ExecConte
   }
 }
 
+/**
+ * After an input_select's options are rewritten, Home Assistant core resets
+ * the current option to options[0] when the old one is no longer valid - so
+ * renaming the ACTIVE season flipped the select to the first season and the
+ * engine's "Season changed" trigger applied that season's blocks (0.7.7
+ * review E4). Options keep their position across a rename (season keys are
+ * frozen, order is config order), so the same index names the renamed
+ * option; anything more ambiguous is logged for the user instead of guessed.
+ */
+async function reselectAfterOptionsUpdate(
+  hass: HassLike,
+  a: Extract<PlanAction, { op: 'update' }>,
+  ctx: ExecContext,
+  seasonsUnchanged: boolean,
+): Promise<void> {
+  const next = Array.isArray(a.spec.options) ? (a.spec.options as unknown[]).map(String) : null;
+  const prev = Array.isArray(a.from?.options) ? (a.from!.options as unknown[]).map(String) : null;
+  const current = hass.states[a.id]?.state;
+  if (!next || typeof current !== 'string' || next.includes(current)) return;
+  const idx = prev ? prev.indexOf(current) : -1;
+  // Only a pure rename maps by position: exactly one option differs, the
+  // lengths agree, AND this Apply creates or deletes no schedule (a season
+  // removed and another added in the same slot looks like a rename by name
+  // alone - 0.7.7 refutation L2/LOW-3). Anything else is logged, not guessed.
+  const positionsChanged = prev ? prev.filter((n, i) => n !== next[i]).length : Infinity;
+  if (prev && prev.length === next.length && idx >= 0 && positionsChanged === 1 && seasonsUnchanged) {
+    try {
+      await hass.callService('input_select', 'select_option', { entity_id: a.id, option: next[idx] });
+      ctx.log(`Re-selected "${next[idx]}" on ${a.id} (was "${current}") so the active season survives its rename`);
+      return;
+    } catch {
+      // fall through to the note
+    }
+  }
+  ctx.log(
+    `NOTE: ${a.id} was set to "${current}", which is no longer an option - Home Assistant falls back to ` +
+      `"${next[0]}". Re-select the intended season.`,
+  );
+}
+
 export interface ExecResult {
   created: number;
   adopted: number;
@@ -528,9 +712,9 @@ export async function executePlan(hass: HassLike, plan: Plan, ctx: ExecContext):
   await ensureLabel(hass, ctx);
   try {
     for (const a of plan.create) {
-      const rec = await createOne(hass, a, ctx);
+      const rec = await createOne(hass, a, ctx, (r) => createdRecords.push(r));
       if (rec) {
-        if (!rec.preexisted) createdRecords.push(rec);
+        if (!rec.preexisted && !rec.registered) createdRecords.push(rec);
         result.created++;
         ctx.log(`Created ${a.id}`);
         if (!a.id.startsWith('automation:')) await labelEntity(hass, a.id);
@@ -550,13 +734,18 @@ export async function executePlan(hass: HassLike, plan: Plan, ctx: ExecContext):
     phase = 'update';
     for (const a of plan.update) {
       if (a.kind === 'helper') {
-        const { domain, objectId } = splitId(a.id);
+        const { domain } = splitId(a.id);
         const { unit, ...rest } = a.spec;
         const payload = { ...rest, ...(unit ? { unit_of_measurement: unit } : {}) };
         try {
-          await hass.callWS!({ type: `${domain}/update`, [`${domain}_id`]: objectId, ...payload });
+          const storageId = await storageIdFor(hass, a.id);
+          await hass.callWS!({ type: `${domain}/update`, [`${domain}_id`]: storageId, ...payload });
           result.updated++;
           ctx.log(`Updated ${a.id}`);
+          if (domain === 'input_select') {
+            const seasonsUnchanged = ![...plan.create, ...plan.delete].some((x) => x.id.startsWith('schedule.'));
+            await reselectAfterOptionsUpdate(hass, a, ctx, seasonsUnchanged);
+          }
         } catch {
           result.skipped++;
           ctx.log(`SKIP update ${a.id} - not updatable`);
@@ -610,17 +799,7 @@ export async function executePlan(hass: HassLike, plan: Plan, ctx: ExecContext):
         // (scan S13-A1/F2). Fallback to object_id when the registry is silent.
         const { objectId } = splitId(a.id);
         try {
-          let storageId = objectId;
-          try {
-            const entries = (await hass.callWS({
-              type: 'config/entity_registry/get_entries',
-              entity_ids: [a.id],
-            })) as Record<string, { unique_id?: string } | null>;
-            const uniq = entries?.[a.id]?.unique_id;
-            if (typeof uniq === 'string' && uniq) storageId = uniq;
-          } catch {
-            // registry unreadable → object_id fallback (pre-S13 behavior)
-          }
+          const storageId = await storageIdFor(hass, a.id);
           const items = (await hass.callWS({ type: 'schedule/list' })) as Array<Record<string, unknown>>;
           const item = items.find((i) => i.id === storageId);
           if (!item) throw new Error(`no storage item "${storageId}"`);
@@ -683,10 +862,25 @@ export async function executePlan(hass: HassLike, plan: Plan, ctx: ExecContext):
           ctx.log(`SKIP delete ${a.id} - no owning config entry found; remove it manually`);
           continue;
         }
-        ctx.log(`snapshot ${a.id}: config entry ${entryId}`);
+        // Only entries of the domains this executor creates (0.7.7 review E2):
+        // an adopted entity owned by another integration must never take that
+        // integration's whole entry down. Unreadable domain = keep.
+        const entryDomain = await configEntryDomain(hass, entryId);
+        if (!entryDomain || !DELETABLE_ENTRY_DOMAINS.has(entryDomain)) {
+          result.skipped++;
+          ctx.log(
+            `KEEP ${a.id} - its config entry ${entryId} belongs to "${entryDomain ?? 'an unreadable integration'}", ` +
+              `not to a template/history_stats/statistics helper; remove it manually if intended`,
+          );
+          continue;
+        }
+        ctx.log(`snapshot ${a.id}: config entry ${entryId} (${entryDomain})`);
         await hass.callApi!('DELETE', `config/config_entries/entry/${entryId}`);
       } else {
-        const { domain, objectId } = splitId(a.id);
+        const { domain } = splitId(a.id);
+        // Storage id via the registry (0.7.7 review E3): after an entity
+        // rename the object_id can name a DIFFERENT user's item.
+        const objectId = await storageIdFor(hass, a.id);
         // Steering-off re-apply (QA finding E6): the revert logic lives in the
         // automation being deleted, and deleting an active timer fires NO
         // timer.cancelled event - so without this, an in-flight override
@@ -726,6 +920,11 @@ export async function executePlan(hass: HassLike, plan: Plan, ctx: ExecContext):
           } catch {
             ctx.log(`NOTE: could not snapshot ${a.id} before delete`);
           }
+        } else {
+          // Every other helper is snapshot-logged too (invariant 4; 0.7.7
+          // review): a learned k or a tuned threshold is a value worth a line.
+          const st = hass.states[a.id];
+          ctx.log(`snapshot ${a.id}: state=${JSON.stringify(st?.state ?? null)} attributes=${JSON.stringify(st?.attributes ?? {})}`);
         }
         await hass.callWS!({ type: `${domain}/delete`, [`${domain}_id`]: objectId });
       }

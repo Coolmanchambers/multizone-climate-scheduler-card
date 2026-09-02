@@ -40,7 +40,7 @@ describe('automation payload generators', () => {
     ]);
     const json = JSON.stringify(a);
     expect(json).toContain("is_state(repeat.item.enabled, 'on')");
-    expect(json).toContain('blk != states(repeat.item.marker)');
+    expect(json).toContain('mark != states(repeat.item.marker)');
     expect(json).toContain("!= 'eco'");
     expect(json).toContain('heat_cool');
     expect(json).toContain('target_temp_high');
@@ -83,6 +83,9 @@ function fakeHass(failOn?: (c: Call) => boolean): {
   calls: Call[];
   autos: Map<string, Record<string, unknown>>;
   reg: Map<string, string>;
+  autoEnt: Map<string, string>;
+  entryDomains: Map<string, string>;
+  helperUniq: Map<string, string>;
 } {
   const calls: Call[] = [];
   let flowN = 0;
@@ -91,6 +94,14 @@ function fakeHass(failOn?: (c: Call) => boolean): {
   const autos = new Map<string, Record<string, unknown>>();
   // entity_id -> owning config_entry_id (flow-created entities)
   const reg = new Map<string, string>();
+  // automation entity_id -> automation uid, registered like HA does on POST
+  // (alias slug, `_2` when a different automation already owns the base id)
+  const autoEnt = new Map<string, string>();
+  // config_entry_id -> domain (flow-created entries default to 'template';
+  // tests set a foreign domain to model an adopted integration entity)
+  const entryDomains = new Map<string, string>();
+  // helper entity_id -> registry unique_id (storage id), for renamed helpers
+  const helperUniq = new Map<string, string>();
   const slug = (n: string) => n.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   const hass: HassLike = {
     states: {},
@@ -105,8 +116,21 @@ function fakeHass(failOn?: (c: Call) => boolean): {
       if (c.key === 'config/entity_registry/get_entries') {
         const ids = (msg.entity_ids as string[]) ?? [];
         return Object.fromEntries(
-          ids.map((id) => [id, reg.has(id) ? { config_entry_id: reg.get(id), labels: [] } : null]),
+          ids.map((id) => [
+            id,
+            reg.has(id)
+              ? { config_entry_id: reg.get(id), labels: [] }
+              : autoEnt.has(id)
+                ? { unique_id: autoEnt.get(id), labels: [] }
+                : helperUniq.has(id)
+                  ? { unique_id: helperUniq.get(id), labels: [] }
+                  : null,
+          ]),
         );
+      }
+      if (c.key === 'config_entries/get_single') {
+        const id = String(msg.entry_id);
+        return { config_entry: { entry_id: id, domain: entryDomains.get(id) ?? 'template' } };
       }
       if (c.key === 'config/entity_registry/update' && msg.new_entity_id) {
         const from = String(msg.entity_id);
@@ -185,7 +209,13 @@ function fakeHass(failOn?: (c: Call) => boolean): {
       const am = path.match(/^config\/automation\/config\/(.+)$/);
       if (am) {
         const uid = am[1]!;
-        if (method === 'POST') { autos.set(uid, { ...(data ?? {}) }); return { result: 'ok' }; }
+        if (method === 'POST') {
+          autos.set(uid, { ...(data ?? {}) });
+          let ent = `automation.${slug(String(data?.alias ?? uid))}`;
+          while (autoEnt.has(ent) && autoEnt.get(ent) !== uid) ent = `${ent}_2`;
+          autoEnt.set(ent, uid);
+          return { result: 'ok' };
+        }
         if (method === 'GET') {
           const cfg = autos.get(uid);
           if (!cfg) throw new Error('not found');
@@ -201,7 +231,7 @@ function fakeHass(failOn?: (c: Call) => boolean): {
       return { result: 'ok' };
     },
   };
-  return { hass, calls, autos, reg };
+  return { hass, calls, autos, reg, autoEnt, entryDomains, helperUniq };
 }
 
 function ctx(log: string[] = []): ExecContext {
@@ -585,6 +615,48 @@ describe('flow-entity resolution (S12c incident regression)', () => {
   });
 });
 
+describe('next-block sensor season map (item 47)', () => {
+  const flowFields = (calls: Call[]) => {
+    const steps = calls.filter((c) => /^POST config\/config_entries\/flow\/f\d+$/.test(c.key));
+    return Object.assign({}, ...steps.map((c) => c.data ?? {}));
+  };
+
+  it('an apostrophe season name gets the double-quoted map key, pinned exactly', async () => {
+    const { hass, calls } = fakeHass();
+    const octx: ExecContext = {
+      prefix: 'climate',
+      zones: ZONES,
+      seasons: [
+        { key: 'owners_summer', name: "Owner's Summer", default_mode: 'cool' },
+        { key: 'winter', name: 'Winter', default_mode: 'heat_cool' },
+      ],
+      log: () => undefined,
+    };
+    const p = emptyPlan();
+    p.create.push(create('sensor.climate_next_block', 'template_sensor', { name: 'Climate next block' }));
+    const res = await executePlan(hass, p, octx);
+    expect(res.ok).toBe(true);
+    expect(flowFields(calls).state).toBe(
+      `{% set season = {"Owner's Summer": 'owners_summer', 'Winter': 'winter'}.get(states('input_select.climate_season'), states('input_select.climate_season') | lower) %}` +
+        `{% set evs = states.schedule | selectattr('entity_id', 'search', '^schedule\\.climate_[a-z0-9_]+_' ~ season ~ '$') | map(attribute='attributes.next_event') | reject('none') | list %}` +
+        `{{ evs | min if evs | count > 0 else 'unknown' }}`,
+    );
+  });
+
+  it('quote-free seasons keep the pre-change template, byte-for-byte', async () => {
+    const { hass, calls } = fakeHass();
+    const p = emptyPlan();
+    p.create.push(create('sensor.climate_next_block', 'template_sensor', { name: 'Climate next block' }));
+    const res = await executePlan(hass, p, ctx());
+    expect(res.ok).toBe(true);
+    expect(flowFields(calls).state).toBe(
+      `{% set season = {'Summer': 'summer', 'Winter': 'winter'}.get(states('input_select.climate_season'), states('input_select.climate_season') | lower) %}` +
+        `{% set evs = states.schedule | selectattr('entity_id', 'search', '^schedule\\.climate_[a-z0-9_]+_' ~ season ~ '$') | map(attribute='attributes.next_event') | reject('none') | list %}` +
+        `{{ evs | min if evs | count > 0 else 'unknown' }}`,
+    );
+  });
+});
+
 describe('config-entry sensor deletion (teardown / zone removal)', () => {
   it('deletes flow-created sensors via their config entry, not a bogus WS collection call', async () => {
     const { hass, calls, reg } = fakeHass();
@@ -689,6 +761,35 @@ describe('pristine reporting for the Objects tab (initial release)', () => {
 });
 
 describe('orphan season schedule discovery (QA-2 live finding, B1-6 season variant)', () => {
+  // The live engine automation is the instance-scoped memory of which
+  // schedules were provisioned (0.7.7): its state trigger lists every zone x
+  // season schedule, its season map carries the keys, its for_each the zones.
+  const engineConfig = (zones: string[], seasons: string[], extraWatched: string[] = []) => ({
+    id: 'climate_mzcs_engine',
+    triggers: [
+      {
+        trigger: 'state',
+        entity_id: [...zones.flatMap((z) => seasons.map((s) => `schedule.climate_${z}_${s}`)), ...extraWatched],
+      },
+    ],
+    actions: [
+      {
+        variables: {
+          season: `{{ {${seasons.map((s) => `'${s[0]!.toUpperCase()}${s.slice(1)}': '${s}'`).join(', ')}}.get(states('input_select.climate_season'), states('input_select.climate_season') | lower) }}`,
+        },
+      },
+      { repeat: { for_each: zones.map((z) => ({ zone: z })), sequence: [] } },
+    ],
+  });
+  const engineFor =
+    (zones: string[], seasons: string[], extraWatched: string[] = []): HassLike['callApi'] =>
+    async (method, path) => {
+      if (method === 'GET' && path === 'config/automation/config/climate_mzcs_engine') {
+        return engineConfig(zones, seasons, extraWatched);
+      }
+      throw new Error('not found');
+    };
+
   it('a schedule for a season no longer in the config is still seen and planned for delete', async () => {
     const hass: HassLike = {
       states: {
@@ -705,6 +806,7 @@ describe('orphan season schedule discovery (QA-2 live finding, B1-6 season varia
         if (t.endsWith('/list')) return [];
         return {};
       },
+      callApi: engineFor(['upstairs'], ['spring', 'summer']),
     };
     // config only knows summer/winter - spring was removed
     const existing = await fetchExisting(hass, 'climate', ['upstairs'], ['summer', 'winter']);
@@ -732,6 +834,106 @@ describe('orphan season schedule discovery (QA-2 live finding, B1-6 season varia
     };
     const existing2 = await fetchExisting(hass2, 'climate', ['upstairs'], ['summer', 'winter']);
     expect(existing2.some((e) => e.id === 'schedule.climate_upstairs_spring' && !e.managed)).toBe(true);
+  });
+
+  it('0.7.7 refutation M1: schedules are claimed from the live engine only, never by id shape', async () => {
+    // Instance A (prefix `climate`, a zone called "House") beside instance B
+    // (prefix `climate_house`). B's schedule ids read as `climate` + `house_...`
+    // and the old tail rule claimed them for A - labelled, so delete-eligible.
+    const mk = (engine: string[] | null): HassLike => ({
+      states: {
+        'schedule.climate_house_summer': { state: 'on', attributes: {} },
+        'schedule.climate_house_upstairs_summer': { state: 'on', attributes: {} }, // B's
+        'schedule.climate_house_upstairs_winter': { state: 'on', attributes: {} }, // B's
+        'schedule.climate_house_spring': { state: 'on', attributes: {} }, // A's removed season
+      },
+      callService: async () => undefined,
+      callWS: async (msg) => {
+        const t = String(msg.type);
+        if (t === 'config/entity_registry/get_entries') {
+          const ids = (msg.entity_ids as string[]) ?? [];
+          return Object.fromEntries(ids.map((id) => [id, { labels: ['mzcs'] }]));
+        }
+        if (t.endsWith('/list')) return [];
+        return {};
+      },
+      ...(engine ? { callApi: engineFor(['house'], engine) } : {}),
+    });
+    const withEngine = await fetchExisting(mk(['summer', 'spring']), 'climate', ['house'], ['summer']);
+    expect(withEngine.map((e) => e.id).sort()).toEqual(['schedule.climate_house_spring', 'schedule.climate_house_summer']);
+    // No engine (never applied): nothing beyond the current parse is claimed -
+    // B's schedules are safe, and A's stray spring schedule is left alone.
+    const noEngine = await fetchExisting(mk(null), 'climate', ['house'], ['summer']);
+    expect(noEngine.map((e) => e.id)).toEqual(['schedule.climate_house_summer']);
+  });
+
+  it('0.7.7 refutation MED-1: a removed zone whose slug extends a current slug is claimed ONCE', async () => {
+    // zones `up` and `up_late`; `up_late` removed. The season pass used to
+    // push `schedule.climate_up_late_*` (as zone `up`, season `late_*`) and
+    // the zone pass pushed them again: two deletes, the second aborting Apply.
+    const ids = [
+      'schedule.climate_up_summer',
+      'schedule.climate_up_late_summer',
+      'schedule.climate_up_late_spring',
+      'input_boolean.climate_up_late_enabled',
+    ];
+    const hass: HassLike = {
+      states: Object.fromEntries(ids.map((id) => [id, { state: 'on', attributes: {} }])),
+      callService: async () => undefined,
+      callWS: async (msg) => {
+        const t = String(msg.type);
+        if (t === 'config/entity_registry/get_entries') {
+          const e = (msg.entity_ids as string[]) ?? [];
+          return Object.fromEntries(e.map((id) => [id, { labels: ['mzcs'] }]));
+        }
+        if (t.endsWith('/list')) return [];
+        return {};
+      },
+      callApi: engineFor(['up', 'up_late'], ['summer', 'spring']),
+    };
+    const existing = await fetchExisting(hass, 'climate', ['up'], ['summer']);
+    const seen = existing.map((e) => e.id);
+    expect(new Set(seen).size).toBe(seen.length);
+    // (up_spring is watched by the engine but has no state here, so it is not listed)
+    expect(seen.sort()).toEqual([...ids].sort());
+    const p = plan(
+      buildDesired({
+        prefix: 'climate',
+        zones: [{ slug: 'up', name: 'Up', climate: 'climate.up' }],
+        seasons: [{ key: 'summer', name: 'Summer', default_mode: 'cool' }],
+        schedules: { up: { summer: { granularity: 'all', sets: { all: [{ time: '06:00', name: 'Day', mode: 'cool', cool_temp: 78, heat_temp: null }] } } } },
+        features: { fan_timer: true, anomaly_alerts: true, steering: false },
+      }),
+      existing,
+    );
+    const del = p.delete.map((a) => a.id);
+    expect(new Set(del).size).toBe(del.length);
+    expect(del).toEqual(expect.arrayContaining(ids.filter((i) => i.includes('up_late'))));
+  });
+
+  it('0.7.7 refutation LOW-2: a hand-edited engine trigger cannot pull a foreign schedule into the claim', async () => {
+    // The user added another instance's schedule to A's engine trigger. Only
+    // schedules under A's OWN for_each zones are memory; the foreign one is
+    // not claimed, so it can never become delete-eligible here.
+    const hass: HassLike = {
+      states: {
+        'schedule.climate_house_summer': { state: 'on', attributes: {} },
+        'schedule.climate_house_upstairs_summer': { state: 'on', attributes: {} }, // instance B's
+      },
+      callService: async () => undefined,
+      callWS: async (msg) => {
+        const t = String(msg.type);
+        if (t === 'config/entity_registry/get_entries') {
+          const e = (msg.entity_ids as string[]) ?? [];
+          return Object.fromEntries(e.map((id) => [id, { labels: ['mzcs'] }]));
+        }
+        if (t.endsWith('/list')) return [];
+        return {};
+      },
+      callApi: engineFor(['house'], ['summer'], ['schedule.climate_house_upstairs_summer']),
+    };
+    const existing = await fetchExisting(hass, 'climate', ['house'], ['summer']);
+    expect(existing.map((e) => e.id)).toEqual(['schedule.climate_house_summer']);
   });
 });
 
@@ -776,5 +978,349 @@ describe('runtime mirror sensor (item 42)', () => {
     const res = await executePlan(hass, p, ctx(log));
     expect(res.ok).toBe(true);
     expect(log.some((l) => l.includes('SKIP'))).toBe(true);
+  });
+});
+
+describe('power-heuristic running sensor (item 29)', () => {
+  /**
+   * SmartThings-class mini-splits expose NO hvac_action, so the hvac_action
+   * template is permanently False for them (measured live 2026-08-30). With a
+   * configured zone power sensor, the CREATION template becomes an OR of the
+   * two measured heuristics: power above standby (catches setpoint-hold duty
+   * cycling the delta misses) or hvac active with the room >= 1° past
+   * setpoint (catches multi-hour power-feed stalls). Both failing together
+   * undercounts - the fail-safe direction. Meta-only: absent power must emit
+   * the ORIGINAL template byte-for-byte, and the differ never compares
+   * template bodies either way.
+   */
+  const flowFields = (calls: Array<{ key: string; data?: Record<string, unknown> }>) => {
+    const steps = calls.filter((c) => /^POST config\/config_entries\/flow\/f\d+$/.test(c.key));
+    return Object.assign({}, ...steps.map((c) => c.data ?? {}));
+  };
+
+  it('with meta.power: the OR template, pinned exactly (QA 0.7.7 MED-1: asymmetric sentinels)', async () => {
+    const { hass, calls } = fakeHass();
+    const p = emptyPlan();
+    p.create.push(
+      create('binary_sensor.climate_upstairs_running', 'template_sensor', {
+        name: 'Climate Upstairs running',
+        source: 'hvac_action',
+        power: 'sensor.upstairs_power',
+      }),
+    );
+    const res = await executePlan(hass, p, ctx());
+    expect(res.ok).toBe(true);
+    const fields = flowFields(calls);
+    // The delta branch's defaults are asymmetric ON PURPOSE: reading side low
+    // (-9999), setpoint side high (9999), so a missing attribute can only make
+    // the comparison FALSE. float(0) on both sides fabricated a huge delta
+    // when current_temperature dropped out mid-heat and pinned running ON.
+    expect(fields.state).toBe(
+      "{{ (states('sensor.upstairs_power') | float(0)) > 100 or (is_state('climate.upstairs', 'cool') and (state_attr('climate.upstairs', 'current_temperature') | float(-9999)) - (state_attr('climate.upstairs', 'temperature') | float(9999)) >= 1) or (is_state('climate.upstairs', 'heat') and (state_attr('climate.upstairs', 'temperature') | float(-9999)) - (state_attr('climate.upstairs', 'current_temperature') | float(9999)) >= 1) }}",
+    );
+    expect(fields.device_class).toBe('running');
+  });
+
+  it('without meta.power: the ORIGINAL hvac_action template, byte-for-byte', async () => {
+    const { hass, calls } = fakeHass();
+    const p = emptyPlan();
+    p.create.push(
+      create('binary_sensor.climate_upstairs_running', 'template_sensor', {
+        name: 'Climate Upstairs running',
+        source: 'hvac_action',
+      }),
+    );
+    const res = await executePlan(hass, p, ctx());
+    expect(res.ok).toBe(true);
+    expect(flowFields(calls).state).toBe(
+      "{{ state_attr('climate.upstairs', 'hvac_action') in ['cooling', 'heating'] }}",
+    );
+  });
+});
+
+/**
+ * 0.7.7 fresh review (2026-09-01): executor hardening. Each test names the
+ * finding it pins; every one was reproduced by execution before the fix.
+ */
+describe('0.7.7 review: executor hardening', () => {
+  it('E2: deleting an adopted sensor KEEPS a config entry that belongs to another integration', async () => {
+    const { hass, calls, reg, entryDomains } = fakeHass();
+    // An adopted running sensor whose registry entry points at a thermostat
+    // integration's own config entry - deleting that entry would remove the
+    // whole integration.
+    reg.set('binary_sensor.climate_upstairs_running', 'entry_of_users_thermostat_integration');
+    entryDomains.set('entry_of_users_thermostat_integration', 'nest');
+    const p = emptyPlan();
+    p.delete.push({ op: 'delete', id: 'binary_sensor.climate_upstairs_running', kind: 'template_sensor' });
+    const log: string[] = [];
+    const res = await executePlan(hass, p, ctx(log));
+    expect(res.deleted).toBe(0);
+    expect(res.skipped).toBe(1);
+    expect(calls.some((c) => c.key.startsWith('DELETE config/config_entries/entry/'))).toBe(false);
+    expect(log.some((l) => l.startsWith('KEEP') && l.includes('"nest"'))).toBe(true);
+  });
+
+  it('E2: an unreadable entry domain is also KEEP, never a delete', async () => {
+    const { hass, calls, reg } = fakeHass((c) => c.key === 'config_entries/get_single' || c.key === 'config_entries/get');
+    reg.set('sensor.climate_upstairs_runtime_today', 'e_unknown');
+    const p = emptyPlan();
+    p.delete.push({ op: 'delete', id: 'sensor.climate_upstairs_runtime_today', kind: 'stats_sensor' });
+    const res = await executePlan(hass, p, ctx());
+    expect(res.deleted).toBe(0);
+    expect(calls.some((c) => c.key.startsWith('DELETE config/config_entries/entry/'))).toBe(false);
+  });
+
+  it('E3: helper update and delete address STORAGE by the registry unique_id, not the entity object_id', async () => {
+    const { hass, calls, helperUniq } = fakeHass();
+    // The managed helper's entity was renamed to the contract id by the user;
+    // its storage item is still `hvac_cdd_base`. A foreign item happens to own
+    // the storage id `climate_cdd_base` - addressing by object_id would rewrite
+    // and then delete THAT one.
+    helperUniq.set('input_number.climate_cdd_base', 'hvac_cdd_base');
+    (hass.states as Record<string, unknown>)['input_number.climate_cdd_base'] = {
+      state: '72',
+      attributes: { min: 60, max: 80 },
+    };
+    const p = emptyPlan();
+    p.update.push({
+      op: 'update',
+      id: 'input_number.climate_cdd_base',
+      kind: 'helper',
+      spec: { name: 'Climate CDD base', min: 60, max: 80, step: 1 },
+      from: { name: 'old', min: 60, max: 80, step: 1 },
+    });
+    await executePlan(hass, p, ctx());
+    const upd = calls.find((c) => c.key === 'input_number/update')!;
+    expect(upd.data!.input_number_id).toBe('hvac_cdd_base');
+    const d = emptyPlan();
+    d.delete.push({ op: 'delete', id: 'input_number.climate_cdd_base', kind: 'helper' });
+    const log: string[] = [];
+    await executePlan(hass, d, ctx(log));
+    const del = calls.find((c) => c.key === 'input_number/delete')!;
+    expect(del.data!.input_number_id).toBe('hvac_cdd_base');
+    // invariant 4: helper deletes are snapshot-logged (a learned/tuned value is worth a line)
+    expect(log.some((l) => l.startsWith('snapshot input_number.climate_cdd_base') && l.includes('"72"'))).toBe(true);
+  });
+
+  it('E4: renaming the ACTIVE season re-selects it after the options update (core would fall back to options[0])', async () => {
+    const { hass, calls } = fakeHass();
+    (hass.states as Record<string, unknown>)['input_select.climate_season'] = { state: 'Winter', attributes: {} };
+    const p = emptyPlan();
+    p.update.push({
+      op: 'update',
+      id: 'input_select.climate_season',
+      kind: 'helper',
+      spec: { name: 'Climate season', options: ['Summer', 'Cold Season'] },
+      from: { name: 'Climate season', options: ['Summer', 'Winter'] },
+    });
+    const log: string[] = [];
+    await executePlan(hass, p, ctx(log));
+    const sel = calls.find((c) => c.key === 'svc input_select.select_option')!;
+    expect(sel.data).toEqual({ entity_id: 'input_select.climate_season', option: 'Cold Season' });
+    expect(log.some((l) => l.includes('Re-selected "Cold Season"'))).toBe(true);
+  });
+
+  it('E4: no re-select when the current option survives; a note (no guess) when the mapping is ambiguous', async () => {
+    const { hass, calls } = fakeHass();
+    (hass.states as Record<string, unknown>)['input_select.climate_season'] = { state: 'Summer', attributes: {} };
+    const p = emptyPlan();
+    p.update.push({
+      op: 'update',
+      id: 'input_select.climate_season',
+      kind: 'helper',
+      spec: { name: 'Climate season', options: ['Summer', 'Cold Season'] },
+      from: { name: 'Climate season', options: ['Summer', 'Winter'] },
+    });
+    await executePlan(hass, p, ctx());
+    expect(calls.some((c) => c.key === 'svc input_select.select_option')).toBe(false);
+    // A season ADDED at the same time as the rename: lengths differ, so the
+    // index mapping is not trustworthy - log, do not guess.
+    (hass.states as Record<string, unknown>)['input_select.climate_season'] = { state: 'Winter', attributes: {} };
+    const q = emptyPlan();
+    q.update.push({
+      op: 'update',
+      id: 'input_select.climate_season',
+      kind: 'helper',
+      spec: { name: 'Climate season', options: ['Summer', 'Cold Season', 'Shoulder'] },
+      from: { name: 'Climate season', options: ['Summer', 'Winter'] },
+    });
+    const log: string[] = [];
+    await executePlan(hass, q, ctx(log));
+    expect(calls.some((c) => c.key === 'svc input_select.select_option')).toBe(false);
+    expect(log.some((l) => l.startsWith('NOTE') && l.includes('no longer an option'))).toBe(true);
+  });
+
+  it('E4 (refutation LOW-3): a season removed and another added in its slot is NOT treated as a rename', async () => {
+    // Winter deleted, Spring added: by names alone this looks like a rename by
+    // position. The same Apply creates Spring's schedule and deletes Winter's,
+    // so the executor logs instead of selecting a season the user never chose.
+    const { hass, calls } = fakeHass();
+    (hass.states as Record<string, unknown>)['input_select.climate_season'] = { state: 'Winter', attributes: {} };
+    const p = emptyPlan();
+    p.update.push({
+      op: 'update',
+      id: 'input_select.climate_season',
+      kind: 'helper',
+      spec: { name: 'Climate season', options: ['Summer', 'Spring'] },
+      from: { name: 'Climate season', options: ['Summer', 'Winter'] },
+    });
+    p.create.push(create('schedule.climate_upstairs_spring', 'schedule', { name: 'Climate Upstairs Spring', week: {} }));
+    p.delete.push({ op: 'delete', id: 'schedule.climate_upstairs_winter', kind: 'schedule' });
+    const log: string[] = [];
+    await executePlan(hass, p, ctx(log));
+    expect(calls.some((c) => c.key === 'svc input_select.select_option')).toBe(false);
+    expect(log.some((l) => l.startsWith('NOTE') && l.includes('no longer an option'))).toBe(true);
+  });
+
+  it('E5: a created automation is labelled by its unique id - a foreign automation owning the alias slug is never labelled', async () => {
+    const { hass, calls, autoEnt } = fakeHass();
+    // A user automation already owns automation.climate_schedule_engine.
+    autoEnt.set('automation.climate_schedule_engine', 'users_own_automation');
+    const p = emptyPlan();
+    p.create.push(create('automation:climate_mzcs_engine', 'automation'));
+    await executePlan(hass, p, ctx());
+    const labels = calls.filter((c) => c.key === 'config/entity_registry/update' && Array.isArray(c.data?.labels));
+    expect(labels.map((c) => c.data!.entity_id)).toEqual(['automation.climate_schedule_engine_2']);
+  });
+
+  it('E5: an automation whose entity cannot be resolved is left unlabelled with a note (the next Apply adopts it)', async () => {
+    const { hass, calls, autoEnt } = fakeHass();
+    const p = emptyPlan();
+    p.create.push(create('automation:climate_mzcs_watchdog', 'automation'));
+    // Simulate registry lag that never resolves: forget the entity after POST.
+    const origWS = hass.callWS!;
+    hass.callWS = async (msg) => {
+      if (msg.type === 'config/entity_registry/get_entries') autoEnt.clear();
+      return origWS(msg);
+    };
+    const log: string[] = [];
+    await executePlan(hass, p, ctx(log));
+    expect(calls.some((c) => c.key === 'config/entity_registry/update')).toBe(false);
+    expect(log.some((l) => l.startsWith('NOTE') && l.includes('label'))).toBe(true);
+  }, 15_000);
+
+  it('rollback removes a config entry whose flow completed but whose locate/rename failed (no orphan entry)', async () => {
+    // An apostrophe zone: HA slugs the flow name to owner_s_office, so the
+    // contract id needs a rename; make that rename fail permanently.
+    const { hass, calls } = fakeHass((c) => c.key === 'config/entity_registry/update' && Boolean(c.data?.new_entity_id));
+    const owner: ZoneRef = { slug: 'owners_office', name: "Owner's Office", climate: 'climate.office' };
+    const p = emptyPlan();
+    p.create.push(
+      create("binary_sensor.climate_owners_office_running", 'template_sensor', {
+        name: "Climate Owner's Office running",
+        source: 'hvac_action',
+      }),
+    );
+    const log: string[] = [];
+    const res = await executePlan(hass, p, { ...ctx(log), zones: [owner] });
+    expect(res.ok).toBe(false);
+    expect(calls.some((c) => c.key === 'DELETE config/config_entries/entry/e_f1')).toBe(true);
+    expect(log.some((l) => l.startsWith('Rolled back e_f1'))).toBe(true);
+  }, 15_000);
+});
+
+/**
+ * 0.7.7 review E1: a zone removed from the config no longer parsed, so every
+ * one of its objects was invisible to fetchExisting - never deleted, missed by
+ * teardown, its kill switch keeping its state. The live engine automation's
+ * for_each rows are the instance-scoped memory of which zones were provisioned.
+ */
+describe('0.7.7 review E1: objects of a zone REMOVED from the config are still seen', () => {
+  const ZONE_TWO = [
+    'input_boolean.climate_zone_two_enabled',
+    'input_text.climate_zone_two_applied_block',
+    'timer.climate_zone_two_fan',
+    'binary_sensor.climate_zone_two_running',
+    'sensor.climate_zone_two_runtime_today',
+    'sensor.climate_zone_two_runtime_mirror',
+    'sensor.climate_zone_two_expected_runtime',
+    'input_number.climate_zone_two_k',
+    'schedule.climate_zone_two_summer',
+    'schedule.climate_zone_two_winter',
+    'schedule.climate_zone_two_spring', // a season removed earlier, under the removed zone
+  ];
+  const OTHER_INSTANCE = 'input_boolean.climate_house_up_enabled'; // prefix `climate_house`, zone `up`
+  const mk = (engineZones: string[] | null, labelled: boolean): HassLike => ({
+    states: Object.fromEntries(
+      [...ZONE_TWO, OTHER_INSTANCE, 'input_boolean.climate_zone_one_enabled'].map((id) => [
+        id,
+        { state: 'off', attributes: {} },
+      ]),
+    ),
+    callService: async () => undefined,
+    callWS: async (msg) => {
+      const t = String(msg.type);
+      if (t === 'config/entity_registry/get_entries') {
+        const ids = (msg.entity_ids as string[]) ?? [];
+        return Object.fromEntries(ids.map((id) => [id, { labels: labelled ? ['mzcs'] : [] }]));
+      }
+      if (t.endsWith('/list')) return [];
+      return {};
+    },
+    callApi: async (method, path) => {
+      if (method === 'GET' && path === 'config/automation/config/climate_mzcs_engine') {
+        if (!engineZones) throw new Error('not found');
+        return {
+          id: 'climate_mzcs_engine',
+          triggers: [
+            {
+              trigger: 'state',
+              // the engine watches every zone x season schedule it was generated for
+              entity_id: engineZones.flatMap((z) => ['summer', 'winter', 'spring'].map((s) => `schedule.climate_${z}_${s}`)),
+            },
+          ],
+          actions: [
+            {
+              variables: {
+                season:
+                  "{{ {'Summer': 'summer', 'Winter': 'winter', 'Spring': 'spring'}.get(states('input_select.climate_season'), states('input_select.climate_season') | lower) }}",
+              },
+            },
+            { repeat: { for_each: engineZones.map((z) => ({ zone: z })), sequence: [] } },
+          ],
+        };
+      }
+      throw new Error('not found');
+    },
+  });
+  const singleZoneInput = () => ({
+    prefix: 'climate',
+    zones: [{ slug: 'zone_one', name: 'Zone One', climate: 'climate.zone_one' }],
+    seasons: SEASONS,
+    schedules: {
+      zone_one: {
+        summer: { granularity: 'all' as const, sets: { all: [{ time: '06:00', name: 'Day', mode: 'cool' as const, cool_temp: 78, heat_temp: null }] } },
+        winter: { granularity: 'all' as const, sets: { all: [{ time: '06:00', name: 'Day', mode: 'heat_cool' as const, cool_temp: 84, heat_temp: 66 }] } },
+      },
+    },
+    features: { fan_timer: true, anomaly_alerts: true, steering: false },
+  });
+
+  it('every object of the removed zone is a managed candidate and plan() deletes them all', async () => {
+    const existing = await fetchExisting(mk(['zone_one', 'zone_two'], true), 'climate', ['zone_one'], ['summer', 'winter']);
+    for (const id of ZONE_TWO) {
+      expect(existing.some((e) => e.id === id && e.managed), id).toBe(true);
+    }
+    const p = plan(buildDesired(singleZoneInput()), existing);
+    for (const id of ZONE_TWO) expect(p.delete.map((a) => a.id), id).toContain(id);
+    // The other instance's object shares the `climate` prefix textually but is
+    // NOT one of this engine's zones: never a candidate, never deletable.
+    expect(existing.some((e) => e.id === OTHER_INSTANCE)).toBe(false);
+    expect(p.delete.map((a) => a.id)).not.toContain(OTHER_INSTANCE);
+  });
+
+  it('unlabelled objects of a removed zone are seen but stay unmanaged (adopt-safe, never deleted)', async () => {
+    const existing = await fetchExisting(mk(['zone_one', 'zone_two'], false), 'climate', ['zone_one'], ['summer', 'winter']);
+    expect(existing.some((e) => e.id === 'input_boolean.climate_zone_two_enabled' && !e.managed)).toBe(true);
+    const p = plan(buildDesired(singleZoneInput()), existing);
+    expect(p.delete).toEqual([]);
+  });
+
+  it('no engine yet (never provisioned) or an engine that only knows the current zones claims nothing extra', async () => {
+    for (const zones of [null, ['zone_one']]) {
+      const existing = await fetchExisting(mk(zones, true), 'climate', ['zone_one'], ['summer', 'winter']);
+      expect(existing.map((e) => e.id).filter((id) => id.includes('zone_two'))).toEqual([]);
+      expect(existing.some((e) => e.id === OTHER_INSTANCE)).toBe(false);
+    }
   });
 });

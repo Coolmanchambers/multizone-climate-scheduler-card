@@ -105,8 +105,12 @@ describe('engine: the skip gate (invariants 1-3)', () => {
    * string. It is the single most safety-critical expression the card
    * generates; if it changes at all, a human should have to say why.
    */
+  // 0.7.7 review: the marker term compares the COMPOSED `mark` variable
+  // (season|block|mode|cool|heat) and the gate refuses an unavailable/unknown
+  // thermostat so a missed transition is retried by the tick instead of being
+  // recorded as applied.
   const GATE_DEFAULT =
-    "{{ is_state(repeat.item.enabled, 'on') and blk is not none and blk != states(repeat.item.marker)" +
+    "{{ is_state(repeat.item.enabled, 'on') and blk is not none and states(repeat.item.climate) not in ['unavailable', 'unknown'] and mark != states(repeat.item.marker)" +
     " and state_attr(repeat.item.climate, 'preset_mode') != 'eco' }}";
 
   it('is EXACTLY the expected boolean expression, joiners included', () => {
@@ -121,8 +125,9 @@ describe('engine: the skip gate (invariants 1-3)', () => {
     // than dumping two long strings.
     const t = String(zoneStep(engine(), 'Skip when zone disabled')!.value_template);
     expect(t).not.toMatch(/\bor\b/);
-    expect(t.match(/\band\b/g) ?? []).toHaveLength(3);
-    expect(t).not.toMatch(/\bnot\b(?!\s+none)/);
+    expect(t.match(/\band\b/g) ?? []).toHaveLength(4);
+    // `is not none` and the availability `not in [...]` are the only negations.
+    expect(t).not.toMatch(/\bnot\b(?!\s+(none|in\b))/);
   });
 
   it('names a custom standby preset instead of the default, exactly', () => {
@@ -133,7 +138,7 @@ describe('engine: the skip gate (invariants 1-3)', () => {
   it('drops ONLY the preset clause when the stand-down is disabled', () => {
     const gate = zoneStep(engine({ features: { eco_preset: false } }), 'Skip when zone disabled');
     expect(gate!.value_template).toBe(
-      "{{ is_state(repeat.item.enabled, 'on') and blk is not none and blk != states(repeat.item.marker) }}",
+      "{{ is_state(repeat.item.enabled, 'on') and blk is not none and states(repeat.item.climate) not in ['unavailable', 'unknown'] and mark != states(repeat.item.marker) }}",
     );
   });
 
@@ -494,12 +499,10 @@ describe('the safety-critical invariants hold across EVERY variant (QA NEW-4)', 
       const gate = zoneStep(eng, 'Skip when zone disabled');
       const t = String(gate!.value_template);
       expect(t).toContain("is_state(repeat.item.enabled, 'on')");
-      // Off-peak re-keys the marker comparison to the composed `mark` variable
-      // (item 7); every other config compares the bare block name.
-      const markerTerm = input.features.off_peak_entity
-        ? 'mark != states(repeat.item.marker)'
-        : 'blk != states(repeat.item.marker)';
-      expect(t).toContain(markerTerm);
+      // Every config compares the composed `mark` variable (0.7.7: season,
+      // block, mode and setpoints; off-peak appends the applied adjustment).
+      expect(t).toContain('mark != states(repeat.item.marker)');
+      expect(t).toContain("states(repeat.item.climate) not in ['unavailable', 'unknown']");
       expect(t).not.toMatch(/\bor\b/);
     });
 
@@ -523,8 +526,17 @@ describe('the safety-critical invariants hold across EVERY variant (QA NEW-4)', 
     });
 
     it(`${name}: every season is in the engine name->key map`, () => {
-      const j = JSON.stringify(eng);
-      for (const s of input.seasons) expect(j, `${name}/${s.key}`).toContain(`'${s.name}': '${s.key}'`);
+      const season = String(
+        (walk(eng).find((n) => (n.variables as Node)?.season)!.variables as Node).season,
+      );
+      for (const s of input.seasons) {
+        // Item 47's emission rule: the key is double-quoted only when the name
+        // carries a single quote (exact strings pinned in season-map.test.ts).
+        const key = s.name.includes("'")
+          ? `"${s.name.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+          : `'${s.name}'`;
+        expect(season, `${name}/${s.key}`).toContain(`${key}: '${s.key}'`);
+      }
     });
 
     it(`${name}: every climate call targets a configured zone`, () => {
@@ -579,12 +591,20 @@ describe('item 38: exact gate + ordered calls across the WHOLE matrix', () => {
     // Off-peak (item 7) compares the composed `mark` variable so a flip or an
     // offset tune re-applies; steering (item 8) appends the override-timer
     // stand-down term; everything else in the gate is unchanged.
-    const marker = offPeak ? 'mark' : 'blk';
-    const base = `{{ is_state(repeat.item.enabled, 'on') and blk is not none and ${marker} != states(repeat.item.marker)`;
+    // 0.7.7: every config compares the composed `mark` variable, and the
+    // gate refuses an unavailable/unknown thermostat (a skipped service call
+    // must not be recorded as applied).
+    void offPeak;
+    const base = `{{ is_state(repeat.item.enabled, 'on') and blk is not none and states(repeat.item.climate) not in ['unavailable', 'unknown'] and mark != states(repeat.item.marker)`;
     // Compound steering term (QA finding M5): the engine stands down only
     // while an override runs ON A COOLING BLOCK - a scheduled transition to
-    // off/heat/heat_cool mid-override is reclaimed immediately.
-    const steer = steering ? " and not (is_state(repeat.item.override_timer, 'active') and blk_mode == 'cool')" : '';
+    // off/heat/heat_cool mid-override is reclaimed immediately - AND only
+    // while the thermostat is already cooling (0.7.7 review): steering never
+    // writes a mode, so an off->cool transition mid-override needs the engine
+    // to apply the block once.
+    const steer = steering
+      ? " and not (is_state(repeat.item.override_timer, 'active') and blk_mode == 'cool' and is_state(repeat.item.climate, 'cool'))"
+      : '';
     if (eco === false) return `${base}${steer} }}`;
     const preset = (typeof eco === 'string' ? eco : 'eco').replace(/['\\]/g, '');
     return `${base} and state_attr(repeat.item.climate, 'preset_mode') != '${preset}'${steer} }}`;
@@ -642,6 +662,79 @@ describe('item 38: exact gate + ordered calls across the WHOLE matrix', () => {
       }
       const actual = Object.fromEntries(Object.entries(payloads).map(([uid, p]) => [uid, callsOf(p as Node)]));
       expect(actual).toEqual(expected);
+    });
+  }
+});
+
+/**
+ * 0.7.7 review, THE headline finding (found independently by three lenses):
+ * the applied-block marker used to be the block NAME alone, so any block whose
+ * content changed without its name changing was never applied - a season
+ * switch whose current block shared a name with the old season's (every seeded
+ * install: both seeds are 'Day'), a weekday/weekend clone edited on one side
+ * only, consecutive same-named blocks. The marker is now COMPOSED of season,
+ * block, mode and both setpoints, so a content change re-applies at the next
+ * trigger while a manual thermostat change (touching none of these) still
+ * holds until the next block. Pinned across the whole matrix, exactly.
+ */
+describe('0.7.7 review: the applied-block marker is composed of the block CONTENT', () => {
+  const rows = [{ name: 'default', overrides: {} as Record<string, unknown> }, ...VARIANTS];
+  const BASE = "season ~ '|' ~ blk ~ '|' ~ blk_mode ~ '|' ~ blk_cool ~ '|' ~ blk_heat";
+  for (const v of rows) {
+    const input = canonicalInput(v.overrides as Parameters<typeof canonicalInput>[0]);
+    const eng = (allPayloads(input) as Record<string, Node>)[`${input.prefix}_mzcs_engine`]!;
+    const offPeak = Boolean(input.features.off_peak_entity);
+
+    it(`${v.name}: the mark variable is EXACTLY the composed expression`, () => {
+      const step = zoneSequence(eng).find((s) => (s.variables as Node | undefined)?.mark) as Node;
+      expect(step, 'a step defining `mark` must exist').toBeDefined();
+      expect((step.variables as Node).mark).toBe(
+        offPeak ? `{{ ${BASE} ~ '|op' ~ adj }}` : `{{ ${BASE} }}`,
+      );
+      // It is computed AFTER the block read and BEFORE the gate that reads it.
+      const seq = zoneSequence(eng);
+      const read = seq.findIndex((s) => String(s.alias).startsWith("Read this zone's active block"));
+      const mark = seq.indexOf(step);
+      const gate = seq.findIndex((s) => String(s.alias).startsWith('Skip when zone disabled'));
+      expect(read).toBeGreaterThanOrEqual(0);
+      expect(mark).toBeGreaterThan(read);
+      expect(gate).toBeGreaterThan(mark);
+    });
+
+    it(`${v.name}: the record step writes the composed marker, never the bare name`, () => {
+      const record = zoneSequence(eng).find((s) => actionOf(s) === 'input_text.set_value') as Node;
+      expect((record.data as Node).value).toBe('{{ mark }}');
+    });
+
+    it(`${v.name}: the gate refuses an unavailable or unknown thermostat`, () => {
+      // HA silently skips a service call to an unavailable entity; recording
+      // the marker anyway lost the transition until the NEXT block.
+      const t = String(zoneStep(eng, 'Skip when zone disabled')!.value_template);
+      expect(t).toContain("states(repeat.item.climate) not in ['unavailable', 'unknown'] and mark != states(repeat.item.marker)");
+    });
+
+    it(`${v.name}: the learning write clamps k to the helper max and continues on error`, () => {
+      const learn = (allPayloads(input) as Record<string, Node>)[`${input.prefix}_mzcs_runtime_learning`]!;
+      const write = walk(learn).find((n) => n.alias === 'Write the new k') as Node;
+      expect(write.continue_on_error).toBe(true);
+      expect((write.data as Node).value).toBe(
+        '{{ [ ((runtime_h / cdd) if old_k == 0 else (alpha * (runtime_h / cdd) + (1 - alpha) * old_k)), 10 ] | min | round(2) }}',
+      );
+    });
+
+    it(`${v.name}: the apply step's choose branches are in EXACTLY this order`, () => {
+      // 0.7.7 review (adversary MED-1): reversing the branches shadows the
+      // heat_cool branch behind the single-target one (a heat_cool block then
+      // applies `temperature: blk_cool, hvac_mode: heat_cool`), and only the
+      // hash pins objected. `choose` is first-match, so order IS behaviour.
+      const apply = zoneStep(eng, 'Apply the block') as Node;
+      const conds = (apply.choose as Node[]).map((c) => String(((c.conditions as Node[])[0] as Node).value_template));
+      expect(conds).toEqual([
+        "{{ blk_mode == 'heat_cool' }}",
+        "{{ blk_mode == 'off' }}",
+        '{{ blk_cool is not none or blk_heat is not none }}',
+      ]);
+      expect(apply.default).toEqual([]);
     });
   }
 });

@@ -607,6 +607,81 @@ describe('seasons[].name: refuse non-strings with a message, not a TypeError (it
   });
 });
 
+describe('reserved slugs (item 43): editor-prevented, message-only at the boundary', () => {
+  /**
+   * The 0.7.7 QA sweep EXECUTED the original blanket-refusal design against a
+   * pinned v0.7.6 worktree and refuted its premise: the A2-8 duplicate-id
+   * guard already refused every actually-colliding config (sensor_schedule +
+   * steering) with a readable error, while a reserved slug that produces no
+   * collision (zone "Fan"; season key "theme" without steering) provisioned
+   * and CONVERGED at v0.7.6 - refusing those is the breaking change R3
+   * forbids. So enforcement lives in the editor (new names only) and the
+   * boundary contribution is message-only: the duplicate-id error names the
+   * reserved season key when that is the actual cause.
+   */
+  const withSeasons = (seasons: unknown[]): ProvisionInput =>
+    ({
+      ...input(),
+      seasons: seasons as ProvisionInput['seasons'],
+      schedules: Object.fromEntries(
+        ZONES.map((z) => [z.slug, Object.fromEntries((seasons as Array<{ key?: unknown }>).map((x) => [String(x.key), set]))]),
+      ),
+    }) as ProvisionInput;
+
+  it('a zone whose slug is a reserved suffix STILL provisions - it converged at v0.7.6 (R3)', () => {
+    const cfg = {
+      ...input(),
+      zones: [{ slug: 'fan', name: 'Fan', climate: 'climate.fan' }],
+      schedules: { fan: { summer: set, winter: set } },
+    } as ProvisionInput;
+    expect(() => buildDesired(cfg)).not.toThrow();
+  });
+
+  it('a reserved season key WITHOUT a collision still provisions (steering off, R3)', () => {
+    expect(() =>
+      buildDesired(withSeasons([{ key: 'sensor_schedule', name: 'Summer', default_mode: 'cool' }])),
+    ).not.toThrow();
+  });
+
+  it('sensor_schedule + steering is refused with the season-key message, not the generic rename hunt', () => {
+    const cfg = {
+      ...withSeasons([{ key: 'sensor_schedule', name: 'Summer', default_mode: 'cool' }]),
+      features: { ...input().features, steering: true },
+    } as ProvisionInput;
+    expect(() => buildDesired(cfg)).toThrow(/key "sensor_schedule".*reserved.*different `key`/s);
+    expect(() => buildDesired(cfg)).not.toThrow(/Rename the conflicting zone or season/);
+  });
+
+  it('a compound collision NOT caused by a reserved key keeps the generic message', () => {
+    const cfg = {
+      ...input(),
+      zones: [
+        { slug: 'up', name: 'Up', climate: 'climate.up' },
+        { slug: 'up_late', name: 'Up Late', climate: 'climate.up_late' },
+      ],
+      seasons: [
+        { key: 'late_summer', name: 'Late Summer', default_mode: 'cool' },
+        { key: 'summer', name: 'Summer', default_mode: 'cool' },
+      ],
+      schedules: {
+        up: { late_summer: set, summer: set },
+        up_late: { late_summer: set, summer: set },
+      },
+    } as ProvisionInput;
+    expect(() => buildDesired(cfg)).toThrow(/Naming collision.*schedule\.climate_up_late_summer/s);
+  });
+
+  it('a reserved season display NAME is fine when its key is safe - the name is only a label', () => {
+    expect(() =>
+      buildDesired(withSeasons([{ key: 'summer', name: 'Sensor Schedule', default_mode: 'cool' }])),
+    ).not.toThrow();
+  });
+
+  it('leaves every valid config untouched', () => {
+    expect(() => buildDesired(input())).not.toThrow();
+  });
+});
+
 describe('registry row: features.off_peak_entity / off_peak_offset (absent -> feature off, added 0.7.5)', () => {
   it('(a) a config without the keys resolves to feature-off, and junk shapes stay off', () => {
     expect(resolveOffPeak(undefined)).toBeNull();
@@ -694,5 +769,36 @@ describe('QA round-5: offset seed rounds to the helper step', () => {
     const e = { off_peak_entity: 'binary_sensor.off_peak_today' };
     expect(resolveOffPeak({ ...e, off_peak_offset: 2.5 })!.offsetSeed).toBe(3);
     expect(resolveOffPeak({ ...e, off_peak_offset: 9.9 })!.offsetSeed).toBe(10);
+  });
+});
+
+describe('registry row: zones[].power_entity (absent -> hvac_action template, item 29, added 0.7.7)', () => {
+  it('(b)(c) absent and blank provision identically, through the real config path', () => {
+    const blank = {
+      ...baseConfig(),
+      zones: [{ entity: 'climate.zone_a', name: 'Zone A', power_entity: '   ' }],
+    };
+    expectSameProvisioning(viaConfig(baseConfig()), viaConfig(blank));
+  });
+
+  it('a set power entity reaches ONLY the running sensor meta - specs and signatures unmoved', () => {
+    const plain = buildDesired(viaConfig(baseConfig()));
+    const withPower = buildDesired(
+      viaConfig({
+        ...baseConfig(),
+        zones: [{ entity: 'climate.zone_a', name: 'Zone A', power_entity: 'sensor.zone_a_power' }],
+      }),
+    );
+    expect(withPower.length).toBe(plain.length);
+    const plainById = new Map(plain.map((o) => [o.id, o]));
+    for (const o of withPower) {
+      const p = plainById.get(o.id)!;
+      expect(o.spec, o.id).toEqual(p.spec);
+      if (o.id === 'binary_sensor.climate_zone_a_running') {
+        expect(o.meta).toEqual({ source: 'hvac_action', power: 'sensor.zone_a_power' });
+      } else {
+        expect(o.meta, o.id).toEqual(p.meta);
+      }
+    }
   });
 });

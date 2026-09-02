@@ -1869,7 +1869,7 @@
     "kind": "automation",
     "spec": {
       "alias": "Hvac: schedule engine",
-      "sig": "fa818666"
+      "sig": "30c62efc"
     }
   },
   {
@@ -1885,7 +1885,7 @@
     "kind": "automation",
     "spec": {
       "alias": "Hvac: runtime learning",
-      "sig": "9e1fa5cc"
+      "sig": "5463d825"
     }
   },
   {

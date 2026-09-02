@@ -54,11 +54,17 @@ describe('spec §7.1 - the default engine is byte-identical when off-peak is abs
     }
   });
 
-  it('the default fixture emits NO adjustment step and the legacy marker', () => {
+  it('the default fixture emits NO adjustment step; its marker is the composed form without the op suffix', () => {
     const eng = allPayloads(canonicalInput())['climate_mzcs_engine'] as Node;
     expect(adjustStep(eng)).toBeUndefined();
+    // 0.7.7: the legacy seam emits its own marker step (season|block|mode|
+    // cool|heat); off-peak's step below appends the applied adjustment.
+    const markStep = zoneSeq(eng).find((s) => String(s.alias) === 'Compute the applied-block marker') as Node;
+    expect((markStep.variables as Node).mark).toBe(
+      "{{ season ~ '|' ~ blk ~ '|' ~ blk_mode ~ '|' ~ blk_cool ~ '|' ~ blk_heat }}",
+    );
     const record = zoneSeq(eng).find((s) => s.action === 'input_text.set_value') as Node;
-    expect((record.data as Node).value).toBe('{{ blk }}');
+    expect((record.data as Node).value).toBe('{{ mark }}');
   });
 });
 
@@ -98,8 +104,12 @@ describe('spec §7.2/§7.4 - the adjustment step, pinned exactly', () => {
     expect(vars.app_lo).toBe('{{ (blk_heat | float(0)) + hc_adj if blk_heat is not none else none }}');
   });
 
-  it('the marker composes the block with the applied adjustment', () => {
-    expect(vars.mark).toBe("{{ blk ~ '|op' ~ adj }}");
+  it('the marker composes the block content with the applied adjustment', () => {
+    // 0.7.7: same composed base as the legacy seam, plus the op suffix so an
+    // off-peak flip or an offset tune re-applies within one safety tick.
+    expect(vars.mark).toBe(
+      "{{ season ~ '|' ~ blk ~ '|' ~ blk_mode ~ '|' ~ blk_cool ~ '|' ~ blk_heat ~ '|op' ~ adj }}",
+    );
     const record = zoneSeq(eng).find((s) => s.action === 'input_text.set_value') as Node;
     expect((record.data as Node).value).toBe('{{ mark }}');
   });

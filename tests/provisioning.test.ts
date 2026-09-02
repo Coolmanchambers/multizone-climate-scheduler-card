@@ -301,3 +301,64 @@ describe('conditional outdoor pair (item 37): weather-less installs settle', () 
     expect(p2.update.map((a) => a.id)).toContain(OUTDOOR[0]);
   });
 });
+
+/**
+ * 0.7.7 fresh review: message-only guards for configs that could NEVER have
+ * provisioned (the executor aborted on HA's id mismatch, or HA rejected the
+ * duplicate select options), so refusing them readably breaks nobody (R3).
+ */
+describe('0.7.7 review: message-only guards for never-provisionable configs', () => {
+  it('two seasons sharing a display name are refused, naming both positions', () => {
+    const input: ProvisionInput = {
+      ...baseInput(),
+      seasons: [
+        { key: 'summer', name: 'Summer', default_mode: 'cool' },
+        { key: 'summer2', name: 'Summer', default_mode: 'cool' },
+      ],
+    };
+    expect(() => buildDesired(input)).toThrow(/Seasons 1 and 2 share the display name "Summer"/);
+  });
+
+  it('duplicate season names are tolerated with zero zones (nothing is provisioned)', () => {
+    const input: ProvisionInput = {
+      ...baseInput(),
+      zones: [],
+      schedules: {},
+      seasons: [
+        { key: 'a', name: 'Same', default_mode: 'cool' },
+        { key: 'b', name: 'Same', default_mode: 'cool' },
+      ],
+    };
+    expect(() => buildDesired(input)).not.toThrow();
+  });
+
+  it('a season key HA cannot keep verbatim (space, capital) is refused, naming the key', () => {
+    for (const key of ['late summer', 'Summer', 'summer ']) {
+      const base = baseInput();
+      const schedules = Object.fromEntries(
+        Object.entries(base.schedules).map(([zone, bySeason]) => [
+          zone,
+          { winter: bySeason.winter!, [key]: bySeason.summer! },
+        ]),
+      );
+      const input: ProvisionInput = {
+        ...base,
+        seasons: [
+          { key: 'winter', name: 'Winter', default_mode: 'heat_cool' },
+          { key, name: 'Late', default_mode: 'cool' },
+        ],
+        schedules,
+      };
+      expect(() => buildDesired(input), JSON.stringify(key)).toThrow(new RegExp(`season key "${key}"`));
+    }
+  });
+
+  it('a prefix with a capital is refused, naming the prefix', () => {
+    const input: ProvisionInput = { ...baseInput(), prefix: 'Climate' };
+    expect(() => buildDesired(input)).toThrow(/prefix "Climate"/);
+  });
+
+  it('the canonical config still builds (the guards are inert on valid input)', () => {
+    expect(() => buildDesired(baseInput())).not.toThrow();
+  });
+});

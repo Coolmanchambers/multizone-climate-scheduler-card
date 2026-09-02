@@ -2,15 +2,19 @@
   "climate_mzcs_engine": {
     "id": "climate_mzcs_engine",
     "alias": "Climate: schedule engine",
-    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Applies the active season's schedule block to each ENABLED zone at block transitions. Per-zone applied-block markers mean manual changes and external raises HOLD until the next block; the 15-minute tick only recovers missed transitions. Zones stand down while their Eco preset is active. heat_cool blocks apply dual setpoints. On off-peak days (per the configured entity) applied setpoints shift toward comfort by the off-peak offset helper. [mzcs-sig:f91ace2a]",
+    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Applies the active season's schedule block to each ENABLED zone at block transitions. Per-zone applied-block markers mean manual changes and external raises HOLD until the next block; the 15-minute tick only recovers missed transitions. Zones stand down while their Eco preset is active. heat_cool blocks apply dual setpoints. On off-peak days (per the configured entity) applied setpoints shift toward comfort by the off-peak offset helper. [mzcs-sig:8f61381b]",
     "mode": "queued",
     "max": 5,
     "triggers": [
       {
         "trigger": "state",
         "entity_id": [
-          "schedule.climate_zone_one_summer",
-          "schedule.climate_zone_one_winter"
+          "schedule.climate_zone_one_owners_summer",
+          "schedule.climate_zone_one_winter",
+          "schedule.climate_zone_two_owners_summer",
+          "schedule.climate_zone_two_winter",
+          "schedule.climate_zone_three_owners_summer",
+          "schedule.climate_zone_three_winter"
         ],
         "alias": "Any zone schedule changed"
       },
@@ -32,7 +36,9 @@
       {
         "trigger": "state",
         "entity_id": [
-          "input_boolean.climate_zone_one_enabled"
+          "input_boolean.climate_zone_one_enabled",
+          "input_boolean.climate_zone_two_enabled",
+          "input_boolean.climate_zone_three_enabled"
         ],
         "to": "on",
         "alias": "Zone re-enabled"
@@ -43,7 +49,7 @@
       {
         "alias": "Resolve the active season key",
         "variables": {
-          "season": "{{ {'Summer': 'summer', 'Winter': 'winter'}.get(states('input_select.climate_season'), states('input_select.climate_season') | lower) }}"
+          "season": "{{ {\"Owner's Summer\": 'owners_summer', 'Winter': 'winter'}.get(states('input_select.climate_season'), states('input_select.climate_season') | lower) }}"
         }
       },
       {
@@ -55,6 +61,18 @@
               "climate": "climate.zone_one",
               "marker": "input_text.climate_zone_one_applied_block",
               "enabled": "input_boolean.climate_zone_one_enabled"
+            },
+            {
+              "zone": "zone_two",
+              "climate": "climate.zone_two",
+              "marker": "input_text.climate_zone_two_applied_block",
+              "enabled": "input_boolean.climate_zone_two_enabled"
+            },
+            {
+              "zone": "zone_three",
+              "climate": "climate.zone_three",
+              "marker": "input_text.climate_zone_three_applied_block",
+              "enabled": "input_boolean.climate_zone_three_enabled"
             }
           ],
           "sequence": [
@@ -197,7 +215,7 @@
   "climate_mzcs_runtime_learning": {
     "id": "climate_mzcs_runtime_learning",
     "alias": "Climate: runtime learning",
-    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Nightly EMA update of each zone's runtime-per-cooling-degree-day factor. Skips mild days; first valid day seeds directly. [mzcs-sig:c86080e0]",
+    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Nightly EMA update of each zone's runtime-per-cooling-degree-day factor. Skips mild days; first valid day seeds directly. [mzcs-sig:9060cb64]",
     "mode": "single",
     "triggers": [
       {
@@ -227,6 +245,14 @@
             {
               "runtime": "sensor.climate_zone_one_runtime_today",
               "k": "input_number.climate_zone_one_k"
+            },
+            {
+              "runtime": "sensor.climate_zone_two_runtime_today",
+              "k": "input_number.climate_zone_two_k"
+            },
+            {
+              "runtime": "sensor.climate_zone_three_runtime_today",
+              "k": "input_number.climate_zone_three_k"
             }
           ],
           "sequence": [
@@ -261,7 +287,7 @@
   "climate_mzcs_runtime_alert": {
     "id": "climate_mzcs_runtime_alert",
     "alias": "Climate: runtime anomaly alert",
-    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Evening check: notifies when a zone's runtime is over the weather-normalized expectation by the alert margin. Uses learned k; silent while learning. [mzcs-sig:015c309b]",
+    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Evening check: notifies when a zone's runtime is over the weather-normalized expectation by the alert margin. Uses learned k; silent while learning. [mzcs-sig:34cfb90d]",
     "mode": "single",
     "triggers": [
       {
@@ -280,6 +306,16 @@
               "name": "Zone One",
               "runtime": "sensor.climate_zone_one_runtime_today",
               "expected": "sensor.climate_zone_one_expected_runtime"
+            },
+            {
+              "name": "Zone Two",
+              "runtime": "sensor.climate_zone_two_runtime_today",
+              "expected": "sensor.climate_zone_two_expected_runtime"
+            },
+            {
+              "name": "Zone Three",
+              "runtime": "sensor.climate_zone_three_runtime_today",
+              "expected": "sensor.climate_zone_three_expected_runtime"
             }
           ],
           "sequence": [
@@ -331,6 +367,64 @@
         "action": "climate.set_fan_mode",
         "target": {
           "entity_id": "climate.zone_one"
+        },
+        "data": {
+          "fan_mode": "off"
+        }
+      }
+    ]
+  },
+  "climate_mzcs_fan_timer_zone_two": {
+    "id": "climate_mzcs_fan_timer_zone_two",
+    "alias": "Climate: Zone Two fan timer finished",
+    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Turns the Zone Two fan off when its fan timer ends. [mzcs-sig:19dee477]",
+    "mode": "single",
+    "triggers": [
+      {
+        "trigger": "event",
+        "event_type": "timer.finished",
+        "event_data": {
+          "entity_id": "timer.climate_zone_two_fan"
+        },
+        "alias": "Zone Two fan timer finished"
+      }
+    ],
+    "conditions": [],
+    "actions": [
+      {
+        "alias": "Turn the Zone Two fan off",
+        "action": "climate.set_fan_mode",
+        "target": {
+          "entity_id": "climate.zone_two"
+        },
+        "data": {
+          "fan_mode": "off"
+        }
+      }
+    ]
+  },
+  "climate_mzcs_fan_timer_zone_three": {
+    "id": "climate_mzcs_fan_timer_zone_three",
+    "alias": "Climate: Zone Three fan timer finished",
+    "description": "Managed by Multi-Zone Climate Scheduler Card (mzcs). Turns the Zone Three fan off when its fan timer ends. [mzcs-sig:e226bee9]",
+    "mode": "single",
+    "triggers": [
+      {
+        "trigger": "event",
+        "event_type": "timer.finished",
+        "event_data": {
+          "entity_id": "timer.climate_zone_three_fan"
+        },
+        "alias": "Zone Three fan timer finished"
+      }
+    ],
+    "conditions": [],
+    "actions": [
+      {
+        "alias": "Turn the Zone Three fan off",
+        "action": "climate.set_fan_mode",
+        "target": {
+          "entity_id": "climate.zone_three"
         },
         "data": {
           "fan_mode": "off"

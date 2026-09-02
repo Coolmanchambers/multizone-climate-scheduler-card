@@ -2029,7 +2029,7 @@
     "kind": "automation",
     "spec": {
       "alias": "Climate: schedule engine",
-      "sig": "3d725ac4"
+      "sig": "f1347e4c"
     }
   },
   {
@@ -2045,7 +2045,7 @@
     "kind": "automation",
     "spec": {
       "alias": "Climate: runtime learning",
-      "sig": "ab1675eb"
+      "sig": "9060cb64"
     }
   },
   {

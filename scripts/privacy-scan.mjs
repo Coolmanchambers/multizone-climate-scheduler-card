@@ -31,7 +31,10 @@ const CHECKS = [
     why: 'an email address' },
   { id: 'ha-url', re: /https?:\/\/[^\s`'"]*:8123\b/g,
     why: 'a Home Assistant URL with its port' },
-  { id: 'local-path', re: /\b[A-Za-z]:\Users\[^\\s'"`]+/g,
+  // Backslashes escaped (0.7.7 review): the previous pattern read `\U` as a
+  // literal U and `\[` as a literal bracket, so it could never match a real
+  // profile path and the check had been dead since it was written.
+  { id: 'local-path', re: /\b[A-Za-z]:\\Users\\[^\s'"`]+/g,
     why: 'a local user profile path' },
   { id: 'nabu-casa', re: /\b[\w-]+\.ui\.nabu\.casa\b/g,
     why: 'a Nabu Casa remote URL' },

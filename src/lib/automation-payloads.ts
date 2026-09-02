@@ -12,12 +12,32 @@ export interface ZoneRef extends ProvisionZone {
 }
 
 /**
- * The season name -> key map, shared VERBATIM by the engine and the steering
- * automation (and mirrored by the executor's next-block template). One
- * construction so the two generated maps cannot drift apart.
+ * The season name -> key map, shared VERBATIM by the engine, the steering
+ * automation, AND the executor's next-block template (which imports this
+ * function). One construction so the generated maps cannot drift apart.
+ *
+ * Item 47: the map is keyed by the season select's options, which are the RAW
+ * display names - so the key must be the name verbatim. A quote-free name
+ * keeps the historical single-quoted form byte-for-byte; a name containing a
+ * single quote is emitted as a double-quoted Jinja literal instead. The old
+ * emission stripped the quote from the key only, so a name like Owner's
+ * Summer missed the map, missed the lowercase fallback too, and the engine
+ * resolved no block anywhere - applying nothing, with no error.
  */
-function seasonMapExpr(seasons: ProvisionSeason[]): string {
-  return `{${seasons.map((s) => `'${s.name.replace(/'/g, '')}': '${s.key}'`).join(', ')}}`;
+export function seasonMapExpr(seasons: ProvisionSeason[]): string {
+  return `{${seasons.map((s) => `${jinjaStr(s.name)}: '${s.key}'`).join(', ')}}`;
+}
+
+/** A Jinja string literal: single-quoted unless the value contains a single
+ * quote, then double-quoted with backslash and double quote escaped. The
+ * single-quoted path deliberately does NOT escape backslashes - it must stay
+ * byte-identical to the historical emission, which means a quote-free name
+ * with a trailing backslash (invalid Jinja) or a `\n` pair (decodes to a
+ * newline) keeps its pre-existing pathology rather than moving every clean
+ * install's signature (QA 0.7.7 review, accepted). */
+function jinjaStr(v: string): string {
+  if (!v.includes("'")) return `'${v}'`;
+  return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
 /**
@@ -127,13 +147,35 @@ interface AdjustmentSeam {
   markerExpr: string;
 }
 
+/**
+ * The marker's content expression, shared by the legacy seam and the off-peak
+ * seam (which appends the applied adjustment). Every field that changes what
+ * the engine WRITES is in it, so a block whose content changed re-applies at
+ * the next trigger while a manual thermostat change (which touches none of
+ * these) still holds until the next block.
+ */
+const MARKER_BASE = "season ~ '|' ~ blk ~ '|' ~ blk_mode ~ '|' ~ blk_cool ~ '|' ~ blk_heat";
+const MARKER_BASE_EXPR = `{{ ${MARKER_BASE} }}`;
+
 function adjustmentSeam(prefix: string, offPeakEntity: string | null): AdjustmentSeam {
+  // The applied-block marker is COMPOSED (0.7.7, review finding found by three
+  // independent lenses): season, block name, mode and both setpoints. It used
+  // to be the block NAME alone, so anything that changed the block's content
+  // without changing its name was never applied: a season switch whose
+  // current block shared a name with the old season's (every seeded install -
+  // both seeds are 'Day'), a weekday/weekend clone edited on one side only
+  // ('Sleep' -> 'Sleep' at Saturday 00:00), consecutive same-named blocks.
+  // Consequence for existing installs: their stored markers are the old form,
+  // so every ENABLED zone re-asserts its current block once after the upgrade.
   const legacy: AdjustmentSeam = {
-    step: null,
+    step: {
+      alias: 'Compute the applied-block marker',
+      variables: { mark: MARKER_BASE_EXPR },
+    },
     coolExpr: '{{ blk_cool }}',
     heatExpr: '{{ blk_heat }}',
     singleExpr: '{{ blk_cool if blk_cool is not none else blk_heat }}',
-    markerExpr: 'blk',
+    markerExpr: 'mark',
   };
   // Same quote-stripping the eco preset gets: a stray apostrophe in a
   // hand-edited entity id would terminate the Jinja string literal.
@@ -169,7 +211,7 @@ function adjustmentSeam(prefix: string, offPeakEntity: string | null): Adjustmen
         app_heat: `{{ (blk_heat | float(0)) + adj if blk_heat is not none else none }}`,
         app_hi: `{{ (blk_cool | float(0)) - hc_adj if blk_cool is not none else none }}`,
         app_lo: `{{ (blk_heat | float(0)) + hc_adj if blk_heat is not none else none }}`,
-        mark: `{{ blk ~ '|op' ~ adj }}`,
+        mark: `{{ ${MARKER_BASE} ~ '|op' ~ adj }}`,
       },
     },
     coolExpr: '{{ app_hi }}',
@@ -190,7 +232,13 @@ function adjustmentSeam(prefix: string, offPeakEntity: string | null): Adjustmen
  */
 function skipGateTemplate(markerExpr: string, presetClause: string, extraTerms: string[]): string {
   const extras = extraTerms.map((t) => ` and ${t}`).join('');
-  return `{{ is_state(repeat.item.enabled, 'on') and blk is not none and ${markerExpr} != states(repeat.item.marker)${presetClause}${extras} }}`;
+  // The climate-available term (0.7.7 review): HA silently skips a service
+  // call to an unavailable entity, and the marker write after it used to
+  // record the block as applied anyway - a thermostat that dropped offline
+  // across a block transition then kept the old setpoint until the NEXT
+  // block, because the safety tick saw an equal marker. Gating here leaves
+  // the marker untouched so the tick retries once the thermostat is back.
+  return `{{ is_state(repeat.item.enabled, 'on') and blk is not none and states(repeat.item.climate) not in ['unavailable', 'unknown'] and ${markerExpr} != states(repeat.item.marker)${presetClause}${extras} }}`;
 }
 
 export function engineAutomation(
@@ -297,8 +345,17 @@ export function engineAutomation(
                 // to off/heat/heat_cool mid-override the engine reclaims the
                 // zone immediately instead of leaving it cooling through an
                 // OFF period (QA finding M5); steering refuses non-cool
-                // blocks, so they never fight.
-                steering ? ["not (is_state(repeat.item.override_timer, 'active') and blk_mode == 'cool')"] : [],
+                // blocks, so they never fight. The engine also keeps the zone
+                // until the thermostat is actually COOLING (0.7.7 review): a
+                // transition from an off/heat block to a cool block while an
+                // override runs needs the mode written once, and steering
+                // only ever writes a setpoint - without this term the zone
+                // stayed off through the whole cooling block.
+                steering
+                  ? [
+                      "not (is_state(repeat.item.override_timer, 'active') and blk_mode == 'cool' and is_state(repeat.item.climate, 'cool'))",
+                    ]
+                  : [],
               ),
             },
             {
@@ -722,12 +779,18 @@ export function learningAutomation(prefix: string, zones: ZoneRef[]): Record<str
             },
             { alias: 'Skip if unavailable', condition: 'template', value_template: '{{ runtime_h >= 0 }}' },
             {
+              // Clamped to the k helper's max (0.7.7 review): a marginal day
+              // (cdd just over the 0.5 gate) with a long runtime seeded a
+              // quotient above 10, input_number.set_value raised, and every
+              // later zone in the loop was skipped that night. continue_on_error
+              // keeps one zone's refusal from starving the rest either way.
               alias: 'Write the new k',
+              continue_on_error: true,
               action: 'input_number.set_value',
               target: { entity_id: '{{ repeat.item.k }}' },
               data: {
                 value:
-                  '{{ ((runtime_h / cdd) if old_k == 0 else (alpha * (runtime_h / cdd) + (1 - alpha) * old_k)) | round(2) }}',
+                  '{{ [ ((runtime_h / cdd) if old_k == 0 else (alpha * (runtime_h / cdd) + (1 - alpha) * old_k)), 10 ] | min | round(2) }}',
               },
             },
           ],

@@ -73,7 +73,7 @@ export const CANONICAL_ZONES = [
 
 export interface FixtureOverrides {
   prefix?: string;
-  zones?: Array<{ entity: string; name: string; room_sensors?: unknown }>;
+  zones?: Array<{ entity: string; name: string; room_sensors?: unknown; power_entity?: string }>;
   seasons?: ProvisionSeason[];
   weather_entity?: string;
   features?: {
@@ -297,6 +297,18 @@ export const VARIANTS: Array<{
     note: 'The offset is a helper SEED: relative to the default only the engine moves (because the entity is set), and the engine must be byte-identical to the off-peak variant - the seed reaches inventory meta only.',
   },
   {
+    name: 'power-heuristic',
+    overrides: {
+      zones: [
+        { entity: 'climate.zone_one', name: 'Zone One', power_entity: 'sensor.zone_one_power' },
+        CANONICAL_ZONES[1]!,
+        CANONICAL_ZONES[2]!,
+      ],
+    },
+    affects: [],
+    note: 'Item 29: a zone power sensor reaches ONLY the running sensor creation meta - no automation may move, and the differ-compared spec is unchanged.',
+  },
+  {
     name: 'steering',
     overrides: { zones: STEERING_ZONES, features: { steering: true } },
     affects: ['climate_mzcs_engine'],
@@ -325,6 +337,17 @@ export const VARIANTS: Array<{
     overrides: { weather_entity: 'weather.forecast_home' },
     affects: [],
     note: 'A weather entity flips the outdoor pair unconditional (item 37) and must change NO automation.',
+  },
+  {
+    name: 'apostrophe-season',
+    overrides: {
+      seasons: [
+        { key: 'owners_summer', name: "Owner's Summer", default_mode: 'cool' },
+        CANONICAL_SEASONS[1]!,
+      ],
+    },
+    affects: ['climate_mzcs_engine'],
+    note: "Item 47: an apostrophe in a season display name gets a double-quoted map key (the old emission stripped it, so the select's raw option missed the map and the engine silently applied nothing). Only the engine reads seasons.",
   },
   {
     name: 'three-seasons',

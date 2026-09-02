@@ -11,6 +11,7 @@ import {
   globalEntityId,
   automationUniqueId,
   automationAlias,
+  RESERVED_SLUGS,
   type ZoneClass,
   type GlobalClass,
 } from './naming';
@@ -34,6 +35,9 @@ export interface ProvisionZone {
    * read it, so configs without steering are unaffected by room changes.
    */
   rooms?: Array<{ label: string; entity: string; seen?: string }>;
+  /** Item 29: zone power sensor - reaches only the running sensor's CREATION
+   * template (meta, never spec), so absent-vs-present cannot move the differ. */
+  power?: string;
 }
 
 /**
@@ -260,9 +264,55 @@ function assertUniqueSeasonKeys(seasons: ProvisionSeason[], zoneCount: number): 
   }
 }
 
+/**
+ * Two seasons with the same display name build a season select with duplicate
+ * options (which Home Assistant rejects, aborting Apply into rollback) and a
+ * name->key map in which the second season is unreachable. Never provisioned,
+ * so refusing it is message-only (0.7.7 review, engine-b L1).
+ */
+function assertUniqueSeasonNames(seasons: ProvisionSeason[], zoneCount: number): void {
+  if (zoneCount === 0) return;
+  const seen = new Map<string, number>();
+  seasons.forEach((s, i) => {
+    if (typeof s?.name !== 'string') return;
+    const first = seen.get(s.name);
+    if (first !== undefined) {
+      throw new Error(
+        `Seasons ${first + 1} and ${i + 1} share the display name "${s.name}". Season names are the ` +
+          `options of the season selector and must be unique - rename one of them (keys can stay as they are).`,
+      );
+    }
+    seen.set(s.name, i);
+  });
+}
+
+/**
+ * Every generated entity id must be one Home Assistant can create verbatim.
+ * A season key with a space or a capital, or a prefix with a capital, builds
+ * an id HA's own slugify would rewrite; the executor then aborts on the id
+ * mismatch after creating and deleting a stray item. Refusing it here names
+ * the offending value instead (0.7.7 review, engine-a L3). Never provisioned,
+ * so message-only.
+ */
+function assertCreatableIds(out: DesiredObject[], input: ProvisionInput): void {
+  const valid = /^[a-z][a-z0-9_]*\.[a-z0-9_]+$/;
+  for (const o of out) {
+    if (o.id.startsWith('automation:') || valid.test(o.id)) continue;
+    const badKey = input.seasons.find((s) => s?.key != null && !/^[a-z0-9_]+$/.test(String(s.key)));
+    const hint = !/^[a-z0-9_]+$/.test(input.prefix)
+      ? `The prefix "${input.prefix}" must use only lowercase letters, digits and underscores.`
+      : badKey
+        ? `The season key "${String(badKey.key)}" must use only lowercase letters, digits and underscores ` +
+          `(the display name can stay as it is).`
+        : `Use only lowercase letters, digits and underscores in the prefix and season keys.`;
+    throw new Error(`"${o.id}" is not an entity id Home Assistant can create. ${hint}`);
+  }
+}
+
 export function buildDesired(input: ProvisionInput): DesiredObject[] {
   assertSeasonNames(input.seasons);
   assertUniqueSeasonKeys(input.seasons, input.zones.length);
+  assertUniqueSeasonNames(input.seasons, input.zones.length);
   const out: DesiredObject[] = [];
   const p = input.prefix;
   // Display names are PREFIX-DERIVED so two card instances never share a name.
@@ -283,7 +333,11 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
       id: zoneEntityId('running_sensor', p, z.slug),
       kind: 'template_sensor',
       spec: { name: `${label} ${z.name} running` },
-      meta: { source: 'hvac_action' },
+      // `power` is creation-only meta (item 29): the executor emits the
+      // power-OR-delta template instead of the hvac_action one. Never in
+      // `spec` - template bodies are neither compared nor overwritten, so an
+      // existing sensor keeps its template until deliberately recreated.
+      meta: { source: 'hvac_action', ...(z.power ? { power: z.power } : {}) },
     });
     out.push({
       id: zoneEntityId('runtime_today', p, z.slug),
@@ -504,14 +558,34 @@ export function buildDesired(input: ProvisionInput): DesiredObject[] {
   // (e.g. zones 'up'/'up_late' with seasons 'late_summer'/'summer' both
   // resolving to schedule.<p>_up_late_summer) - QA-R finding A2-8.
   const seen = new Set<string>();
+  // Item 43 is MESSAGE-ONLY here, deliberately: this guard already refused
+  // every actually-colliding config at v0.7.6 (the 0.7.7 QA sweep executed
+  // that against a pinned worktree), and a reserved slug that produces no id
+  // collision provisioned and converged before - refusing it would be the
+  // breaking change R3 forbids (docs/config-compatibility.md). So a reserved
+  // NAME is prevented at the editor for new configs, and here we only make
+  // the collision message actionable when a season key sits on a reserved
+  // class suffix (e.g. key `sensor_schedule` colliding with the steering
+  // daypart schedule) - the generic message sent users hunting zone names.
+  const reservedSeason = input.seasons.find((s) => RESERVED_SLUGS.has(String(s?.key)));
   for (const o of out) {
     if (seen.has(o.id)) {
+      if (reservedSeason && o.id.endsWith(`_${String(reservedSeason.key)}`)) {
+        const k = String(reservedSeason.key);
+        const label = typeof reservedSeason.name === 'string' && reservedSeason.name ? reservedSeason.name : k;
+        throw new Error(
+          `Season "${label}" uses the key "${k}", which is reserved for the card's own objects - ` +
+            `"${o.id}" is also one of the card's "${k}" entities. Give the season a different ` +
+            `\`key\` (the display name can stay as it is).`,
+        );
+      }
       throw new Error(
         `Naming collision: two configured objects both resolve to "${o.id}". Rename the conflicting zone or season.`,
       );
     }
     seen.add(o.id);
   }
+  assertCreatableIds(out, input);
   return out;
 }
 
@@ -542,7 +616,10 @@ export function plan(desired: DesiredObject[], existing: ExistingObject[]): Plan
       out.noop.push({ op: 'noop', id: d.id, kind: d.kind });
     }
   }
-  for (const e of existing) {
+  // Iterate the id-keyed map, not the raw list: a registry read that listed
+  // one id twice would otherwise plan two deletes, and the second one aborts
+  // the executor mid-run (0.7.7 refutation MED-1).
+  for (const e of byId.values()) {
     if (e.managed && !desiredIds.has(e.id)) {
       out.delete.push({ op: 'delete', id: e.id, kind: e.kind });
     }
@@ -552,6 +629,23 @@ export function plan(desired: DesiredObject[], existing: ExistingObject[]): Plan
 
 export function actionable(p: Plan): PlanAction[] {
   return [...p.create, ...p.adopt, ...p.update, ...p.delete];
+}
+
+/**
+ * The identity of a plan for the destructive flows' freshness gate: which ids
+ * sit under which operation, order-independent. Apply and teardown re-plan
+ * against the LIVE registry immediately before executing and refuse when this
+ * differs from the previewed plan - an armed list minutes old is not consent.
+ * Lifted out of the card (0.7.7 review, adversary HIGH-3) so the gate has a
+ * unit test and a source scan instead of living untested inside two methods.
+ */
+export function planIdShape(p: Plan): string {
+  return JSON.stringify([
+    p.create.map((x) => x.id).sort(),
+    p.adopt.map((x) => x.id).sort(),
+    p.update.map((x) => x.id).sort(),
+    p.delete.map((x) => x.id).sort(),
+  ]);
 }
 
 /** Test/preview simulator: the registry state after executing a plan. */
@@ -610,7 +704,7 @@ export function defaultSeasons(): ProvisionSeason[] {
 export function provisionInputFromConfig(
   config: {
     prefix?: string;
-    zones: Array<{ entity: string; name: string; room_sensors?: unknown }>;
+    zones: Array<{ entity: string; name: string; room_sensors?: unknown; power_entity?: string }>;
     seasons?: ProvisionSeason[];
     weather_entity?: string;
     features?: {
@@ -636,6 +730,9 @@ export function provisionInputFromConfig(
       // Rooms feed ONLY steering; built exactly when the feature is on so a
       // non-steering config is byte-identical to one that never had sensors.
       ...(steering ? { rooms: steeringRooms(z.room_sensors) } : {}),
+      ...(typeof z.power_entity === 'string' && z.power_entity.trim()
+        ? { power: z.power_entity.trim() }
+        : {}),
     })),
     seasons: config.seasons ?? defaultSeasons(),
     schedules,

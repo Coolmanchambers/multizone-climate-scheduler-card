@@ -4,6 +4,128 @@ All notable changes to the Multi-Zone Climate Scheduler Card are documented here
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- **The engine's "already applied" marker now records the block's content, not just its name.**
+  It used to hold the block NAME alone, so anything that changed a block without changing its
+  name was never applied: switching seasons while the new season's current block shared a name
+  with the old one (every seeded install - both seeds are called *Day* - never switched at all),
+  editing only the weekend copy of a weekday/weekend schedule (Saturday's *Sleep* looked like
+  Friday's *Sleep* and was skipped until *Wake*), or two consecutive blocks with the same name.
+  The marker is now season, block name, mode and both setpoints, so a block whose content
+  changed applies at the engine's next trigger. Two consequences worth knowing: **editing the
+  current block's temperatures now applies within the next trigger** (before, only *Apply now*
+  did that; a manual change made ON the thermostat still holds until the next block, exactly
+  as before), and **every install plans two Updates on its first dry-run after upgrading**
+  (the engine and the runtime-learning automation - the fixes arriving). Because the stored
+  markers are the old form, every zone that is switched ON re-asserts its current block once
+  after the update, which also ends one manual hold on that zone.
+- **The engine no longer records a block as applied when the thermostat is unavailable.** Home
+  Assistant silently skips a service call to an unavailable entity; the engine then marked the
+  block applied anyway and the 15-minute tick never retried it, so a thermostat that dropped
+  offline across a transition kept the old setpoint until the NEXT block. The gate now waits
+  for the thermostat to be back.
+- **Comfort steering: a scheduled transition from an off/heat block to a cooling block while an
+  override is running now applies the block once** (the engine kept deferring to the override,
+  but steering only ever writes a setpoint, never a mode, so the zone stayed off through the
+  whole cooling block).
+- **Runtime learning clamps the learned k factor to its helper's maximum**, so a marginal day
+  with a long runtime can no longer seed a value the helper refuses (that refusal aborted the
+  night's update for every zone after it).
+
+Notes on the first dry-run after upgrading: the two Updates apply to a pristine (never
+hand-edited) engine and learning automation; a customized one is kept as always and keeps the
+old name-only marker. Block names entered in the card are now capped at 40 characters because
+they live inside the marker; on installs provisioned before this release the marker helper
+allows 100 characters, so keep block names entered in Home Assistant's own schedule editor
+short too (under about 60).
+
+### Fixed
+- **Objects of a zone removed from the config are seen again.** The dry-run only looked for the
+  zones in the current config, so a removed (or renamed) zone's helpers, sensors, schedules and
+  kill switch were invisible: never deleted, missed by *Remove everything*, and the removed
+  zone's kill switch kept its state. The previously provisioned zones - and every schedule the
+  engine was generated for - are now read from the live engine automation, so the dry-run plans
+  their deletion (the mzcs label still decides what is managed). This also retires the old rule
+  that claimed any schedule "under a known zone" by its id shape, which could claim another card
+  instance's schedules when a zone name was a leading word of that instance's prefix. A zone
+  removed and applied under an earlier version, or a schedule left behind after the engine was
+  deleted by hand, stays orphaned - delete it by hand.
+- **Guards for configs that could never provision:** two seasons with the same display name,
+  and a prefix or season key with a space or a capital, are refused with a message naming the
+  value instead of failing inside Apply.
+- **Helper deletions are snapshot-logged** (a learned k or a tuned threshold is worth a line),
+  and a sensor whose creation flow completed but whose rename failed is rolled back instead of
+  being left behind as an orphan config entry.
+- **Deleting an adopted sensor can no longer take another integration down.** Flow-created
+  sensors are deleted through their owning config entry; when an adopted entity belonged to
+  some other integration, that integration's whole entry was deleted. The executor now only
+  deletes template, history-stats and statistics entries and keeps anything else with a note.
+- **Helper updates and deletes address storage by the registry unique id**, not the entity's
+  object id, so a helper renamed away from a contract id can no longer cause a different item
+  to be rewritten or deleted (the S13 fix covered schedule renames only).
+- **Renaming the active season keeps it selected.** Rewriting the season selector's options made
+  Home Assistant fall back to the first option, and the engine then applied that season. Applies
+  to a plain rename; a rename combined with a reorder or an added season is logged for you to
+  re-select by hand rather than guessed.
+- **A newly created automation is labelled by its own id.** When a user automation already owned
+  the alias-derived entity id, the label landed on that bystander and the card's own automation
+  stayed unlabelled.
+- **Custom themes can be saved.** The 12-colour custom theme is 102 characters; the theme helper
+  was created with Home Assistant's default maximum of 100, so every custom theme was silently
+  refused. New installs create the helper with a 255 maximum. **On an existing install, raise
+  the helper's "Maximum length" to 255 by hand** (Settings > Devices & services > Helpers,
+  `input_text.<prefix>_theme`); the card now shows that instruction when a save is refused
+  instead of failing silently.
+- **Runtime drawer: past-day pills refresh after midnight and a day's detail can no longer leak
+  across zones** (a slow read for one zone landed in the next zone's cache); today's detail is
+  re-read on every open. **Schedule drawer: edits made in Home Assistant's own schedule editor
+  or on another device show up** without switching zones.
+- **Comfort steering refuses Celsius zones** instead of opening a sheet at 50° (steering is
+  Fahrenheit-only in this version).
+- **Apply and *Remove everything* re-check that you are still on that tab, with the same config
+  and preview, after the registry read** that precedes execution; the two flows also share one
+  plan-shape comparison that is now unit-tested.
+- **Malformed YAML shapes** (`seasons:` or `room_sensors:` given as a single value, a bare `-`
+  season row) are refused with a readable message instead of leaving a blank card.
+- **Two quick edits in the editor could lose the first one.** The original zone, season, and
+  feature handlers read the configuration captured at render time, so two changes landing
+  inside one render window (fast typing, a double toggle) dropped the earlier edit. All
+  handlers now read the live configuration, matching the fields added since.
+- **The editor no longer lets a new name collide with the card's own entity suffixes.** A zone
+  or season named onto one of the card's reserved suffixes (say a season with key
+  `sensor_schedule`, which shares an entity id with the steering daypart schedule) could only
+  be caught at dry-run time by a generic "naming collision" error; the reserved list itself was
+  checked nowhere. The editor now refuses such zone names inline and keeps a season's key off
+  the reserved words, and when a hand-written YAML config does collide on a reserved season
+  key, the dry-run error now names the key and the exact fix instead of sending you renaming
+  zones. Configs that provisioned before keep provisioning - only the messages and the editor
+  changed.
+- **An apostrophe in a season display name silently disabled the engine.** The generated
+  season name→key map stripped single quotes from its keys while the season selector holds
+  the raw name, so a hand-edited name like `Owner's Summer` matched nothing, no block ever
+  resolved, and the engine applied nothing with no error (pre-existing since at least 0.7.4).
+  Map keys are now emitted quote-safely (double-quoted only when the name contains a single
+  quote), so those names work; every quote-free name emits byte-identically. An install that
+  already has an apostrophe season name gets this fix inside the engine update every install
+  plans this release (with comfort steering on, the steering automation updates too - it shares
+  the map). One edge stays: such an install's already-created next-block
+  sensor keeps the old map (template bodies are never overwritten) and shows "unknown" until
+  that sensor is deleted and re-applied; display-only.
+
+### Added
+- **Running detection for thermostats without `hvac_action`** (`zones[].power_entity`). Some
+  brands (e.g. SmartThings mini-splits) never report `hvac_action`, leaving the provisioned
+  running sensor permanently off - no runtime history, no learning. Point the zone at its
+  power sensor (it must report watts) and the running detection becomes an OR of two
+  live-measured heuristics: power draw above standby, or hvac active with the room at least 1°
+  past setpoint - each covering
+  the other's measured failure mode (multi-hour power-feed stalls; steady-state duty cycling
+  at setpoint-hold). In `heat_cool` mode only the power branch applies (the setpoint is a
+  pair, not a number). Applies when the running sensor is created; an existing sensor keeps its
+  detection until deliberately deleted and re-applied. Absent = today's behavior, byte-for-byte.
+
 ## [0.7.6] - 2026-08-31
 
 ### Added
