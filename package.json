@@ -1,6 +1,6 @@
 {
   "name": "multizone-climate-scheduler-card",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "description": "Home Assistant dashboard card (Lovelace): multi-zone climate view for 1-4 zones with seasonal scheduling, fan timers, and runtime history.",
   "license": "MIT",
   "type": "module",

@@ -5,7 +5,7 @@
 declare const __MZCS_DEV__: boolean | undefined;
 const DEV = typeof __MZCS_DEV__ !== 'undefined' && __MZCS_DEV__;
 
-export const CARD_VERSION = '0.7.6';
+export const CARD_VERSION = '0.7.7';
 export const CARD_TYPE = DEV ? 'multizone-climate-scheduler-card-dev' : 'multizone-climate-scheduler-card';
 export const CARD_NAME = DEV ? 'Multi-Zone Climate Scheduler Card (DEV)' : 'Multi-Zone Climate Scheduler Card';
 export const EDITOR_TYPE = `${CARD_TYPE}-editor`;

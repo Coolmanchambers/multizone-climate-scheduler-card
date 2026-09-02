@@ -4,7 +4,7 @@ All notable changes to the Multi-Zone Climate Scheduler Card are documented here
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.7.7] - 2026-09-02
 
 ### Changed
 - **The engine's "already applied" marker now records the block's content, not just its name.**
